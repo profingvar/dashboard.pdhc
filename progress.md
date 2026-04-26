@@ -226,11 +226,24 @@ Per `../plans/CDR_sim_dashboard_execution_plan.md` §4.
 - [x] `GET /api/cohort/<id>/trend?canonical=&window=`.
 - [x] `GET /api/cohort/<id>/export?format=csv&variables=` (§4.6).
 
-### §4.4–§4.5 Frontend — deferred
-The HTML/JS workspaces are deferred to the next slice. They need a
-running 5-CDR cluster to exercise meaningfully (§3.2 / §3.3 operator
-actions on miserver are still pending). The backend is fully callable
-so a frontend can drop on top without further service work.
+### §4.4–§4.5 Frontend — DONE (2026-04-26, backend-callable HTML/JS)
+- [x] `/workspace` selector — sole-role redirect, dual-role chooser,
+  admin sees both, no-clinical-role 403.
+- [x] `/nurse` (§4.4) — patient-GUID search + recent strip, AGP card
+  with hourly bands and TIR/TBR/TAR/mean/CV/hypo summary, variable
+  picker (HbA1c, weight, BMI, BP sys/dia, TIR), event feed.
+- [x] `/researcher` (§4.5) — left rail (5 CDR multi-select +
+  demographics + condition + medication filters), variable picker,
+  chart pane with Histogram / Box-Violin / Scatter / Trend tabs
+  (scatter auto-disabled until 2 vars), right rail summary +
+  per-CDR breakdown + CSV export via hidden iframe.
+- [x] Partial-result banner driven by `fanout_mode` from the
+  federation layer.
+
+The pages are pure HTML+vanilla-JS+Chart.js (no framework / build
+step). They work the moment the 5 CDRs are reachable; until then the
+"build cohort" button can be pressed but will return a 0-member
+cohort because no CDRs respond.
 
 ### §4.6 CSV export — DONE (audit log to ``results/export_audit.log``)
 DB-backed `dashboard_audit` table is a follow-up — needs a migration

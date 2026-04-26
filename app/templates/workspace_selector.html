@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Choose workspace · dashboard.pdhc{% endblock %}
+{% block h1 %}Choose your workspace{% endblock %}
+{% block content %}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;margin-top:1rem;">
+  {% if has_nurse %}
+  <a href="{{ url_for('workspace.nurse_view') }}"
+     style="display:block;padding:1.25rem;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:inherit;">
+    <h2 style="margin:0 0 .5rem;font-size:1.05rem;">Nurse workspace</h2>
+    <p style="margin:0;color:#555;font-size:.9rem;">Look up a single patient by GUID. AGP, variable trends, hypo + encounter overlay.</p>
+  </a>
+  {% endif %}
+  {% if has_researcher %}
+  <a href="{{ url_for('workspace.researcher_view') }}"
+     style="display:block;padding:1.25rem;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:inherit;">
+    <h2 style="margin:0 0 .5rem;font-size:1.05rem;">Researcher workspace</h2>
+    <p style="margin:0;color:#555;font-size:.9rem;">Define a cohort across CDRs. Federated histograms, scatter, trend, CSV export.</p>
+  </a>
+  {% endif %}
+</div>
+{% endblock %}

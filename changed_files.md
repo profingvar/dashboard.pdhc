@@ -70,3 +70,16 @@ actions on miserver.
 the 11 pre-existing failures stem from the legacy ObservationCache
 model being JSONB+UUID-typed, which SQLite's create_all() can't
 reproduce — not a Phase 4 regression.
+
+# 2026-04-26 — Phase 4 frontend (§4.4 nurse + §4.5 researcher workspaces)
+
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/workspace.py (NEW — workspace selector + nurse + researcher HTML routes; route guards via the same role-guard helpers as the JSON API)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py (registered workspace_bp)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/workspace_selector.html (NEW — chooser; sole-role users redirected, dual-role/admin shown both cards)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/nurse_workspace.html (NEW — patient-GUID search + recent strip, AGP card with hourly bands chart and TIR/TBR/TAR/mean/CV/hypo summary, variable-switcher chart with LTTB display, latest-values table, events feed; Chart.js + fetch against /api/nurse/*)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/researcher_workspace.html (NEW — left rail filters: 5 CDR multi-select, age min/max + sex, condition pills, medication pills; cohort builder POSTs /api/cohort; chart pane with Histogram / Box-Violin / Scatter (auto-disabled until 2 vars) / Trend tabs; right rail summary stats + per-CDR breakdown + CSV export download via hidden iframe; partial-result banner driven by fanout_mode)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_workspace.py (NEW — 9 tests: selector redirects single-role / shows chooser dual-role / admin / blocks no-clinical-role; nurse + researcher pages render their key markers + canonical URIs; cross-role page guards return 403)
+
+35/35 Phase 4 tests now pass (16 federation + 6 role guards + 4
+researcher flow + 9 workspace). 47/58 total (47 = 12 pre-existing
+green + 35 Phase 4); same 11 pre-existing JSONB-on-SQLite failures.

@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}Nurse workspace · dashboard.pdhc{% endblock %}
+{% block h1 %}Nurse workspace{% endblock %}
+{% block content %}
+<style>
+  .nurse-search { display:flex; gap:.5rem; align-items:center; margin: .5rem 0 1rem; }
+  .nurse-search input { flex: 0 0 22rem; padding: .35rem .55rem; font: inherit; border: 1px solid var(--border); border-radius: 4px; }
+  .recent-strip { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.4rem; }
+  .recent-strip button { font: inherit; font-size:.85em; padding: .15rem .45rem; background:var(--card-bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; }
+  .layout { display:grid; grid-template-columns: 1.2fr 2fr; gap:1rem; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem 1rem; }
+  .summary-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:.5rem; }
+  .summary-grid .stat { text-align:center; padding:.4rem; background:#f6f6f6; border-radius:4px; }
+  .summary-grid .stat .v { font-weight:700; font-size:1.1rem; }
+  .summary-grid .stat .l { color:#666; font-size:.78rem; text-transform:uppercase; }
+  .arr-up { color:#a04; } .arr-dn { color:#048; } .arr-fl { color:#888; }
+  table.lv { width:100%; border-collapse: collapse; font-size:.92rem; }
+  table.lv td { padding: .25rem .35rem; border-bottom:1px solid #eee; }
+  table.lv td.value { text-align:right; font-variant-numeric: tabular-nums; }
+  .var-chooser { display:flex; gap:.4rem; margin: .35rem 0 .5rem; flex-wrap:wrap; }
+  .var-chooser button { font:inherit; font-size:.85em; padding: .2rem .5rem; background: var(--card-bg); border:1px solid var(--border); border-radius:4px; cursor:pointer; }
+  .var-chooser button.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .badge { display:inline-block; padding:.05rem .35rem; border-radius:3px; font-size:.78rem; background:#eef; color:#247; }
+  .partial-banner { background:#fff8e1; border:1px solid #ffe082; padding:.4rem .6rem; border-radius:4px; margin-bottom:.6rem; font-size:.9rem; }
+</style>
+
+<div class="nurse-search">
+  <label for="patient-guid"><strong>Patient GUID:</strong></label>
+  <input id="patient-guid" placeholder="urn:uuid:..." autocomplete="off">
+  <button id="patient-go" class="btn btn-primary btn-sm">Open</button>
+  <span id="patient-status" style="color:#666;font-size:.85em;"></span>
+</div>
+<div class="recent-strip" id="recent-strip"></div>
+
+<div id="patient-pane" hidden>
+  <div id="partial-banner" class="partial-banner" hidden></div>
+
+  <div class="layout">
+    <!-- Left column: AGP + summary stats + latest values -->
+    <section>
+      <div class="card" style="margin-bottom:1rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;font-size:1rem;">Ambulatory glucose profile</h2>
+          <div>
+            <button class="agp-window-btn active" data-w="14d">14 d</button>
+            <button class="agp-window-btn" data-w="90d">90 d</button>
+          </div>
+        </div>
+        <div class="summary-grid" id="agp-summary"></div>
+        <canvas id="agp-chart" height="170" style="margin-top:.6rem;"></canvas>
+      </div>
+      <div class="card">
+        <h2 style="margin:0 0 .35rem;font-size:1rem;">Latest values</h2>
+        <table class="lv" id="latest-values"><tbody></tbody></table>
+      </div>
+    </section>
+
+    <!-- Right column: variable chart + events -->
+    <section>
+      <div class="card" style="margin-bottom:1rem;">
+        <h2 style="margin:0;font-size:1rem;">Variable</h2>
+        <div class="var-chooser" id="var-chooser"></div>
+        <canvas id="var-chart" height="170"></canvas>
+      </div>
+      <div class="card">
+        <h2 style="margin:0 0 .35rem;font-size:1rem;">Events (180 d)</h2>
+        <ul id="event-list" style="margin:0;padding-left:1rem;font-size:.9rem;max-height:11rem;overflow:auto;"></ul>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Variables we expose in the chooser. Display names + canonical URIs;
+// the canonicals match what cdr.pdhc Phase 1.1 stores.
+const VARIABLES = [
+  { name: "HbA1c",      canonical: "https://termbank.pdhc.se/CodeSystem/loinc/4548-4",  unit: "%" },
+  { name: "Body weight",canonical: "https://termbank.pdhc.se/CodeSystem/loinc/29463-7", unit: "kg" },
+  { name: "BMI",        canonical: "https://termbank.pdhc.se/CodeSystem/loinc/39156-5", unit: "kg/m2" },
+  { name: "Sys BP",     canonical: "https://termbank.pdhc.se/CodeSystem/loinc/8480-6",  unit: "mmHg" },
+  { name: "Dia BP",     canonical: "https://termbank.pdhc.se/CodeSystem/loinc/8462-4",  unit: "mmHg" },
+  { name: "TIR (CGM)",  canonical: "https://termbank.pdhc.se/CodeSystem/loinc/97509-4", unit: "%" },
+];
+
+const RECENT_KEY = "dashboard.nurse.recent";
+let agpChart = null;
+let varChart = null;
+let currentPatient = null;
+let currentVariable = VARIABLES[0];
+let agpWindow = "14d";
+
+// ---------------- Recent strip ---------------------------------------------
+
+function loadRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+}
+function pushRecent(guid) {
+  const list = loadRecent().filter(g => g !== guid);
+  list.unshift(guid);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 8)));
+  renderRecent();
+}
+function renderRecent() {
+  const strip = document.getElementById("recent-strip");
+  const list = loadRecent();
+  strip.innerHTML = list.length ? "<span style='color:#666;font-size:.85em;'>recent:</span>" : "";
+  for (const g of list) {
+    const b = document.createElement("button");
+    b.textContent = g.length > 16 ? g.slice(0, 8) + "…" + g.slice(-4) : g;
+    b.title = g;
+    b.onclick = () => { document.getElementById("patient-guid").value = g; openPatient(); };
+    strip.appendChild(b);
+  }
+}
+
+// ---------------- Patient open ---------------------------------------------
+
+async function openPatient() {
+  const input = document.getElementById("patient-guid").value.trim();
+  if (!input) return;
+  // Accept "urn:uuid:..." or bare UUID
+  const guid = input.replace(/^urn:uuid:/i, "");
+  document.getElementById("patient-status").textContent = "loading…";
+  document.getElementById("partial-banner").hidden = true;
+
+  let summary;
+  try {
+    const r = await fetch(`/api/nurse/patient/${encodeURIComponent(guid)}`);
+    if (!r.ok) {
+      document.getElementById("patient-status").textContent =
+        r.status === 404 ? "not found" : `error ${r.status}`;
+      return;
+    }
+    summary = await r.json();
+  } catch (e) {
+    document.getElementById("patient-status").textContent = "request failed";
+    return;
+  }
+  currentPatient = guid;
+  pushRecent(guid);
+  document.getElementById("patient-status").textContent =
+    `${summary.owner_cdr || ""} · ${summary.owner_region || ""}`;
+  document.getElementById("patient-pane").hidden = false;
+
+  renderLatestValues(summary.latest_values || []);
+  renderVarChooser();
+  await Promise.all([refreshAgp(), refreshVariable(), refreshEvents()]);
+}
+
+function renderLatestValues(latest) {
+  // Map by canonical so we can prioritise our known variables in the table.
+  const byCanonical = {};
+  for (const v of latest) byCanonical[v.canonical] = v;
+  const tbody = document.querySelector("#latest-values tbody");
+  tbody.innerHTML = "";
+  for (const def of VARIABLES) {
+    const v = byCanonical[def.canonical];
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${def.name}</td>
+                    <td class="value">${v ? `${v.value} ${v.unit || def.unit || ""}` : "—"}</td>
+                    <td style="font-size:.78rem;color:#666;">${v && v.effective ? v.effective.slice(0,10) : ""}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+function renderVarChooser() {
+  const div = document.getElementById("var-chooser");
+  div.innerHTML = "";
+  for (const v of VARIABLES) {
+    const b = document.createElement("button");
+    b.textContent = v.name;
+    if (v === currentVariable) b.classList.add("active");
+    b.onclick = () => { currentVariable = v; renderVarChooser(); refreshVariable(); };
+    div.appendChild(b);
+  }
+}
+
+// ---------------- AGP ------------------------------------------------------
+
+async function refreshAgp() {
+  if (!currentPatient) return;
+  const r = await fetch(`/api/nurse/patient/${currentPatient}/agp?window=${agpWindow}`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const s = data.summary || {};
+  const card = document.getElementById("agp-summary");
+  card.innerHTML = "";
+  for (const [label, val, unit] of [
+    ["TIR", s.tir, "%"], ["TBR", s.tbr, "%"], ["TAR", s.tar, "%"],
+    ["Mean", s.mean, "mg/dL"], ["CV", s.cv, "%"], ["Hypo", s.hypo_events, ""],
+    ["n", s.n, ""],
+  ]) {
+    if (val == null) continue;
+    const d = document.createElement("div");
+    d.className = "stat";
+    d.innerHTML = `<div class="v">${typeof val === "number" ? val.toFixed(unit==="%" ? 1 : 1) : val}${unit}</div>
+                   <div class="l">${label}</div>`;
+    card.appendChild(d);
+  }
+
+  // Build dataset arrays for the hourly bands.
+  const bands = data.bands || [];
+  const hours = bands.map(b => b.hour);
+  const ds = (key) => bands.map(b => (b[key] != null ? b[key] : null));
+  const datasets = [
+    { label: "5-95 %", data: ds("p95"), borderColor: "#bcd9ee",
+      backgroundColor: "rgba(58,127,184,0.10)", fill: "+2", pointRadius: 0, tension: 0.3 },
+    { label: "_p5",  data: ds("p5"),  borderColor: "#bcd9ee", pointRadius: 0, tension: 0.3 },
+    { label: "25-75 %", data: ds("p75"), borderColor: "#5a9bd6",
+      backgroundColor: "rgba(58,127,184,0.25)", fill: "+1", pointRadius: 0, tension: 0.3 },
+    { label: "_p25", data: ds("p25"), borderColor: "#5a9bd6", pointRadius: 0, tension: 0.3 },
+    { label: "Median", data: ds("p50"), borderColor: "#1d4f80",
+      borderWidth: 2, pointRadius: 0, tension: 0.3 },
+  ];
+
+  if (agpChart) agpChart.destroy();
+  agpChart = new Chart(document.getElementById("agp-chart"), {
+    type: "line",
+    data: { labels: hours, datasets },
+    options: {
+      animation: false,
+      plugins: {
+        legend: {
+          labels: { filter: (i) => !i.text.startsWith("_") },
+        },
+      },
+      scales: {
+        x: { title: { display: true, text: "Hour of day" } },
+        y: { title: { display: true, text: "Glucose (mg/dL)" }, suggestedMin: 50, suggestedMax: 300 },
+      },
+    },
+  });
+}
+
+// ---------------- Variable chart -------------------------------------------
+
+async function refreshVariable() {
+  if (!currentPatient || !currentVariable) return;
+  const r = await fetch(
+    `/api/nurse/patient/${currentPatient}/variable/${encodeURIComponent(currentVariable.canonical)}?days=730`
+  );
+  if (!r.ok) return;
+  const data = await r.json();
+  const points = (data.points || []).map(p => ({ x: p.t * 1000, y: p.value }));
+  if (varChart) varChart.destroy();
+  varChart = new Chart(document.getElementById("var-chart"), {
+    type: "line",
+    data: { datasets: [{
+      label: `${currentVariable.name} (${currentVariable.unit})`,
+      data: points, borderColor: "#2a6ebb", backgroundColor: "#2a6ebb",
+      pointRadius: 1.5, showLine: true, tension: 0.1,
+    }]},
+    options: {
+      animation: false,
+      scales: {
+        x: { type: "time", time: { unit: "day" }, title: { display: true, text: "Date" } },
+        y: { title: { display: true, text: currentVariable.unit } },
+      },
+      plugins: { title: {
+        display: true,
+        text: `${data.n_returned}/${data.n_raw} points` + (data.downsampled ? " (downsampled)" : ""),
+        position: "bottom", color: "#888", font: { size: 11, weight: "normal" },
+      }},
+    },
+  });
+}
+
+// ---------------- Events ---------------------------------------------------
+
+async function refreshEvents() {
+  if (!currentPatient) return;
+  const r = await fetch(`/api/nurse/patient/${currentPatient}/events`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const ul = document.getElementById("event-list");
+  ul.innerHTML = "";
+  for (const e of data.events || []) {
+    const li = document.createElement("li");
+    if (e.kind === "encounter") {
+      li.innerHTML = `<span class="badge">enc</span> ${e.start ? e.start.slice(0,10) : ""} — ${e.display || ""} (${e.class || ""})`;
+    } else {
+      li.innerHTML = `<span class="badge" style="background:#fee;color:#a04;">hypo</span> ${e.at ? e.at.slice(0,10) : ""} — ${e.count} events/day`;
+    }
+    ul.appendChild(li);
+  }
+  if (!ul.children.length) ul.innerHTML = "<li style='color:#888'>no events in window</li>";
+}
+
+// ---------------- Wire up --------------------------------------------------
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("patient-go").addEventListener("click", openPatient);
+  document.getElementById("patient-guid").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") openPatient();
+  });
+  for (const b of document.querySelectorAll(".agp-window-btn")) {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".agp-window-btn").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      agpWindow = b.dataset.w;
+      refreshAgp();
+    });
+  }
+  renderRecent();
+});
+</script>
+{% endblock %}

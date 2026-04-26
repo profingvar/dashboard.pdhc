@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+{% block title %}Researcher workspace · dashboard.pdhc{% endblock %}
+{% block h1 %}Researcher workspace{% endblock %}
+{% block content %}
+<style>
+  .research-layout { display:grid; grid-template-columns: 280px 1fr 240px; gap:1rem; }
+  .rail { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem; font-size:.92rem; }
+  .rail h3 { margin: .5rem 0 .25rem; font-size: .85rem; text-transform: uppercase; color: #555; letter-spacing: .03em; }
+  .rail label.line { display:flex; align-items:center; gap:.35rem; margin: .15rem 0; cursor:pointer; }
+  .rail input[type=number], .rail select, .rail input[type=text] {
+    width: 100%; padding: .25rem .35rem; font: inherit; border: 1px solid var(--border); border-radius: 4px;
+  }
+  .build-row { display:flex; gap:.4rem; margin-top: .8rem; }
+  .build-row button { flex: 1; }
+
+  .chart-pane { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem 1rem; }
+  .tab-bar { display:flex; gap:.4rem; margin-bottom:.5rem; border-bottom:1px solid var(--border); padding-bottom:.4rem; }
+  .tab-bar button { padding: .25rem .55rem; font-size: .9rem; background: transparent; border: 0; cursor:pointer; }
+  .tab-bar button.active { border-bottom: 2px solid var(--primary); color: var(--primary); font-weight: 600; }
+
+  .summary-rail .stat-row { display:flex; justify-content:space-between; padding: .15rem 0; }
+  .summary-rail .stat-row .l { color:#666; font-size:.85rem; }
+
+  .partial-banner { background:#fff8e1; border:1px solid #ffe082; padding:.4rem .6rem; border-radius:4px; margin-bottom:.6rem; font-size:.9rem; }
+  .var-pill { display:inline-flex; align-items:center; gap:.3rem; padding: .15rem .5rem; background:#eef; border-radius:14px; font-size:.85rem; margin: .15rem; cursor:default;}
+  .var-pill button { background:none; border:none; cursor:pointer; color:#a04; font-weight:bold; }
+</style>
+
+<div id="partial-banner" class="partial-banner" hidden></div>
+<div class="research-layout">
+
+  <!-- LEFT RAIL: filters + cohort builder -->
+  <aside class="rail">
+    <h3>CDRs</h3>
+    <div id="cdr-list">
+      {% for n, label in [(1, 'CDR1 — Norrland'), (2, 'CDR2 — Skåne / Halland'),
+                          (3, 'CDR3 — Västra Götaland'), (4, 'CDR4 — Östergötland'),
+                          (5, 'CDR5 — Mälardalen / Bergslagen')] %}
+      <label class="line"><input type="checkbox" name="cdr" value="cdr{{n}}" checked> {{ label }}</label>
+      {% endfor %}
+    </div>
+
+    <h3>Demographics</h3>
+    <label class="line">Age min <input type="number" id="age-min" min="0" max="120" placeholder="—" style="width:5em;"></label>
+    <label class="line">Age max <input type="number" id="age-max" min="0" max="120" placeholder="—" style="width:5em;"></label>
+    <label class="line">Sex
+      <select id="sex"><option value="">any</option><option value="female">female</option><option value="male">male</option></select>
+    </label>
+
+    <h3>Conditions</h3>
+    <label class="line"><input type="checkbox" id="t2dm" data-canonical="https://termbank.pdhc.se/CodeSystem/snomed/44054006"> T2 diabetes</label>
+    <label class="line"><input type="checkbox" id="t1dm" data-canonical="https://termbank.pdhc.se/CodeSystem/snomed/46635009"> T1 diabetes</label>
+    <label class="line"><input type="checkbox" id="htn"  data-canonical="https://termbank.pdhc.se/CodeSystem/snomed/38341003"> Hypertension</label>
+    <label class="line"><input type="checkbox" id="ckd"  data-canonical="https://termbank.pdhc.se/CodeSystem/snomed/709044004"> CKD</label>
+
+    <h3>Medications</h3>
+    <label class="line"><input type="checkbox" id="ins"  data-canonical="https://termbank.pdhc.se/CodeSystem/atc/A10A"> Insulin</label>
+    <label class="line"><input type="checkbox" id="met"  data-canonical="https://termbank.pdhc.se/CodeSystem/atc/A10BA02"> Metformin</label>
+    <label class="line"><input type="checkbox" id="sgl"  data-canonical="https://termbank.pdhc.se/CodeSystem/atc/A10BK"> SGLT2</label>
+    <label class="line"><input type="checkbox" id="glp"  data-canonical="https://termbank.pdhc.se/CodeSystem/atc/A10BJ"> GLP-1</label>
+
+    <div class="build-row">
+      <button id="build-btn" class="btn btn-primary btn-sm" style="width:100%;">Build cohort</button>
+    </div>
+    <div id="cohort-status" style="margin-top:.5rem;color:#666;font-size:.85rem;"></div>
+  </aside>
+
+  <!-- CENTER: variable picker + chart pane -->
+  <section class="chart-pane">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+      <div>
+        <strong>Variables:</strong>
+        <span id="picked-vars"></span>
+      </div>
+      <select id="var-add" style="font:inherit;padding:.2rem;">
+        <option value="">+ add variable…</option>
+      </select>
+    </div>
+    <div class="tab-bar" style="margin-top:.5rem;">
+      <button class="tab-btn active" data-tab="histogram">Histogram</button>
+      <button class="tab-btn" data-tab="boxplot">Box / Violin</button>
+      <button class="tab-btn" data-tab="scatter" disabled title="Pick 2 variables to enable">Scatter</button>
+      <button class="tab-btn" data-tab="trend">Trend</button>
+    </div>
+    <canvas id="research-chart" height="200"></canvas>
+    <div id="chart-meta" style="margin-top:.4rem;color:#666;font-size:.85rem;"></div>
+  </section>
+
+  <!-- RIGHT RAIL: summary + export -->
+  <aside class="rail summary-rail">
+    <h3>Summary</h3>
+    <div id="summary-content" style="font-size:.9rem;color:#555;">Build a cohort and pick a variable.</div>
+
+    <h3 style="margin-top:1rem;">Per-CDR breakdown</h3>
+    <div id="per-cdr-content" style="font-size:.85rem;color:#555;">—</div>
+
+    <h3 style="margin-top:1rem;">Export</h3>
+    <button id="export-btn" class="btn btn-secondary btn-sm" style="width:100%;" disabled>Download CSV</button>
+    <div id="export-status" style="margin-top:.4rem;color:#666;font-size:.8rem;"></div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const VARIABLES = [
+  { name: "HbA1c",       canonical: "https://termbank.pdhc.se/CodeSystem/loinc/4548-4",  unit: "%" },
+  { name: "Body weight", canonical: "https://termbank.pdhc.se/CodeSystem/loinc/29463-7", unit: "kg" },
+  { name: "BMI",         canonical: "https://termbank.pdhc.se/CodeSystem/loinc/39156-5", unit: "kg/m2" },
+  { name: "Sys BP",      canonical: "https://termbank.pdhc.se/CodeSystem/loinc/8480-6",  unit: "mmHg" },
+  { name: "Dia BP",      canonical: "https://termbank.pdhc.se/CodeSystem/loinc/8462-4",  unit: "mmHg" },
+  { name: "TIR (CGM)",   canonical: "https://termbank.pdhc.se/CodeSystem/loinc/97509-4", unit: "%" },
+  { name: "CGM mean",    canonical: "https://termbank.pdhc.se/CodeSystem/loinc/97506-0", unit: "mg/dL" },
+];
+
+let cohortId = null;
+let pickedVars = [];      // array of VARIABLES entries
+let activeTab = "histogram";
+let researchChart = null;
+
+// --------------- Filter object -------------------------------------------
+
+function readFilter() {
+  const cdrs = Array.from(document.querySelectorAll("input[name=cdr]:checked")).map(i => i.value);
+  const conds = Array.from(document.querySelectorAll(".rail input[type=checkbox][data-canonical]:checked"))
+                     .filter(i => /\/snomed\//.test(i.dataset.canonical))
+                     .map(i => i.dataset.canonical);
+  const meds  = Array.from(document.querySelectorAll(".rail input[type=checkbox][data-canonical]:checked"))
+                     .filter(i => /\/atc\//.test(i.dataset.canonical))
+                     .map(i => i.dataset.canonical);
+  const ageMin = parseInt(document.getElementById("age-min").value, 10);
+  const ageMax = parseInt(document.getElementById("age-max").value, 10);
+  const sex = document.getElementById("sex").value;
+  const demo = {};
+  if (Number.isFinite(ageMin)) demo.age_min = ageMin;
+  if (Number.isFinite(ageMax)) demo.age_max = ageMax;
+  if (sex) demo.sex = sex;
+  return {
+    cdr_ids: cdrs,
+    demographics: demo,
+    conditions: conds,
+    medications: meds,
+  };
+}
+
+// --------------- Cohort build --------------------------------------------
+
+async function buildCohort() {
+  const filter = readFilter();
+  document.getElementById("cohort-status").textContent = "building…";
+  const r = await fetch("/api/cohort", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(filter),
+  });
+  if (!r.ok) {
+    document.getElementById("cohort-status").textContent = `failed (${r.status})`;
+    return;
+  }
+  const body = await r.json();
+  cohortId = body.cohort_id;
+  document.getElementById("cohort-status").innerHTML =
+    `<strong>${body.n}</strong> patients · cohort <code style="font-size:.78em;">${cohortId.slice(0,8)}…</code>`;
+  document.getElementById("export-btn").disabled = !cohortId || pickedVars.length === 0;
+  refreshChart();
+}
+
+// --------------- Variable picker -----------------------------------------
+
+function renderVarPicker() {
+  const sel = document.getElementById("var-add");
+  // Re-fill only the dropdown options not yet picked.
+  sel.innerHTML = "<option value=''>+ add variable…</option>";
+  for (const v of VARIABLES) {
+    if (pickedVars.find(x => x.canonical === v.canonical)) continue;
+    const o = document.createElement("option");
+    o.value = v.canonical;
+    o.textContent = v.name;
+    sel.appendChild(o);
+  }
+  const span = document.getElementById("picked-vars");
+  span.innerHTML = "";
+  for (const v of pickedVars) {
+    const pill = document.createElement("span");
+    pill.className = "var-pill";
+    pill.innerHTML = `${v.name} <button data-c="${v.canonical}" title="remove">×</button>`;
+    pill.querySelector("button").addEventListener("click", () => {
+      pickedVars = pickedVars.filter(x => x.canonical !== v.canonical);
+      renderVarPicker();
+      enableTabs();
+      refreshChart();
+    });
+    span.appendChild(pill);
+  }
+  document.getElementById("export-btn").disabled = !cohortId || pickedVars.length === 0;
+}
+
+function enableTabs() {
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    if (b.dataset.tab === "scatter") b.disabled = pickedVars.length < 2;
+  });
+  // If scatter active but only 1 var, fall back to histogram.
+  if (activeTab === "scatter" && pickedVars.length < 2) {
+    activeTab = "histogram";
+    syncTabUI();
+  }
+}
+
+function syncTabUI() {
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === activeTab);
+  });
+}
+
+// --------------- Chart refresh -------------------------------------------
+
+async function refreshChart() {
+  if (!cohortId || pickedVars.length === 0) {
+    if (researchChart) { researchChart.destroy(); researchChart = null; }
+    document.getElementById("summary-content").textContent = "Pick a variable.";
+    document.getElementById("per-cdr-content").textContent = "—";
+    document.getElementById("chart-meta").textContent = "";
+    return;
+  }
+  const v = pickedVars[0];
+  if (activeTab === "histogram")  return renderHistogram(v);
+  if (activeTab === "boxplot")   return renderBoxplot(v);
+  if (activeTab === "scatter")   return renderScatter(pickedVars[0], pickedVars[1]);
+  if (activeTab === "trend")     return renderTrend(v);
+}
+
+async function renderHistogram(v) {
+  const r = await fetch(`/api/cohort/${cohortId}/variable/${encodeURIComponent(v.canonical)}/histogram?buckets=20`);
+  if (!r.ok) return;
+  const data = await r.json();
+  showPartialBanner(data.fanout_mode, data.failed_cdrs || []);
+  const labels = (data.buckets || []).map(b => `${b.low.toFixed(1)}–${b.high.toFixed(1)}`);
+  const values = (data.buckets || []).map(b => b.count);
+  drawChart({
+    type: "bar",
+    data: { labels, datasets: [{ label: v.name, data: values, backgroundColor: "#5a9bd6" }] },
+    options: {
+      animation: false,
+      scales: { y: { title: { display: true, text: "n" } },
+                x: { title: { display: true, text: `${v.name} (${v.unit})` } } },
+    },
+  });
+  fillSummary(data, v);
+  fillPerCdr(data.per_cdr || []);
+}
+
+async function renderBoxplot(v) {
+  const r = await fetch(`/api/cohort/${cohortId}/variable/${encodeURIComponent(v.canonical)}/boxplot?group_by=region`);
+  if (!r.ok) return;
+  const data = await r.json();
+  // Minimal box/violin: render as a grouped bar of (p25, p50, p75) per region.
+  const groups = data.groups || [];
+  const labels = groups.map(g => g.group);
+  drawChart({
+    type: "bar",
+    data: { labels, datasets: [
+      { label: "p25", data: groups.map(g => g.p25), backgroundColor: "#bcd9ee" },
+      { label: "p50", data: groups.map(g => g.p50), backgroundColor: "#5a9bd6" },
+      { label: "p75", data: groups.map(g => g.p75), backgroundColor: "#1d4f80" },
+    ]},
+    options: { animation: false, scales: { y: { title: { display: true, text: v.unit } } } },
+  });
+  document.getElementById("summary-content").innerHTML =
+    groups.map(g => `<div class='stat-row'><span class='l'>${g.group}</span><span><strong>${g.p50.toFixed(1)}</strong> (${g.n})</span></div>`).join("");
+  document.getElementById("per-cdr-content").textContent = "(grouped by region)";
+}
+
+async function renderScatter(vx, vy) {
+  const r = await fetch(`/api/cohort/${cohortId}/scatter?x=${encodeURIComponent(vx.canonical)}&y=${encodeURIComponent(vy.canonical)}&max=5000`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const points = (data.points || []).map(p => ({ x: p.x, y: p.y, _pat: p.patient_guid }));
+  drawChart({
+    type: "scatter",
+    data: { datasets: [{ label: `${vx.name} vs ${vy.name}`, data: points,
+                          backgroundColor: "rgba(58,127,184,0.5)", pointRadius: 2.5 }] },
+    options: {
+      animation: false,
+      scales: { x: { title: { display: true, text: `${vx.name} (${vx.unit})` } },
+                y: { title: { display: true, text: `${vy.name} (${vy.unit})` } } },
+      onClick: (e, items) => {
+        if (!items.length) return;
+        const idx = items[0].index;
+        const p = points[idx];
+        if (p && p._pat) {
+          window.open(`/nurse?guid=${encodeURIComponent(p._pat)}`, "_blank");
+        }
+      },
+    },
+  });
+  document.getElementById("chart-meta").textContent =
+    `${data.n} pairs` + (data.truncated ? " (truncated to 5 000)" : "");
+  document.getElementById("summary-content").innerHTML =
+    `<div class='stat-row'><span class='l'>n</span><span><strong>${data.n}</strong></span></div>`;
+  document.getElementById("per-cdr-content").textContent = "Click a point to open the patient.";
+}
+
+async function renderTrend(v) {
+  const r = await fetch(`/api/cohort/${cohortId}/trend?canonical=${encodeURIComponent(v.canonical)}&window=730`);
+  if (!r.ok) return;
+  const data = await r.json();
+  const series = data.series || [];
+  const labels = series.map(s => s.month);
+  drawChart({
+    type: "line",
+    data: { labels, datasets: [
+      { label: "p75", data: series.map(s => s.p75), borderColor: "#bcd9ee", pointRadius: 0, tension: 0.3 },
+      { label: "p50", data: series.map(s => s.p50), borderColor: "#1d4f80", borderWidth: 2, pointRadius: 0, tension: 0.3 },
+      { label: "p25", data: series.map(s => s.p25), borderColor: "#5a9bd6", pointRadius: 0, tension: 0.3 },
+    ]},
+    options: { animation: false, scales: { y: { title: { display: true, text: v.unit } } } },
+  });
+  document.getElementById("summary-content").innerHTML =
+    `<div class='stat-row'><span class='l'>months</span><span><strong>${series.length}</strong></span></div>`;
+  document.getElementById("per-cdr-content").textContent = "(IQR bands)";
+}
+
+function fillSummary(data, v) {
+  const html = [];
+  if (data.n != null) html.push(row("n", data.n));
+  if (data.mean != null) html.push(row("mean", data.mean.toFixed(1) + " " + v.unit));
+  if (data.sd != null) html.push(row("sd", data.sd.toFixed(2)));
+  if (data.min != null) html.push(row("min", data.min.toFixed(1)));
+  if (data.max != null) html.push(row("max", data.max.toFixed(1)));
+  document.getElementById("summary-content").innerHTML = html.join("");
+}
+function row(l, v) {
+  return `<div class='stat-row'><span class='l'>${l}</span><span><strong>${v}</strong></span></div>`;
+}
+function fillPerCdr(per) {
+  document.getElementById("per-cdr-content").innerHTML = per.map(p =>
+    `<div class='stat-row'><span class='l'>${p.cdr_id}</span><span>${p.n} · ${p.mean ? p.mean.toFixed(1) : "—"}</span></div>`
+  ).join("") || "—";
+}
+
+function showPartialBanner(mode, failed) {
+  const el = document.getElementById("partial-banner");
+  if (mode === "complete" || mode == null) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = (mode === "degraded")
+    ? `Partial result — ${failed.join(", ")} unavailable.`
+    : `Most CDRs unreachable (${failed.join(", ")}). Showing what we got.`;
+}
+
+function drawChart(spec) {
+  if (researchChart) researchChart.destroy();
+  researchChart = new Chart(document.getElementById("research-chart"), spec);
+}
+
+// --------------- Export ---------------------------------------------------
+
+function downloadExport() {
+  if (!cohortId || !pickedVars.length) return;
+  const vars = pickedVars.map(v => v.canonical).join(",");
+  const url = `/api/cohort/${cohortId}/export?format=csv&variables=${encodeURIComponent(vars)}`;
+  document.getElementById("export-status").textContent = "preparing…";
+  // Use a hidden iframe so the streamed CSV downloads via the browser's
+  // built-in handling (Content-Disposition).
+  const iframe = document.createElement("iframe");
+  iframe.style.display = "none";
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  setTimeout(() => {
+    document.getElementById("export-status").textContent = "downloaded";
+    document.body.removeChild(iframe);
+  }, 1500);
+}
+
+// --------------- Wire up --------------------------------------------------
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("build-btn").addEventListener("click", buildCohort);
+  document.getElementById("var-add").addEventListener("change", (e) => {
+    const c = e.target.value;
+    if (!c) return;
+    const v = VARIABLES.find(x => x.canonical === c);
+    if (v) pickedVars.push(v);
+    e.target.value = "";
+    renderVarPicker();
+    enableTabs();
+    refreshChart();
+  });
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      if (b.disabled) return;
+      activeTab = b.dataset.tab;
+      syncTabUI();
+      refreshChart();
+    });
+  });
+  document.getElementById("export-btn").addEventListener("click", downloadExport);
+  renderVarPicker();
+});
+</script>
+{% endblock %}
