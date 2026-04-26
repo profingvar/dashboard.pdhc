@@ -1,0 +1,1 @@
+Current focus: Step 1 — repo scaffolding. Next up: 1.c git init, 1.d scaffolding tests, then Step 2 venv + dependencies.

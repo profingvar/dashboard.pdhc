@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}dashboard.pdhc{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pdhc.css') }}">
+<style>
+  main { max-width: 1200px; margin: 0 auto; padding: 1.25rem 1.25rem 2.5rem; }
+  .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem; }
+  .page-header h1 { font-size: 1.4rem; font-weight: 700; line-height: 1.3; }
+  canvas { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; margin-top: 1rem; padding: 0.5rem; }
+  .concept-picker { display:flex; flex-wrap:wrap; gap: 0.4rem; margin: 0.75rem 0; }
+  .concept-picker label { background: var(--card-bg); border: 1px solid var(--border); padding: 0.2rem 0.6rem; border-radius: 5px; cursor: pointer; font-size: 0.92em; }
+  .concept-picker input { margin-right: 0.3rem; }
+  .concept-picker input:checked + span { color: var(--primary); font-weight: 600; }
+</style>
+</head>
+<body>
+<nav style="display:flex;align-items:center;gap:1rem;">
+  <a href="{{ url_for('views.landing') }}" style="color:white;font-weight:700;font-size:1rem;">dashboard.pdhc</a>
+  <form method="post" action="{{ url_for('views.refresh') }}" style="margin:0;">
+    <button type="submit" class="btn btn-primary btn-sm">Refresh from gateway</button>
+  </form>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;">
+    {% if g.current_user %}
+      <span style="color:white;font-size:0.9rem;">{{ g.current_user.username }}</span>
+    {% endif %}
+    <a href="{{ url_for('auth.logout') }}" class="btn btn-secondary btn-sm" style="color:white;">Logout</a>
+  </div>
+</nav>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div style="max-width:1200px;margin:0.5rem auto 0;padding:0 1.25rem;">
+      {% for category, msg in messages %}
+        <div class="flash flash-{{ category }}" style="padding:0.5rem 0.75rem;border-radius:4px;background:#fff3cd;border:1px solid #ffeeba;color:#856404;margin-bottom:0.4rem;font-size:0.9rem;">{{ msg }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+<main>
+  <div class="page-header">
+    <h1>{% block h1 %}Dashboard{% endblock %}</h1>
+  </div>
+  {% block content %}{% endblock %}
+</main>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

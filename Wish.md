@@ -1,0 +1,3 @@
+This is a dashboard repo to serve the Observation.pdhc. When starting there is a list of eligable patients number of observations per concept (give names only), date of lates observation. Make it possible to select up to two concepts for time activity curves. Upon selecting view. A Patient dasboard is displayed. 
+
+At the end the project should be listed on the SSO page that lists all repos. It should be coorganised in the SSO. before web deploy- leave ti open för developement without login.

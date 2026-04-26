@@ -1,0 +1,16 @@
+app/.venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+results/
+*.log
+.DS_Store
+instance/
+.pytest_cache/
+
+# Release tarballs — built and shipped, not source
+dist/
+
+# Local backups
+backups/

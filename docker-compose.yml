@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16
+    container_name: dashboard_pdhc_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-dashboard_pdhc_db}
+      POSTGRES_USER: ${DB_USER:-dashboard}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    ports:
+      - "9026:5432"
+    volumes:
+      - dashboard_pdhc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-dashboard} -d ${DB_NAME:-dashboard_pdhc_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  dashboard_pdhc_pgdata:
