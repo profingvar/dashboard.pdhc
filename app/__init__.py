@@ -40,9 +40,13 @@ def create_app(config=None):
     from app.routes.views import bp as views_bp
     from app.routes.api import bp as api_bp, register_metadata
     from app.routes.auth import bp as auth_bp
+    from app.routes.nurse import bp as nurse_bp
+    from app.routes.researcher import bp as researcher_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(nurse_bp)
+    app.register_blueprint(researcher_bp)
     register_metadata(app)
 
     log_dir = _results_dir()

@@ -1,1 +1,17 @@
-Current focus: Step 1 — repo scaffolding. Next up: 1.c git init, 1.d scaffolding tests, then Step 2 venv + dependencies.
+Current focus: dashboard.pdhc.se is live and serving (gunicorn daemon, pid
+in /usr/local/www/dashboard.pdhc/shared/gunicorn.pid, logs in shared/logs/).
+See progress.md §18 for deployment state.
+
+Open items (none blocking):
+  1. services.html false-greens — bug is in www.pdhc.se's polling JS
+     (`mode: 'no-cors'` + hard-coded DB dot). Owners for services.html and
+     for request.pdhc (DB creds drift) and cdr.pdhc (connection drops).
+     Details in progress.md §18 "services.html diagnosis".
+  2. /healthz on dashboard.pdhc, rosetta.pdhc, contract.pdhc, plan.pdhc does
+     not ping the DB. Standardise the JSON shape to
+     {status, database, service, version}.
+  3. Compose project name on macmini is "current" (accidental from symlink).
+     Plan dump→rename→restore maintenance window.
+  4. Orphan docker volume dashboard_pdhc_dashboard_pdhc_pgdata from a prior
+     failed attempt — verify empty, remove.
+  5. Prune releases/2026-04-09T10-36-42Z after another smoke-verified day.

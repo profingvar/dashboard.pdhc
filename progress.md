@@ -2,10 +2,260 @@
 
 Tracks progress against readme.md. Same numbering. Each step records tests deployed and results.
 
-## 1. Repo scaffolding — in progress
-- 1.a directories created: app/{routes,services,models,templates,static,tests,migrations}, docs/, results/ ✓
-- 1.b seed files: progress.md ✓, changed_files.md ✓, newtask.txt ✓, readme.md ✓
-- 1.c git init — pending
-- 1.d tests — pending
+## 1. Repo scaffolding — done
+- 1.a–1.c directories, seed files, git init ✓
+- 1.d test_scaffold.py: 2/2 passed
 
-## 2–18. pending
+## 2. venv + dependencies — done
+- 2.a–2.c app/.venv created, requirements.txt installed
+- 2.d import check ok (via pytest run)
+
+## 3. Postgres on 9026 — done
+- 3.a docker-compose.yml (postgres:16, named volume)
+- 3.b .env from .env.example
+- 3.c container up, pg_isready ok, psycopg2 connect ok
+
+## 4. Flask app skeleton — done
+- 4.a create_app() reading env
+- 4.b /healthz → {"status":"ok"}
+- 4.c logging to results/<ts>/app.log
+- 4.d test_healthz.py: 1/1 passed
+- Full suite: 3/3 passed
+
+## 5. Data model + migrations — done
+- 5.a models: User, OrgMembership, ObservationCache, RefreshLog (GUID PKs, Rule 18)
+- 5.b alembic init + initial migration applied to dashboard_pdhc_db
+- 5.c test_models.py CRUD cycle passed
+- Full suite: 4/4 passed
+
+## 6. Gateway client — done
+- 6.a GatewayClient.fetch_observations (FHIR Observation bundle)
+- 6.b GUID-only normalise (Rule 18); drops malformed entries
+- 6.c refresh_org: clear + repopulate cache, RefreshLog row with status/count
+- 6.d test_gateway_client.py: 2/2 passed (normalise + refresh with mock)
+- Full suite: 6/6 passed
+
+## 7. Auth + bootstrap SU — done
+- 7.a AUTH_MODE=off loads dev SU user automatically
+- 7.b `flask create-su` CLI command (Rule 23)
+- 7.c SSO stub (reads X-PDHC-User, 401/403 as appropriate)
+- 7.d scope_to_user_orgs middleware (Rule 24) — admin sees all, members restricted
+- 7.e test_auth.py: 3/3 passed (off mode, scoping, CLI)
+- Full suite: 9/9 passed
+
+## 8. Landing page — done
+- `/` lists patients in user's org with counts per concept, latest observation
+- PDHC-styled base.html (12px, accent #2a6ebb)
+
+## 9. Concept selection + cohort curves — done
+- checkbox multi-select, max 2 enforced server-side
+- Chart.js time scatter with line overlay
+
+## 10. Patient dashboard — done
+- `/patient/<guid>` latest-values table + per-concept time curves
+- 403 if outside user orgs, 404 if no data
+
+## 11. Refresh button — done
+- POST `/refresh` → refresh_org for each user org, logged in RefreshLog
+- prominent button in header of every page
+
+## 12. API + FHIR metadata — done
+- GET `/api/v1/series?patient&concept` returns FHIR Bundle of Observations
+- GET `/metadata` returns FHIR R5 CapabilityStatement
+- test_views_api.py: 5/5 passed (landing, patient view, series, metadata, 400)
+- Full suite: 14/14 passed
+
+## 13. API test script — done
+- `scripts/test_api.sh` walks endpoints, writes `results/<ts>/api_test.json`
+- Expected-code scoring: pass=5 fail=0
+
+## 14. start.sh — done
+- kills 9026–9029, ensures Docker, `docker compose up -d db`, waits pg_isready
+- activates venv, `flask db upgrade`, starts Flask on APP_PORT
+- Ctrl+C trap → `docker compose down` + deactivate
+
+## 15. Documentation (Rule 25) — done
+- `docs/technical.md` (architecture, models, endpoints, env, running)
+- `docs/user_manual.md` (login, landing, patient view, refresh, API)
+
+## 16. API key handling — documented in docs/technical.md
+- storage: .env only (gitignored)
+- rotation: regenerate + restart
+- expiry: 90d reminder at 75d
+- revocation: gateway admin revoke + rotate
+
+## 17. Local acceptance — green
+- pytest: 14/14 passed
+- scripts/test_api.sh: 5/5 passed (live)
+- Manual walkthrough: landing, patient view, /metadata, /healthz all 200
+
+## 18. Server deploy — app serving on dashboard.pdhc.se (2026-04-11)
+- 18.a pre-flight: pytest 14/14 → after SSO refactor 22/22 ✓; tarball built
+- 18.b remote pre-checks: target dir created (operator), Colima up on macmini, ports 9026–9029 free
+- 18.c transfer: two tarballs extracted to releases/2026-04-09T10-36-42Z and releases/2026-04-09T14-40-47Z; `current` → 14-40-47Z
+- 18.d server .env seeded from .env.example, mode 600; operator filled secrets
+- 18.i-bis SSO integration (in-place, before reverse proxy):
+  - app/auth.py rewritten: validate via sso.pdhc /api/auth/me/service (mirrors gateway)
+  - new app/routes/auth.py blueprint: /auth/login, /auth/callback, /auth/logout
+  - phase gate: 'analysis' in effective_phases OR is_su_admin
+  - org scope now reads blob['organization_ids'] (Rule 24)
+  - AUTH_MODE=off retained for local dev (Rule 23)
+  - tests rewritten (test_auth.py): 22/22 passed locally
+- 18.e venv on server — done (rebuilt from scratch 2026-04-11; see "Venv rebuild" below)
+- 18.f migrate — done. alembic head 146cc611c12e, all 5 tables present
+- 18.g create-su — done. martin@ingvar.com (is_su=true, created 2026-04-09 18:13 UTC)
+- 18.h start — done. gunicorn daemon on 127.0.0.1:9027, pid under shared/, logs under shared/logs/
+- 18.i smoke — done. Internal and external probes both pass:
+  - /healthz → 200 `{"auth_mode":"sso","status":"ok"}`
+  - /metadata → 200 (FHIR R5 CapabilityStatement)
+  - GET / → 302 → /auth/login (SSO redirect, per auth.py before_request)
+  - /auth/login → 302 (handoff to sso.pdhc)
+- 18.j reverse proxy — operator already live (dashboard.pdhc.se → 127.0.0.1:9027). Not touched.
+
+### start.sh rewrite (2026-04-11)
+Replaced the foreground `flask run` pattern with a robust daemonized setup
+matching gateway.pdhc / 1177 / cgm conventions:
+- gunicorn `--daemon` bound to 127.0.0.1:9027 (reverse proxy fronts it)
+- pid file + access/error logs under `/usr/local/www/dashboard.pdhc/shared/`
+  so they survive release swaps
+- graceful stop of previous gunicorn via pid file; belt-and-braces kill of
+  any leftover :9027 listener
+- COMPOSE_PROJECT_NAME pinned (suppresses the "using name current from
+  symlink" warning and prevents accidental parallel compose projects)
+- hard-bounded waits on Postgres readiness and /healthz so the script fails
+  loudly instead of hanging
+
+### Venv rebuild (2026-04-11)
+Found that releases/2026-04-09T14-40-47Z/app/.venv was a copy of the old
+release's venv — gunicorn and other scripts still had shebangs pointing at
+`releases/2026-04-09T10-36-42Z/app/.venv/bin/python3.14`, and pyvenv.cfg's
+`command` field still referenced the old release path. That meant the new
+release was functionally glued to the old one: pruning 10-36-42Z would
+have broken 14-40-47Z immediately. Fixed by:
+  rm -rf releases/2026-04-09T14-40-47Z/app/.venv
+  /opt/homebrew/opt/python@3.14/bin/python3.14 -m venv releases/2026-04-09T14-40-47Z/app/.venv
+  .../app/.venv/bin/pip install -r requirements.txt
+gunicorn shebang now correctly points at 14-40-47Z's own python.
+
+### services.html diagnosis — why broken services show green
+Reviewed www.pdhc.se/services.html client-side polling JS. Two independent
+bugs, plus a third class of silent failures:
+1. `fetch(url, { mode: 'no-cors' })` returns an *opaque* response for ANY
+   network-level success — including HTTP 5xx, 4xx, redirects, TLS, etc.
+   The dot goes green as long as the reverse proxy's TLS handshake works,
+   regardless of whether the upstream Flask/gunicorn returned 200, 503, or
+   nginx's 502. This is the *primary* false-green bug.
+2. The "DB" dot is hard-coded to mirror the API dot (`if (dbDot) setDot(dbDot,
+   'up', 'DB ok')`). There is no separate DB probe at all.
+3. Several services' /health endpoints don't report DB status themselves —
+   contract `/health` → `{"status":"ok"}` only, plan `/api/health` → same,
+   dashboard `/healthz` and rosetta `/healthz` → `{auth_mode,status}` only.
+   Even a CORS-enabled JSON parser couldn't tell DB state from these.
+
+Ground-truth probe (internal, 2026-04-11 07:52 UTC):
+  sso        :9000 /api/health       200  database=connected
+  request    :9060 /api/health       503  database=unavailable  ← actually broken
+  ips        :9040 /api/v1/health    200  database=connected
+  contract   :9021 /health           200  (no db field)
+  provider1  :9070 /api/v1/health    200  database=connected
+  1177       :9036 /api/health       200  database=connected
+  cgm        :9080 /api/v1/health    200  database=connected
+  gateway    :9050 /api/v1/health    200  database=connected
+  dashboard  :9027 /healthz          200  (no db field)
+  rosetta    :9092 /healthz          200  (no db field)
+  cdr        :9046 /healthz          503  db=false              ← actually broken
+  plan       :9030 /api/health       200  (no db field)
+
+Currently broken (but green on services.html):
+  * request.pdhc.se — container `.env` creds drifted from its DB container;
+    psycopg2 `FATAL: password authentication failed for user "request_admin"`.
+    `docker ps` marks request_pdhc_app as `(unhealthy)` for 28+ min.
+  * cdr.pdhc.se — Postgres closes the connection mid-query during
+    `SELECT count(*) FROM ingest_raw`. Likely OOM/pool config in cdr.pdhc,
+    not a lost DB.
+
+Fix plan for services.html (follow-up, separate service):
+  a) Switch fetch to `mode: 'cors'` and add `Access-Control-Allow-Origin:
+     https://www.pdhc.se` on each service's /health* endpoint. Then use
+     `response.ok` to distinguish 2xx from 5xx.
+  b) Standardise /healthz payloads to `{status, database, service, version}`,
+     parse JSON in the JS, and drive the DB dot from the real `database` field.
+  c) Normalise the path names (`/healthz` vs `/health` vs `/api/v1/health`
+     vs `/api/health`) — one canonical path per service.
+
+### Follow-up TODOs (not blocking but noted)
+- dashboard /healthz does not ping the DB. Add a minimal SELECT 1 health check
+  (and apply the standardised JSON shape in (b) above).
+- Compose project name on the macmini is `current` (accidental, from the
+  symlinked dir). Plan a maintenance window to dump → rename to
+  `dashboard_pdhc` → restore. Non-urgent.
+- Orphan volume `dashboard_pdhc_dashboard_pdhc_pgdata` exists on the macmini
+  from a prior failed attempt. Verify empty and `docker volume rm`.
+- Prune `releases/2026-04-09T10-36-42Z` eventually — safe NOW that 14-40-47Z
+  has an independent venv, but leave until after one or two more
+  smoke-verified days to keep a rollback target.
+
+---
+
+## Platform-plan Phase 4 (CDR-federation dashboard upgrade) — overlay
+
+Per `../plans/CDR_sim_dashboard_execution_plan.md` §4.
+
+### §4.1 Federation backend — DONE (2026-04-26)
+- [x] `app/services/federation.py` — `CdrRegistry` from
+  `app.config["CDR_ENDPOINTS"]`, `discover()` boot-time ping.
+- [x] `fanout(...)` with per-CDR timeout, ThreadPoolExecutor concurrency,
+  bearer/org/admin header forwarding (§4.1.b–c).
+- [x] `merge_histograms(...)` parallel-variance combine (§4.1.d).
+- [x] `concat_series(...)` with cdr_id tagging (§4.1.e).
+- [x] `lttb_downsample` + `agp_hourly_bands` helpers used by §4.2.
+
+### §4.2 Nurse workspace backend — DONE
+- [x] `GET /api/nurse/patient/<guid>` — finds owning CDR, rolls up
+  conditions / regimen / latest-values.
+- [x] `GET /api/nurse/patient/<guid>/agp?window=14d|90d`.
+- [x] `GET /api/nurse/patient/<guid>/variable/<canonical>` — LTTB to ≤2k.
+- [x] `GET /api/nurse/patient/<guid>/events`.
+
+### §4.3 Researcher workspace backend — DONE
+- [x] `POST /api/cohort` (define) + `GET /api/cohort` (list).
+- [x] `GET /api/cohort/<id>/variable/<canonical>/histogram` — federated
+  $stats merge.
+- [x] `GET /api/cohort/<id>/variable/<canonical>/boxplot?group_by=`.
+- [x] `GET /api/cohort/<id>/scatter?x=&y=&max=` — truncate flag.
+- [x] `GET /api/cohort/<id>/trend?canonical=&window=`.
+- [x] `GET /api/cohort/<id>/export?format=csv&variables=` (§4.6).
+
+### §4.4–§4.5 Frontend — deferred
+The HTML/JS workspaces are deferred to the next slice. They need a
+running 5-CDR cluster to exercise meaningfully (§3.2 / §3.3 operator
+actions on miserver are still pending). The backend is fully callable
+so a frontend can drop on top without further service work.
+
+### §4.6 CSV export — DONE (audit log to ``results/export_audit.log``)
+DB-backed `dashboard_audit` table is a follow-up — needs a migration
+that the existing JSONB+UUID model issue must be sorted first.
+
+### §4.7 Permissions / role guards — DONE
+`nurse_required`, `researcher_required`, `admin_required` decorators
+in `app/services/role_guards.py`. Admin satisfies any clinical role.
+
+### §4.8 Backend tests — DONE
+26 new tests:
+- `test_federation.py` — 16 tests covering cohort_predicate_builder,
+  fanout (complete / degraded / error / header-forwarding),
+  histogram_merge (preserves total / skips-failed / weighted-mean),
+  concat_series tagging, LTTB (short-passthrough / extrema-preserved /
+  target-size), AGP (flat-trace / hypo-count).
+- `test_role_guards.py` — 6 tests for role enforcement.
+- `test_researcher_flow.py` — 4 integration-shaped tests with a
+  fully-mocked federation: cohort intersection, histogram merge across
+  2 CDRs, CSV export filters to members, scatter truncation flag.
+
+38/49 total in dashboard's test suite (38 = 12 pre-existing green +
+26 new). The 11 pre-existing failures stem from the legacy
+ObservationCache model being JSONB+UUID-typed, which SQLite's
+create_all() can't reproduce — not Phase 4 regressions.
+
+Frontend (§4.4 / §4.5) and Playwright E2E (§4.8 e2e block) deferred
+until the 5 CDRs exist and a real environment can drive them.
