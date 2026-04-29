@@ -19,6 +19,9 @@
 <body>
 <nav style="display:flex;align-items:center;gap:1rem;">
   <a href="{{ url_for('views.landing') }}" style="color:white;font-weight:700;font-size:1rem;">dashboard.pdhc</a>
+  <a href="/workspace" style="color:white;font-size:0.9rem;{% if request.path == '/workspace' %}text-decoration:underline;{% endif %}">Workspace</a>
+  <a href="/nurse" style="color:white;font-size:0.9rem;{% if request.path.startswith('/nurse') %}text-decoration:underline;{% endif %}">Nurse</a>
+  <a href="/researcher" style="color:white;font-size:0.9rem;{% if request.path.startswith('/researcher') %}text-decoration:underline;{% endif %}">Researcher</a>
   <form method="post" action="{{ url_for('views.refresh') }}" style="margin:0;">
     <button type="submit" class="btn btn-primary btn-sm">Refresh from gateway</button>
   </form>

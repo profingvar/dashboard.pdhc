@@ -271,23 +271,23 @@ def test_lttb_target_size_respected():
 # ---------------------------------------------------------------------------
 
 def test_agp_hourly_bands_against_reference():
-    """A flat 120 mg/dL series for 24 h: every hourly band collapses to
-    120 and TIR=100 %."""
+    """A flat 6.7 mmol/L series (≈120 mg/dL) for 24 h: every hourly
+    band collapses to 6.7 and TIR=100 %."""
     pts = []
     for h in range(24):
         for s in range(0, 3600, 300):  # every 5 min within the hour
-            pts.append((float(h * 3600 + s), 120.0))
+            pts.append((float(h * 3600 + s), 6.7))
     res = agp_hourly_bands(pts)
     for band in res["bands"]:
-        assert band["p50"] == 120.0
-        assert band["p5"] == 120.0
-        assert band["p95"] == 120.0
+        assert band["p50"] == 6.7
+        assert band["p5"] == 6.7
+        assert band["p95"] == 6.7
     assert math.isclose(res["summary"]["tir"], 100.0)
     assert res["summary"]["tbr"] == 0.0
 
 
 def test_agp_hypo_count_matches_naive_count():
-    # 30 minutes below 70 — counts as one event.
-    pts = [(0.0, 60.0)] * 6 + [(1800.0, 120.0)] * 12
+    # 30 minutes below 3.9 mmol/L (≈70 mg/dL) — counts as one event.
+    pts = [(0.0, 3.3)] * 6 + [(1800.0, 6.7)] * 12
     res = agp_hourly_bands(pts)
     assert res["summary"]["hypo_events"] == 1

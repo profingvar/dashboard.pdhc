@@ -152,6 +152,19 @@ def fanout(
     headers = {"Accept": "application/json"}
     if bearer_token:
         headers["Authorization"] = f"Bearer {bearer_token}"
+    else:
+        # No human SSO bearer in scope (service-key call, monitor /
+        # cron / smoke / Phase-4 backend running before SSO is wired).
+        # Fall back to the dashboard's outbound service-key — the CDRs
+        # accept "dashboard.pdhc" via their KNOWN_FHIR_SERVICES table.
+        try:
+            from flask import current_app
+            sk = current_app.config.get("DASHBOARD_PDHC_SERVICE_KEY", "")
+        except RuntimeError:
+            sk = ""
+        if sk:
+            headers["X-Source-Service"] = "dashboard.pdhc"
+            headers["X-Service-Key"] = sk
     if org_guids_header:
         headers["X-Org-Guids"] = org_guids_header
     if is_admin_header:
@@ -504,10 +517,12 @@ def agp_hourly_bands(cgm_points: list[tuple[float, float]]) -> dict:
             "mean": None, "cv": None, "hypo_events": 0,
         }}
 
+    # TIR/TBR/TAR thresholds in mmol/L (Sweden / IFCC convention).
+    # Equivalents in mg/dL would be 70/180.
     n = len(all_vals)
-    tir = sum(1 for v in all_vals if 70 <= v <= 180) / n * 100
-    tbr = sum(1 for v in all_vals if v < 70) / n * 100
-    tar = sum(1 for v in all_vals if v > 180) / n * 100
+    tir = sum(1 for v in all_vals if 3.9 <= v <= 10.0) / n * 100
+    tbr = sum(1 for v in all_vals if v < 3.9) / n * 100
+    tar = sum(1 for v in all_vals if v > 10.0) / n * 100
     mean = statistics.fmean(all_vals)
     sd = statistics.pstdev(all_vals)
     cv = (sd / mean * 100) if mean else 0.0
@@ -535,7 +550,7 @@ def _percentile(sorted_values: list[float], p: float) -> float:
     return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (idx - lo)
 
 
-def _count_hypo_events(values: list[float], *, threshold: float = 70.0,
+def _count_hypo_events(values: list[float], *, threshold: float = 3.9,
                        gap: int = 6) -> int:
     """Same gap-based event counting as sim.pdhc CGM engine."""
     n = 0

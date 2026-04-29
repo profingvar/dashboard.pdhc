@@ -30,6 +30,30 @@ def create_app(config=None):
     app.config.setdefault("SSO_CLIENT_ID", os.environ.get("SSO_CLIENT_ID", ""))
     app.config.setdefault("SSO_CLIENT_SECRET", os.environ.get("SSO_CLIENT_SECRET", ""))
     app.config.setdefault("SSO_CALLBACK_URL", os.environ.get("SSO_CALLBACK_URL", ""))
+    # Service-key bypass: monitor.pdhc → benchmarks / smoke / future CI.
+    app.config.setdefault(
+        "MONITOR_PDHC_SERVICE_KEY",
+        os.environ.get("MONITOR_PDHC_SERVICE_KEY", ""),
+    )
+    # CDR endpoints + outbound key (used by services/federation.py).
+    # Env shape is a comma-separated URL list (e.g. "https://cdr2.pdhc.se,
+    # https://cdr3.pdhc.se,..."). The federation expects dicts with
+    # cdr_id + base_url, so parse the cdr<N> shortname out of each
+    # hostname here once at app boot.
+    import re as _re
+    _eps: list[dict] = []
+    for url in (os.environ.get("CDR_ENDPOINTS", "") or "").split(","):
+        url = url.strip().rstrip("/")
+        if not url:
+            continue
+        m = _re.search(r"cdr(\d+)\.pdhc\.se", url)
+        cdr_id = f"cdr{m.group(1)}" if m else url
+        _eps.append({"cdr_id": cdr_id, "base_url": url})
+    app.config.setdefault("CDR_ENDPOINTS", _eps)
+    app.config.setdefault(
+        "DASHBOARD_PDHC_SERVICE_KEY",
+        os.environ.get("DASHBOARD_PDHC_SERVICE_KEY", ""),
+    )
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 

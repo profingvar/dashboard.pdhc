@@ -189,7 +189,7 @@ async function refreshAgp() {
   card.innerHTML = "";
   for (const [label, val, unit] of [
     ["TIR", s.tir, "%"], ["TBR", s.tbr, "%"], ["TAR", s.tar, "%"],
-    ["Mean", s.mean, "mg/dL"], ["CV", s.cv, "%"], ["Hypo", s.hypo_events, ""],
+    ["Mean", s.mean, "mmol/L"], ["CV", s.cv, "%"], ["Hypo", s.hypo_events, ""],
     ["n", s.n, ""],
   ]) {
     if (val == null) continue;
@@ -228,7 +228,7 @@ async function refreshAgp() {
       },
       scales: {
         x: { title: { display: true, text: "Hour of day" } },
-        y: { title: { display: true, text: "Glucose (mg/dL)" }, suggestedMin: 50, suggestedMax: 300 },
+        y: { title: { display: true, text: "Glucose (mmol/L)" }, suggestedMin: 2, suggestedMax: 18 },
       },
     },
   });

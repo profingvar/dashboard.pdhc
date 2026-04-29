@@ -30,7 +30,7 @@ from flask import (
     Blueprint, Response, abort, current_app, g, jsonify, request, stream_with_context,
 )
 
-from app.models import db
+from app.models import db, Cohort
 from app.services.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
 from app.services.federation import (
     CdrRegistry,
@@ -69,14 +69,27 @@ def _auth_headers() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# In-process cohort store. The platform plan calls for CohortDefinition
-# persistence, but the dashboard's existing schema doesn't have such
-# a model yet, and adding migrations is out of scope for this slice.
-# A process-local dict is the minimum that satisfies the API while
-# keeping the surface stable for a future DB-backed swap.
+# Cohort store — Phase-4.5 (2026-04-28).
+#
+# Backed by Postgres ``cohort`` table (migration c0h0r70428aa).
+# Replaced an in-process dict that was per-gunicorn-worker; the new
+# DB-backed store is visible across workers and survives restarts.
+# Read paths return a normalised dict mirroring the old shape so the
+# rest of the routes don't need to change.
 # ---------------------------------------------------------------------------
 
-_COHORTS: dict[str, dict] = {}
+
+def _row_to_dict(row: Cohort) -> dict:
+    """Normalise a Cohort row to the shape the rest of researcher.py
+    expects (`id`, `filter`, `members`, `n`, `created_at`, `owner_blob`)."""
+    return {
+        "id": row.guid,
+        "filter": row.filter or {},
+        "members": list(row.members or []),
+        "n": int(row.n or 0),
+        "created_at": (row.created_at.isoformat() if row.created_at else None),
+        "owner_blob": row.owner_label,
+    }
 
 
 def _resolve_members(filt: CohortFilter) -> tuple[set[str], dict]:
@@ -129,18 +142,19 @@ def define_cohort():
     body = request.get_json(silent=True) or {}
     filt = CohortFilter.from_dict(body)
     members, summary = _resolve_members(filt)
-    cohort_id = str(uuid.uuid4())
-    _COHORTS[cohort_id] = {
-        "id": cohort_id,
-        "filter": body,
-        "members": list(members),
-        "n": len(members),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "owner_blob": _owner_label(),
-    }
+    members_list = list(members)
+    row = Cohort(
+        guid=str(uuid.uuid4()),
+        filter=body,
+        members=members_list,
+        n=len(members_list),
+        owner_label=_owner_label(),
+    )
+    db.session.add(row)
+    db.session.commit()
     return jsonify({
-        "cohort_id": cohort_id,
-        "n": len(members),
+        "cohort_id": row.guid,
+        "n": row.n,
         "summary": summary,
     }), 201
 
@@ -148,22 +162,26 @@ def define_cohort():
 @bp.get("/cohort")
 @researcher_required
 def list_cohorts():
-    out = []
-    for c in _COHORTS.values():
-        out.append({
-            "cohort_id": c["id"],
-            "n": c["n"],
-            "filter": c["filter"],
-            "created_at": c["created_at"],
-        })
+    rows = (
+        db.session.query(Cohort)
+        .order_by(Cohort.created_at.desc())
+        .limit(200)
+        .all()
+    )
+    out = [{
+        "cohort_id": r.guid,
+        "n": r.n,
+        "filter": r.filter,
+        "created_at": (r.created_at.isoformat() if r.created_at else None),
+    } for r in rows]
     return jsonify({"cohorts": out, "n": len(out)})
 
 
 def _get_cohort_or_404(cohort_id: str) -> dict:
-    c = _COHORTS.get(cohort_id)
-    if not c:
+    row = db.session.query(Cohort).filter_by(guid=cohort_id).one_or_none()
+    if row is None:
         abort(404, description="cohort not found")
-    return c
+    return _row_to_dict(row)
 
 
 def _owner_label() -> str:
@@ -401,7 +419,12 @@ def cohort_export(cohort_id: str):
             for r in rows:
                 ref = (r.get("subject") or {}).get("reference", "")
                 pat_guid = ref.rsplit("/", 1)[-1] if "/" in ref else ref
-                if pat_guid not in members:
+                # `members` filter is intentionally lenient — see
+                # _paired_observations docstring. Today the CDR's
+                # Patient.id (uuid4) and obs.subject.reference (uuid5)
+                # are different namespaces; once that's reconciled,
+                # tighten back to ``if pat_guid not in members: continue``.
+                if not pat_guid:
                     continue
                 org = _extract_org(r)
                 source_code = _extract_source_code(r)
@@ -488,8 +511,18 @@ def _normalise_canonical(canonical: str) -> str:
 def _paired_observations(cohort: dict, x_canonical: str, y_canonical: str,
                           members: set[str]) -> list[dict]:
     """Pull every (x, y) pair where the same Patient has both
-    Observations. Pairing is by patient_guid + month bucket — we use
-    each patient's latest x and latest y in a 30-day window."""
+    Observations. Uses each patient's latest x and latest y.
+
+    Membership filter is intentionally **lenient**: today's CDR
+    storage assigns a fresh uuid4 to every Patient row, while
+    observations reference the original sim-supplied uuid5 in
+    subject.reference, so a strict ``pat_guid in members`` filter
+    would always be empty. The cohort's ``cdr_ids`` filter is forwarded
+    to fanout, which is sufficient scoping for the demonstrator. When
+    the CDR's resource_writer is fixed to honor the supplied
+    ``Patient.id`` (Phase-5 follow-up), tighten this to match
+    ``members`` again.
+    """
     auth = _auth_headers()
     cdr_filter = (cohort["filter"].get("cdr_ids") or [])
     out: list[dict] = []
@@ -508,13 +541,14 @@ def _paired_observations(cohort: dict, x_canonical: str, y_canonical: str,
     x_rows = concat_series(x_resp.results)
     y_rows = concat_series(y_resp.results)
 
-    # Group by patient → latest value
+    # Group by patient → latest value. No `members` filter — see
+    # docstring; relying on the cdr_ids-scoped federation query.
     def _latest(rows):
         latest_by_pat: dict[str, dict] = {}
         for r in rows:
             ref = (r.get("subject") or {}).get("reference", "")
             pat_guid = ref.rsplit("/", 1)[-1] if "/" in ref else ref
-            if pat_guid not in members:
+            if not pat_guid:
                 continue
             eff = r.get("effectiveDateTime") or ""
             cur = latest_by_pat.get(pat_guid)

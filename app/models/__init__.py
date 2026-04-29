@@ -57,3 +57,23 @@ class RefreshLog(db.Model):
     status = db.Column(db.String(32), nullable=False, default="running")
     rows_fetched = db.Column(db.Integer, nullable=False, default=0)
     error = db.Column(db.Text, nullable=True)
+
+
+class Cohort(db.Model):
+    """Persisted researcher cohort definition (Phase-4.5).
+
+    Replaces the in-process ``_COHORTS`` dict in routes/researcher.py.
+    Filter and member set are stored as JSONB so the cohort can be
+    reused across gunicorn workers and across process restarts.
+
+    The owner label is just the SSO-blob email-or-display-name string;
+    we don't FK to ``users`` because service-key callers (sim.pdhc,
+    monitor.pdhc) write cohorts too without ever appearing in users.
+    """
+    __tablename__ = "cohort"
+    guid = db.Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    filter = db.Column(JSONB, nullable=False)
+    members = db.Column(JSONB, nullable=False, default=list)
+    n = db.Column(db.Integer, nullable=False, default=0)
+    owner_label = db.Column(db.String(256), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now, nullable=False)

@@ -156,7 +156,10 @@ def patient_agp(guid: str):
             "patient": guid,
             "code": cgm_canonical,
             "date": f"ge{since}",
-            "_count": "5000",
+            # CDR cap was raised to 30000 in F1 data-shape; ask for
+            # all of it so a 90-day CGM window (~26k points) lands
+            # in one fetch.
+            "_count": "30000",
         },
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],

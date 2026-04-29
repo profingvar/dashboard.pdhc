@@ -83,3 +83,7 @@ reproduce — not a Phase 4 regression.
 35/35 Phase 4 tests now pass (16 federation + 6 role guards + 4
 researcher flow + 9 workspace). 47/58 total (47 = 12 pre-existing
 green + 35 Phase 4); same 11 pre-existing JSONB-on-SQLite failures.
+
+## 2026-04-28 — Workspace nav links + F2 GUID rebase
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — added top-nav links for Workspace / Nurse / Researcher so users land on the chooser (or their default workspace) without typing the URL. Deployed via `start.sh` restart on miserver 2026-04-28T22:14Z.
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/e2e/specs/nurse_flow.spec.ts — `CGM_PATIENT` default rebased from the stale `04bbc029-…` (purged in the SI conversion) to `e57da193-bfe9-5015-8062-c4d5fd8bf5f6` (the seed's CGM patient on cdr2, ~26k CGM-raw obs). Will only round-trip cleanly after the cdr.pdhc writer fix + reseed land — see the parallel cdr.pdhc/changed_files.md entry.

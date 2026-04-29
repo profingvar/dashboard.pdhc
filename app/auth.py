@@ -132,6 +132,67 @@ def _public_path(path: str) -> bool:
     )
 
 
+# Service-key auth: trusted sibling tools (perf benchmarks, monitoring,
+# CI smoke tests) may call dashboard APIs without an SSO session.
+KNOWN_SERVICES = {
+    "monitor.pdhc": "MONITOR_PDHC_SERVICE_KEY",
+}
+
+
+def _service_key_outcome(app):
+    """None / True / False — same shape as cdr.pdhc's _service_key_outcome."""
+    source = request.headers.get("X-Source-Service", "").strip()
+    key = request.headers.get("X-Service-Key", "").strip()
+    if not source and not key:
+        return None
+    if not source or not key:
+        return False
+    cfg_var = KNOWN_SERVICES.get(source)
+    if not cfg_var:
+        return False
+    expected = app.config.get(cfg_var, "")
+    if not expected or key != expected:
+        return False
+    g.source_service = source
+    return True
+
+
+def _service_blob(source_service: str) -> dict:
+    """Synthetic SU blob for service-key callers — admin + both clinical
+    roles so federation/researcher/nurse routes all pass.
+
+    For E2E tests that need to assert role-based denial, the request
+    can carry ``X-Test-Roles: nurse`` (or comma-separated) which both
+    drops ``is_su_admin`` and replaces the role list. Only applied
+    when the service-key path is the chosen auth — never on real SSO
+    sessions."""
+    test_roles = request.headers.get("X-Test-Roles", "").strip()
+    if test_roles:
+        projected = [r.strip() for r in test_roles.split(",") if r.strip()]
+        return {
+            "user_guid": f"00000000-0000-0000-0000-service-{source_service[:8]}",
+            "email": f"service:{source_service}:test={test_roles}",
+            "display_name": f"service:{source_service}",
+            "user_type": "service",
+            "is_su_admin": False,
+            "roles": projected,
+            "effective_phases": ["analysis"],
+            "organization_ids": [],
+            "service_source": source_service,
+        }
+    return {
+        "user_guid": f"00000000-0000-0000-0000-service-{source_service[:8]}",
+        "email": f"service:{source_service}",
+        "display_name": f"service:{source_service}",
+        "user_type": "service",
+        "is_su_admin": True,
+        "roles": ["nurse", "researcher", "admin"],
+        "effective_phases": ["analysis", "ingestion"],
+        "organization_ids": [],
+        "service_source": source_service,
+    }
+
+
 def install_request_loader(app):
     """Install a single before_request that resolves the current user."""
 
@@ -139,6 +200,15 @@ def install_request_loader(app):
     def _loader():  # noqa: ANN202
         if _public_path(request.path):
             return None
+        sk = _service_key_outcome(app)
+        if sk is True:
+            blob = _service_blob(g.source_service)
+            g.access_blob = blob
+            g.current_user = _blob_to_user(blob)
+            return None
+        if sk is False:
+            from flask import jsonify
+            return jsonify({"error": "Invalid service credentials"}), 403
         mode = app.config.get("AUTH_MODE", "off")
         if mode == "off":
             g.access_blob = _DEV_BLOB
