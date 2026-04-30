@@ -268,7 +268,9 @@ def patient_events(guid: str):
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
-    hypo_canonical = "https://termbank.pdhc.se/CodeSystem/loinc|97511-0"
+    # 104642-4 = "Time below range, very low" (severe hypoglycemia, <3.0 mmol/L)
+    # — matches sim.pdhc's cgm_hypo_count concept code.
+    hypo_canonical = "https://termbank.pdhc.se/CodeSystem/loinc|104642-4"
     hypo = fanout(
         _registry(),
         method="GET",

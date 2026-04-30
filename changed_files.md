@@ -87,3 +87,60 @@ green + 35 Phase 4); same 11 pre-existing JSONB-on-SQLite failures.
 ## 2026-04-28 — Workspace nav links + F2 GUID rebase
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — added top-nav links for Workspace / Nurse / Researcher so users land on the chooser (or their default workspace) without typing the URL. Deployed via `start.sh` restart on miserver 2026-04-28T22:14Z.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/e2e/specs/nurse_flow.spec.ts — `CGM_PATIENT` default rebased from the stale `04bbc029-…` (purged in the SI conversion) to `e57da193-bfe9-5015-8062-c4d5fd8bf5f6` (the seed's CGM patient on cdr2, ~26k CGM-raw obs). Will only round-trip cleanly after the cdr.pdhc writer fix + reseed land — see the parallel cdr.pdhc/changed_files.md entry.
+
+## 2026-04-29 — CGM LOINC code mismatch surfaced by termbank load (followup)
+
+Termbank.pdhc loaded LOINC 2.82 today. Cross-referencing the codes
+PDHC's CGM pipeline uses:
+
+- 97506-0 → "Glucose management indicator" (GMI) — CORRECT
+- 97507-8 → "Average glucose [Mass/volume] in Interstitial fluid during Reporting Period" — CORRECT
+- 97509-4 → **LOINC says "Cancer disease progression"** — sim/dashboard treat it as a CGM time-in-range / time-above-range marker. **Wrong code.**
+- 97511-0 → **LOINC says "Fungal Ab panel - Specimen by Immune diffusion (ID)"** — sim/dashboard treat it as another CGM range marker. **Wrong code.**
+
+Real CGM Time-In-Range codes from the LOINC family typically used:
+- 97509-4 is wrong. Correct CGM TIR (% of time 70–180 mg/dL or
+  3.9–10.0 mmol/L) is **97510-2** "Time in target range".
+- TBR (time below range): **97509-4** is wrong; the right codes are
+  **97511-0** is also wrong. Real ones: **TBR Level 1** (54-69
+  mg/dL) is `97515-1`, **TBR Level 2** (<54) is `97514-4`.
+- TAR (time above): `97508-6` (level 1, 181-250) and `97506-0` is GMI
+  not TAR — TAR codes are `97507-8`-adjacent.
+
+Action: review every reference to 97509-4, 97511-0 in
+sim.pdhc/sim/variables/cgm.py, dashboard.pdhc/app/services/federation.py,
+the seeded test fixtures, and replace with the real CGM TIR/TBR/TAR
+codes. NOT done in this commit — surfacing the bug only.
+
+Discovery via: termbank.pdhc deploy + LOINC 2.82 import on 2026-04-29.
+
+## 2026-04-30 — CGM LOINC fix landed
+
+Replaced the wrong CGM codes with verified LOINC 2.82 codes (each
+verified by `curl http://127.0.0.1:9012/CodeSystem/loinc/<code>` on
+miserver against the loaded termbank). Mapping:
+
+- TIR (CGM): `97509-4` → **`97510-2`** ("Glucose measurements in range
+  out of Total glucose measurements during reporting period")
+- Hypoglycemia / severe hypo events: `97511-0` → **`104642-4`**
+  ("Time below range, very low" — <3.0 mmol/L; matches sim.pdhc's
+  `cgm_hypo_count` concept)
+- CGM mean (researcher workspace): `97506-0` → **`97507-8`**
+  ("Average glucose [Mass/volume] in Interstitial fluid during
+  Reporting Period"); `97506-0` (GMI) split out as its own variable.
+
+Files:
+
+- `app/templates/nurse_workspace.html` — TIR canonical
+- `app/templates/researcher_workspace.html` — TIR canonical, CGM mean
+  canonical, added GMI as separate variable
+- `app/routes/nurse.py` — `hypo_canonical` now `104642-4` with a
+  comment explaining what the code means and how it lines up with
+  `cgm_hypo_count` in sim.pdhc
+
+Deployed via `scp` of the three files into
+`/usr/local/www/dashboard.pdhc/current/` and a manual gunicorn
+restart (start.sh failed at the docker-context check because the
+mac-side colima socket forward is broken right now; the dashboard
+app itself talks to its DB on `localhost:9026`, no docker call
+needed). Verified `https://dashboard.pdhc.se/healthz` 200.
