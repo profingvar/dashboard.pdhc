@@ -42,12 +42,29 @@ def create_app(config=None):
     # hostname here once at app boot.
     import re as _re
     _eps: list[dict] = []
-    for url in (os.environ.get("CDR_ENDPOINTS", "") or "").split(","):
-        url = url.strip().rstrip("/")
-        if not url:
+    for raw in (os.environ.get("CDR_ENDPOINTS", "") or "").split(","):
+        raw = raw.strip()
+        if not raw:
             continue
-        m = _re.search(r"cdr(\d+)\.pdhc\.se", url)
-        cdr_id = f"cdr{m.group(1)}" if m else url
+        # Accept two forms:
+        #   1. plain URL — e.g. "https://cdr2.pdhc.se" — cdr_id pulled
+        #      from the cdrN.pdhc.se hostname.
+        #   2. "<id>=<url>" — e.g. "cdr2=http://127.0.0.1:9146" —
+        #      explicit id. Used for loopback / internal URLs that
+        #      don't have a cdrN.pdhc.se hostname (avoids hairpin NAT
+        #      and the resulting fanout 499s when dashboard's
+        #      gunicorn worker calls the public hostnames back into
+        #      itself).
+        if "=" in raw and not raw.startswith("http"):
+            cdr_id, _, url = raw.partition("=")
+            cdr_id = cdr_id.strip()
+            url = url.strip().rstrip("/")
+        else:
+            url = raw.rstrip("/")
+            m = _re.search(r"cdr(\d+)\.pdhc\.se", url)
+            cdr_id = f"cdr{m.group(1)}" if m else url
+        if not url or not cdr_id:
+            continue
         _eps.append({"cdr_id": cdr_id, "base_url": url})
     app.config.setdefault("CDR_ENDPOINTS", _eps)
     app.config.setdefault(
