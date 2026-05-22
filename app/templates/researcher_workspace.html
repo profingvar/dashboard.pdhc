@@ -23,7 +23,21 @@
 
   .partial-banner { background:#fff8e1; border:1px solid #ffe082; padding:.4rem .6rem; border-radius:4px; margin-bottom:.6rem; font-size:.9rem; }
   .var-pill { display:inline-flex; align-items:center; gap:.3rem; padding: .15rem .5rem; background:#eef; border-radius:14px; font-size:.85rem; margin: .15rem; cursor:default;}
+  .var-pill.inactive { opacity:.55; }
   .var-pill button { background:none; border:none; cursor:pointer; color:#a04; font-weight:bold; }
+
+  .partial-banner-row { display:flex; align-items:center; justify-content:space-between; gap:.6rem; }
+  .partial-banner button { font-size:.82rem; padding:.15rem .5rem; }
+  .partial-banner .meta { color:#7a6a3a; font-size:.78rem; }
+
+  .cohort-id { font-family: ui-monospace, monospace; font-size:.82em; background:#f3f3f5; padding:1px 4px; border-radius:3px; }
+  .copy-btn { font-size:.78em; padding:0 .35em; margin-left:.25em; cursor:pointer; background:transparent; border:1px solid var(--border); border-radius:3px; }
+
+  .cdr-row { display:grid; grid-template-columns: 1fr auto auto; gap:.4rem; padding:.15rem 0; font-size:.82rem; }
+  .cdr-row .n  { color:#333; }
+  .cdr-row .mean { color:#666; }
+  .cdr-row.fail { color:#a04; }
+  .cdr-row.empty { color:#888; font-style:italic; }
 </style>
 
 <div id="partial-banner" class="partial-banner" hidden></div>
@@ -160,10 +174,18 @@ async function buildCohort() {
   }
   const body = await r.json();
   cohortId = body.cohort_id;
+  const safe = escapeHtml(cohortId);
   document.getElementById("cohort-status").innerHTML =
-    `<strong>${body.n}</strong> patients · cohort <code style="font-size:.78em;">${cohortId.slice(0,8)}…</code>`;
+    `<strong>${body.n}</strong> patients · cohort <span class="cohort-id">${safe}</span>` +
+    ` <button type="button" class="copy-btn" data-copy="${safe}" title="copy cohort id">copy</button>`;
   document.getElementById("export-btn").disabled = !cohortId || pickedVars.length === 0;
   refreshChart();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
 }
 
 // --------------- Variable picker -----------------------------------------
@@ -181,9 +203,16 @@ function renderVarPicker() {
   }
   const span = document.getElementById("picked-vars");
   span.innerHTML = "";
-  for (const v of pickedVars) {
+  // For 1-var tabs (histogram, boxplot, trend) only the first picked
+  // variable is actually charted; the rest become dead weight in the
+  // UI. Mark them visually so the user can tell, without removing
+  // them (they're queued in case the tab changes to scatter).
+  const oneVarTab = activeTab !== "scatter";
+  for (const [i, v] of pickedVars.entries()) {
     const pill = document.createElement("span");
-    pill.className = "var-pill";
+    pill.className = "var-pill" + (oneVarTab && i > 0 ? " inactive" : "");
+    const hint = (oneVarTab && i > 0) ? " (not used on this tab)" : "";
+    pill.title = v.name + hint;
     pill.innerHTML = `${v.name} <button data-c="${v.canonical}" title="remove">×</button>`;
     pill.querySelector("button").addEventListener("click", () => {
       pickedVars = pickedVars.filter(x => x.canonical !== v.canonical);
@@ -230,6 +259,11 @@ async function refreshChart() {
   if (activeTab === "trend")     return renderTrend(v);
 }
 
+function selectedCdrs() {
+  return Array.from(document.querySelectorAll("input[name=cdr]:checked"))
+              .map(i => i.value);
+}
+
 async function renderHistogram(v) {
   const r = await fetch(`/api/cohort/${cohortId}/variable/${encodeURIComponent(v.canonical)}/histogram?buckets=20`);
   if (!r.ok) return;
@@ -242,12 +276,20 @@ async function renderHistogram(v) {
     data: { labels, datasets: [{ label: v.name, data: values, backgroundColor: "#5a9bd6" }] },
     options: {
       animation: false,
-      scales: { y: { title: { display: true, text: "n" } },
-                x: { title: { display: true, text: `${v.name} (${v.unit})` } } },
+      scales: {
+        y: { title: { display: true, text: "n" } },
+        // Thin x-axis ticks: with 20 buckets at 45° rotation the labels
+        // are cramped. autoSkip + maxTicksLimit lets Chart.js drop
+        // every other label when the chart is narrow.
+        x: {
+          title: { display: true, text: `${v.name} (${v.unit})` },
+          ticks: { autoSkip: true, maxTicksLimit: 10, maxRotation: 45 },
+        },
+      },
     },
   });
   fillSummary(data, v);
-  fillPerCdr(data.per_cdr || []);
+  fillPerCdr(data.per_cdr || [], selectedCdrs(), data.failed_cdrs || []);
 }
 
 async function renderBoxplot(v) {
@@ -333,19 +375,51 @@ function fillSummary(data, v) {
 function row(l, v) {
   return `<div class='stat-row'><span class='l'>${l}</span><span><strong>${v}</strong></span></div>`;
 }
-function fillPerCdr(per) {
-  document.getElementById("per-cdr-content").innerHTML = per.map(p =>
-    `<div class='stat-row'><span class='l'>${p.cdr_id}</span><span>${p.n} · ${p.mean ? p.mean.toFixed(1) : "—"}</span></div>`
-  ).join("") || "—";
+function fillPerCdr(per, selectedCdrs, failedCdrs) {
+  // Render every CDR the user has selected, not only those that
+  // returned data. Failed CDRs show with their status; CDRs that
+  // returned but had no observations for this variable get an
+  // explicit "no data" row instead of silently disappearing.
+  const byId = {};
+  for (const p of per || []) byId[p.cdr_id] = p;
+  const failed = new Set(failedCdrs || []);
+
+  const rows = (selectedCdrs || Object.keys(byId)).map(id => {
+    if (failed.has(id)) {
+      return `<div class='cdr-row fail' title='Fetch failed for ${id}'>` +
+             `<span>${id}</span><span class='n'>—</span><span>fetch failed</span></div>`;
+    }
+    const p = byId[id];
+    if (!p) {
+      return `<div class='cdr-row empty'>` +
+             `<span>${id}</span><span class='n'>0</span><span>no data</span></div>`;
+    }
+    const mean = (p.mean != null) ? `mean ${p.mean.toFixed(1)}` : 'no data';
+    return `<div class='cdr-row'>` +
+           `<span>${id}</span>` +
+           `<span class='n'>n ${p.n ?? 0}</span>` +
+           `<span class='mean'>${mean}</span></div>`;
+  });
+  document.getElementById("per-cdr-content").innerHTML = rows.join("") || "—";
 }
+
+let _lastBannerState = { mode: null, failed: [] };
 
 function showPartialBanner(mode, failed) {
   const el = document.getElementById("partial-banner");
+  _lastBannerState = { mode, failed: failed || [] };
   if (mode === "complete" || mode == null) { el.hidden = true; return; }
   el.hidden = false;
-  el.textContent = (mode === "degraded")
+  const msg = (mode === "degraded")
     ? `Partial result — ${failed.join(", ")} unavailable.`
     : `Most CDRs unreachable (${failed.join(", ")}). Showing what we got.`;
+  const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  el.innerHTML =
+    `<div class="partial-banner-row">` +
+      `<span>${msg} <span class="meta">checked ${stamp}</span></span>` +
+      `<button type="button" class="btn btn-secondary btn-sm" id="banner-retry">Retry</button>` +
+    `</div>`;
+  document.getElementById("banner-retry").addEventListener("click", refreshChart);
 }
 
 function drawChart(spec) {
@@ -391,10 +465,27 @@ document.addEventListener("DOMContentLoaded", () => {
       if (b.disabled) return;
       activeTab = b.dataset.tab;
       syncTabUI();
+      // Re-mark inactive pills when switching between 1-var and 2-var tabs
+      renderVarPicker();
       refreshChart();
     });
   });
   document.getElementById("export-btn").addEventListener("click", downloadExport);
+
+  // Delegate copy-button clicks (button is re-rendered each build)
+  document.addEventListener("click", e => {
+    const btn = e.target.closest(".copy-btn");
+    if (!btn) return;
+    const txt = btn.getAttribute("data-copy") || "";
+    navigator.clipboard.writeText(txt).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = "copied";
+      setTimeout(() => { btn.textContent = orig; }, 900);
+    }, () => {
+      btn.textContent = "failed";
+    });
+  });
+
   renderVarPicker();
 });
 </script>
