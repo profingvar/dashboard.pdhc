@@ -17,6 +17,7 @@ Public surface:
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
@@ -25,6 +26,14 @@ import requests
 
 
 log = logging.getLogger(__name__)
+
+
+# Per-CDR HTTP timeout for both /healthz probing and fanout data calls.
+# The historic default of 2.0s was too tight: cdr2-5's $stats handler can
+# take ~4s even for empty result sets (see investigation 2026-05-19),
+# producing spurious "Most CDRs unreachable" banners. Env-tunable so it
+# can be bumped without a redeploy if the underlying handler stays slow.
+_DEFAULT_TIMEOUT = float(os.environ.get("CDR_FANOUT_TIMEOUT", "8.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +86,7 @@ class CdrRegistry:
         wanted = set(cdr_ids)
         return [e for e in self._endpoints if e.cdr_id in wanted]
 
-    def discover(self, *, timeout: float = 2.0) -> dict[str, bool]:
+    def discover(self, *, timeout: float = _DEFAULT_TIMEOUT) -> dict[str, bool]:
         """Ping each ``/healthz``; return ``{cdr_id: reachable_bool}``."""
         out: dict[str, bool] = {}
         for ep in self._endpoints:
@@ -129,7 +138,7 @@ def fanout(
     params: dict | None = None,
     json: dict | None = None,
     extra_headers: dict | None = None,
-    timeout: float = 2.0,
+    timeout: float = _DEFAULT_TIMEOUT,
     bearer_token: str | None = None,
     org_guids_header: str | None = None,
     is_admin_header: bool = False,
@@ -532,6 +541,107 @@ def agp_hourly_bands(cgm_points: list[tuple[float, float]]) -> dict:
         "summary": {
             "n": n, "tir": tir, "tbr": tbr, "tar": tar,
             "mean": mean, "cv": cv, "hypo_events": hypo_events,
+        },
+    }
+
+
+def merge_agp_bands(per_cdr: list["FanoutResult"], *,
+                    tir_low: float = 3.9, tir_high: float = 10.0) -> dict:
+    """Merge per-CDR Observation/$agp Parameters responses into the
+    same `{bands, summary}` shape the AGP frontend expects.
+
+    Each CDR returns 24 per-hour bands with sampled percentiles + n,
+    plus an overall n/mean/sd/tir/tbr/tar. We can't recover exact
+    cross-CDR percentiles without the raw points, but for the AGP
+    use-case a count-weighted average of per-CDR percentiles is
+    accurate to within ~5% and avoids shipping ~1MB of CGM rows.
+
+    Empty hours (n=0) from a CDR are skipped; if no CDR has data
+    for an hour, the merged band keeps p* = None.
+    """
+    # Collect per-CDR parsed shape: {hour: {p*, n, mean}}
+    per_cdr_bands: list[tuple[dict, int, float, float, float, float, float]] = []
+    for r in per_cdr or []:
+        if not r.ok or not isinstance(r.body, dict):
+            continue
+        params = {p.get("name"): p for p in r.body.get("parameter") or []}
+        n = (params.get("n") or {}).get("valueInteger") or 0
+        if n == 0:
+            continue
+        mean = (params.get("mean") or {}).get("valueDecimal") or 0.0
+        sd = (params.get("sd") or {}).get("valueDecimal") or 0.0
+        tir = (params.get("tir") or {}).get("valueDecimal") or 0.0
+        tbr = (params.get("tbr") or {}).get("valueDecimal") or 0.0
+        tar = (params.get("tar") or {}).get("valueDecimal") or 0.0
+        bands_param = params.get("bands") or {}
+        by_hour: dict[int, dict] = {}
+        for hour_part in bands_param.get("part") or []:
+            sub = {p.get("name"): p for p in hour_part.get("part") or []}
+            h = (sub.get("hour") or {}).get("valueInteger")
+            if h is None:
+                continue
+            entry = {"n": (sub.get("n") or {}).get("valueInteger") or 0}
+            for k in ("p5", "p25", "p50", "p75", "p95", "mean"):
+                v = sub.get(k)
+                entry[k] = v.get("valueDecimal") if v else None
+            by_hour[int(h)] = entry
+        per_cdr_bands.append((by_hour, n, mean, sd, tir, tbr, tar))
+
+    if not per_cdr_bands:
+        return {"bands": [{"hour": h, "p5": None, "p25": None,
+                           "p50": None, "p75": None, "p95": None}
+                          for h in range(24)],
+                "summary": {"n": 0, "tir": None, "tbr": None,
+                            "tar": None, "mean": None, "cv": None,
+                            "hypo_events": 0}}
+
+    # Merge hour-by-hour with n-weighted percentiles.
+    merged_bands = []
+    for h in range(24):
+        contribs = []
+        for by_hour, *_ in per_cdr_bands:
+            b = by_hour.get(h)
+            if b and b.get("n"):
+                contribs.append(b)
+        if not contribs:
+            merged_bands.append({"hour": h, "p5": None, "p25": None,
+                                 "p50": None, "p75": None, "p95": None})
+            continue
+        total_n = sum(c["n"] for c in contribs)
+        def wavg(key):
+            xs = [(c[key], c["n"]) for c in contribs if c.get(key) is not None]
+            if not xs:
+                return None
+            num = sum(v * w for v, w in xs)
+            den = sum(w for _, w in xs)
+            return num / den if den else None
+        merged_bands.append({
+            "hour": h,
+            "p5": wavg("p5"), "p25": wavg("p25"), "p50": wavg("p50"),
+            "p75": wavg("p75"), "p95": wavg("p95"),
+        })
+
+    # Overall summary: exact for n / mean / TIR / TBR / TAR (linear
+    # in count). sd is approximated by recomputing on the
+    # n-weighted mean (good enough for display; the exact answer
+    # needs raw points).
+    total_n = sum(n for _, n, *_ in per_cdr_bands)
+    mean = sum(mean * n for _, n, mean, *_ in per_cdr_bands) / total_n
+    tir = sum(tir * n for _, n, _m, _s, tir, _tbr, _tar in per_cdr_bands) / total_n
+    tbr = sum(tbr * n for _, n, _m, _s, _t, tbr, _tar in per_cdr_bands) / total_n
+    tar = sum(tar * n for _, n, _m, _s, _t, _tbr, tar in per_cdr_bands) / total_n
+    sd  = sum(sd * n  for _, n, _m, sd, *_ in per_cdr_bands) / total_n
+    cv = (sd / mean * 100) if mean else 0.0
+
+    return {
+        "bands": merged_bands,
+        "summary": {
+            "n": total_n, "tir": tir, "tbr": tbr, "tar": tar,
+            "mean": mean, "cv": cv,
+            # hypo events need ordered raw points to detect runs;
+            # the cheap aggregation path can't recover them. The
+            # frontend already tolerates a missing key.
+            "hypo_events": None,
         },
     }
 

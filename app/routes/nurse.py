@@ -22,6 +22,7 @@ from app.services.federation import (
     agp_hourly_bands,
     fanout,
     lttb_downsample,
+    merge_agp_bands,
 )
 from app.services.role_guards import nurse_required
 
@@ -142,6 +143,18 @@ def patient_summary(guid: str):
 @bp.get("/patient/<guid>/agp")
 @nurse_required
 def patient_agp(guid: str):
+    """Ambulatory Glucose Profile for one patient.
+
+    Calls the CDR's `Observation/$agp` SQL-aggregation operation
+    instead of streaming raw CGM points back. Per-CDR responses are
+    ~2KB regardless of window size; merge happens in
+    federation.merge_agp_bands.
+
+    Previously this route pulled `_count=30000` of CGM rows back from
+    each CDR, hit the dashboard's 8s CDR_FANOUT_TIMEOUT on the 14-90 d
+    window, and silently returned empty bands. See the cdr.pdhc
+    fhir_read.py _agp_postgres comment for the SQL.
+    """
     window = request.args.get("window", "14d")
     days = 14 if window == "14d" else 90
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -151,38 +164,24 @@ def patient_agp(guid: str):
     resp = fanout(
         _registry(),
         method="GET",
-        path="api/v1/fhir/Observation",
+        path="api/v1/fhir/Observation/$agp",
         params={
             "patient": guid,
             "code": cgm_canonical,
             "date": f"ge{since}",
-            # CDR cap was raised to 30000 in F1 data-shape; ask for
-            # all of it so a 90-day CGM window (~26k points) lands
-            # in one fetch.
-            "_count": "30000",
         },
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
 
-    points: list[tuple[float, float]] = []
-    for r in resp.results:
-        if not r.ok or not isinstance(r.body, dict):
-            continue
-        for entry in r.body.get("entry") or []:
-            obs = entry.get("resource") or {}
-            eff = obs.get("effectiveDateTime")
-            val = (obs.get("valueQuantity") or {}).get("value")
-            if eff and val is not None:
-                ts = _parse_iso(eff)
-                if ts is not None:
-                    points.append((ts, float(val)))
-
+    merged = merge_agp_bands(resp.results)
     return jsonify({
         "guid": guid,
         "window": window,
-        "n_points": len(points),
-        **agp_hourly_bands(points),
+        "fanout_mode": resp.mode,
+        "succeeded_cdrs": resp.succeeded,
+        "failed_cdrs": resp.failed,
+        **merged,
     })
 
 
