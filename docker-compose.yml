@@ -2,12 +2,13 @@ services:
   db:
     image: postgres:16
     container_name: dashboard_pdhc_db
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-dashboard_pdhc_db}
       POSTGRES_USER: ${DB_USER:-dashboard}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
     ports:
-      - "9026:5432"
+      - "127.0.0.1:9026:5432"
     volumes:
       - dashboard_pdhc_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +16,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  app:
+    build: .
+    container_name: dashboard_pdhc_app
+    restart: unless-stopped
+    env_file: .env
+    # DATABASE_URL via ${}-substitution from .env (gitignored) — NEVER hardcode
+    # the password in the repo. The deployed server compose carries the literal
+    # value; here it stays substituted so no secret lands in git. dashboard's
+    # .env has clean (unindented) keys, so substitution resolves correctly.
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${DB_USER:-dashboard}:${DB_PASSWORD:-changeme}@db:5432/${DB_NAME:-dashboard_pdhc_db}
+    ports:
+      - "127.0.0.1:9027:9027"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   dashboard_pdhc_pgdata:
