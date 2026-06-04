@@ -2,6 +2,17 @@
 
 All edited files (full path) from now on (Rule 17).
 
+## Ticket #211 — dashboard_audit table + decorator (2026-06-04)
+
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/models/__init__.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/migrations/versions/2026_06_04_dashboard_audit.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/audit.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/views.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/researcher.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/api.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_audit_read.py
+
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/readme.md
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md

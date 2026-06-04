@@ -17,6 +17,7 @@ from typing import Any
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
 
+from app.services.audit import audit_read
 from app.services.federation import (
     CdrRegistry,
     agp_hourly_bands,
@@ -56,6 +57,7 @@ def _auth_headers() -> dict:
 
 @bp.get("/patient/<guid>")
 @nurse_required
+@audit_read
 def patient_summary(guid: str):
     """Find the owning CDR (the one that has this Patient) and return a
     rolled-up summary for the nurse view.
@@ -142,6 +144,7 @@ def patient_summary(guid: str):
 
 @bp.get("/patient/<guid>/agp")
 @nurse_required
+@audit_read
 def patient_agp(guid: str):
     """Ambulatory Glucose Profile for one patient.
 
@@ -191,6 +194,7 @@ def patient_agp(guid: str):
 
 @bp.get("/patient/<guid>/variable/<path:canonical>")
 @nurse_required
+@audit_read
 def patient_variable(guid: str, canonical: str):
     auth = _auth_headers()
     target = int(request.args.get("max", "2000"))
@@ -253,6 +257,7 @@ def patient_variable(guid: str, canonical: str):
 
 @bp.get("/patient/<guid>/events")
 @nurse_required
+@audit_read
 def patient_events(guid: str):
     auth = _auth_headers()
     days = int(request.args.get("days", "180"))

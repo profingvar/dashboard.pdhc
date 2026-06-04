@@ -59,6 +59,47 @@ class RefreshLog(db.Model):
     error = db.Column(db.Text, nullable=True)
 
 
+class DashboardAudit(db.Model):
+    """PDL Ch 4 §3 kontroller log — one row per patient-touching read
+    via the dashboard.
+
+    Ticket #211. Replaces the file-based researcher-export audit at
+    ``results/export_audit.log`` (which only covered §4.6 exports) with
+    a Postgres-backed table that covers every read.
+
+    Columns:
+      - ``user_guid``: SSO ``user_guid`` of the caller, or a synthetic
+        ``00000000-...-service-<svc>`` for service-key callers
+        (sim.pdhc, monitor.pdhc).
+      - ``user_org_guids``: snapshot of the caller's ``organization_ids``
+        at read time (used to attribute the read to a vårdenhet).
+      - ``route``: ``"<METHOD> <rule>"``, e.g. ``"GET /patient/<guid>"``.
+        Stored at the rule level (not the materialised URL) so the
+        same logical action aggregates cleanly.
+      - ``patient_guid``: the single patient touched, or NULL for
+        cohort-level reads (researcher aggregates touch many patients;
+        ``n_rows_returned`` is the right denominator there).
+      - ``n_rows_returned``: best-effort count of patient-data rows in
+        the response body; NULL for streamed responses or when the
+        shape can't be inferred. Routes may set ``g._audit_n_rows`` to
+        override.
+      - ``response_status``: HTTP code returned to the caller. Includes
+        4xx; 5xx pre-DB are NOT logged (we'd have no audit context).
+      - ``session_id``: SSO session id, set once Phase 3 / #191 ships;
+        nullable until then.
+    """
+    __tablename__ = "dashboard_audit"
+    guid = db.Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    timestamp = db.Column(db.DateTime(timezone=True), default=_now, nullable=False, index=True)
+    user_guid = db.Column(db.String(128), nullable=True, index=True)
+    user_org_guids = db.Column(JSONB, nullable=False, default=list)
+    route = db.Column(db.String(256), nullable=False, index=True)
+    patient_guid = db.Column(UUID(as_uuid=False), nullable=True, index=True)
+    n_rows_returned = db.Column(db.Integer, nullable=True)
+    response_status = db.Column(db.Integer, nullable=False)
+    session_id = db.Column(db.String(128), nullable=True, index=True)
+
+
 class Cohort(db.Model):
     """Persisted researcher cohort definition (Phase-4.5).
 

@@ -31,6 +31,7 @@ from flask import (
 )
 
 from app.models import db, Cohort
+from app.services.audit import audit_read
 from app.services.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
 from app.services.federation import (
     CdrRegistry,
@@ -138,6 +139,7 @@ def _resolve_members(filt: CohortFilter) -> tuple[set[str], dict]:
 
 @bp.post("/cohort")
 @researcher_required
+@audit_read
 def define_cohort():
     body = request.get_json(silent=True) or {}
     filt = CohortFilter.from_dict(body)
@@ -161,6 +163,7 @@ def define_cohort():
 
 @bp.get("/cohort")
 @researcher_required
+@audit_read
 def list_cohorts():
     rows = (
         db.session.query(Cohort)
@@ -197,6 +200,7 @@ def _owner_label() -> str:
 
 @bp.get("/cohort/<cohort_id>/variable/<path:canonical>/histogram")
 @researcher_required
+@audit_read
 def cohort_histogram(cohort_id: str, canonical: str):
     cohort = _get_cohort_or_404(cohort_id)
     auth = _auth_headers()
@@ -226,6 +230,7 @@ def cohort_histogram(cohort_id: str, canonical: str):
 
 @bp.get("/cohort/<cohort_id>/variable/<path:canonical>/boxplot")
 @researcher_required
+@audit_read
 def cohort_boxplot(cohort_id: str, canonical: str):
     """Stratified boxplot: returns per-group summary (n, p25/p50/p75,
     min, max) for the chosen ``group_by``."""
@@ -289,6 +294,7 @@ def cohort_boxplot(cohort_id: str, canonical: str):
 
 @bp.get("/cohort/<cohort_id>/scatter")
 @researcher_required
+@audit_read
 def cohort_scatter(cohort_id: str):
     cohort = _get_cohort_or_404(cohort_id)
     x = request.args.get("x")
@@ -314,6 +320,7 @@ def cohort_scatter(cohort_id: str):
 
 @bp.get("/cohort/<cohort_id>/trend")
 @researcher_required
+@audit_read
 def cohort_trend(cohort_id: str):
     """Returns per-month mean/p25/p50/p75 for a single canonical."""
     cohort = _get_cohort_or_404(cohort_id)
@@ -378,6 +385,7 @@ def cohort_trend(cohort_id: str):
 
 @bp.get("/cohort/<cohort_id>/export")
 @researcher_required
+@audit_read
 def cohort_export(cohort_id: str):
     cohort = _get_cohort_or_404(cohort_id)
     fmt = request.args.get("format", "csv")
@@ -459,6 +467,12 @@ def cohort_export(cohort_id: str):
         "Content-Type": "text/csv; charset=utf-8",
         "X-Export-Id": export_id,
     }
+    # Audit row-count denominator = cohort member count. We can't see
+    # the streamed row count from the decorator (it commits before the
+    # generator runs); the file-based audit at results/export_audit.log
+    # still captures the actual exported row count for now (#214 will
+    # consolidate the two).
+    g._audit_n_rows = len(members)
     return Response(_stream(), headers=headers)
 
 

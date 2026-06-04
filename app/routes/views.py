@@ -8,6 +8,7 @@ from flask import Blueprint, render_template, request, abort, g, redirect, url_f
 from sqlalchemy import func
 from app.models import db, ObservationCache, RefreshLog
 from app.auth import scope_to_user_orgs, org_guids_for
+from app.services.audit import audit_read
 from app.services.gateway_client import refresh_org, GatewayClient
 
 AUTO_REFRESH_INTERVAL = timedelta(minutes=5)
@@ -41,6 +42,7 @@ def _auto_refresh_if_stale():
 
 
 @bp.get("/")
+@audit_read
 def landing():
     _auto_refresh_if_stale()
     q = scope_to_user_orgs(ObservationCache.query, ObservationCache.org_guid)
@@ -58,10 +60,13 @@ def landing():
         key=lambda x: x["latest"] or 0, reverse=True,
     )
 
+    # Tell the audit decorator how many patient rows were shown.
+    g._audit_n_rows = len(patient_rows)
     return render_template("landing.html", patients=patient_rows)
 
 
 @bp.get("/patient/<guid>")
+@audit_read
 def patient(guid):
     user_orgs = org_guids_for(g.current_user)
     q = ObservationCache.query.filter_by(patient_guid=guid)
@@ -100,6 +105,8 @@ def patient(guid):
 
     measures = sorted(latest.values(), key=lambda m: m["name"])
 
+    # Audit row count = total observations returned (not just selected).
+    g._audit_n_rows = len(rows)
     return render_template(
         "patient.html",
         patient_guid=guid,

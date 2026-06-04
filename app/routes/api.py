@@ -4,11 +4,13 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request, abort, g
 from app.models import ObservationCache
 from app.auth import scope_to_user_orgs
+from app.services.audit import audit_read
 
 bp = Blueprint("api", __name__, url_prefix="/api/v1")
 
 
 @bp.get("/series")
+@audit_read
 def series():
     patient = request.args.get("patient")
     concept = request.args.get("concept")
