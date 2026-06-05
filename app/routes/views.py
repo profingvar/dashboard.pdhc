@@ -10,6 +10,11 @@ from app.models import db, ObservationCache, RefreshLog
 from app.auth import scope_to_user_orgs, org_guids_for
 from app.services.audit import audit_read
 from app.services.gateway_client import refresh_org, GatewayClient
+from app.services.ips_client import (
+    get_active_blocks,
+    filter_blocked_rows,
+    has_any_active_block,
+)
 
 AUTO_REFRESH_INTERVAL = timedelta(minutes=5)
 
@@ -78,6 +83,26 @@ def patient(guid):
     if not rows:
         abort(404)
 
+    # Spärr Phase 2 (ticket #205, PDL Ch 4 § 4). Drop rows whose source
+    # is actively blocked, and surface the metadata-only banner when
+    # the patient has *any* active block — even after org-scoping
+    # already hid every blocked row.
+    blocks = get_active_blocks(guid)
+    rows = filter_blocked_rows(rows, blocks)
+    has_blocked_sources = has_any_active_block(blocks)
+    if not rows:
+        # Every row was filtered by spärr. The patient *exists* and has
+        # data, just not data this caller may see — present the banner
+        # but no measurements.
+        # (404 would be wrong: it would leak "no data" vs "data exists
+        # but is blocked".)
+        return render_template(
+            "patient.html",
+            patient_guid=guid,
+            latest={}, series={}, concepts=[], selected=[],
+            measures=[], graphs=[], has_blocked_sources=has_blocked_sources,
+        )
+
     selected = [c for c in request.args.getlist("concept") if c]
 
     by_concept = defaultdict(list)
@@ -116,6 +141,7 @@ def patient(guid):
         selected=selected,
         measures=measures,
         graphs=graphs,
+        has_blocked_sources=has_blocked_sources,
     )
 
 
