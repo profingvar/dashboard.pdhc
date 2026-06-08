@@ -30,7 +30,7 @@ from flask import (
     Blueprint, Response, abort, current_app, g, jsonify, request, stream_with_context,
 )
 
-from app.models import db, Cohort
+from app.models import db, Cohort, DashboardAudit
 from app.services.audit import audit_read
 from app.services.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
 from app.services.federation import (
@@ -467,45 +467,65 @@ def cohort_export(cohort_id: str):
         "Content-Type": "text/csv; charset=utf-8",
         "X-Export-Id": export_id,
     }
-    # Audit row-count denominator = cohort member count. We can't see
-    # the streamed row count from the decorator (it commits before the
-    # generator runs); the file-based audit at results/export_audit.log
-    # still captures the actual exported row count for now (#214 will
-    # consolidate the two).
+    # @audit_read row records the cohort denominator at request entry;
+    # _record_export_audit() inside the stream writes a second row
+    # (route='research_export') with the actual streamed row count.
     g._audit_n_rows = len(members)
     return Response(_stream(), headers=headers)
 
 
 def _record_export_audit(*, export_id: str, cohort_id: str,
                          variables: list[str], row_count: int) -> None:
-    """Append one row to a process-local audit log. The platform-plan
-    §4.6.c calls for a `dashboard_audit` table — we surface the audit
-    event here and leave the migration as a follow-up so this slice
-    doesn't carry a schema change."""
+    """Write one ``DashboardAudit`` row capturing the completed export.
+
+    Ticket #214. Migrated from a process-local file log
+    (``results/export_audit.log``) to the dashboard_audit table so
+    operator review tooling has a single source of truth. The row is
+    distinct from the request-entry audit row written by the
+    ``@audit_read`` decorator on /api/cohort/<id>/export — that one
+    captures the route call with ``n_rows_returned = len(members)``
+    (cohort denominator); this one captures the export receipt with
+    the *actual* streamed row count and the export metadata.
+    """
     blob = getattr(g, "access_blob", None) or {}
     if isinstance(blob, dict):
         user = blob.get("user_guid") or blob.get("email") or "anonymous"
+        org_ids = list(blob.get("organization_ids") or [])
+        session_id = blob.get("session_id")
     else:
-        user = getattr(blob, "user_guid", "anonymous")
-    log_path = current_app.config.get("EXPORT_AUDIT_LOG", "results/export_audit.log")
-    line = json.dumps({
-        "export_id": export_id,
-        "cohort_id": cohort_id,
-        "user": user,
-        "variables": variables,
-        "row_count": row_count,
-        "at": datetime.now(timezone.utc).isoformat(),
-    })
+        user = (getattr(blob, "user_guid", None)
+                or getattr(blob, "email", None) or "anonymous")
+        org_ids = list(getattr(blob, "organization_ids", None) or [])
+        session_id = getattr(blob, "session_id", None)
     try:
-        import os
-        os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
-        with open(log_path, "a") as fh:
-            fh.write(line + "\n")
-    except OSError:
-        # We don't break the export over an audit-log write failure — but
-        # we shouldn't silently drop it either. Future: hook this into
-        # the Flask logger.
-        current_app.logger.warning("export audit log write failed: %s", line)
+        row = DashboardAudit(
+            user_guid=user,
+            user_org_guids=org_ids,
+            route="research_export",
+            patient_guid=None,
+            n_rows_returned=int(row_count),
+            response_status=200,
+            session_id=session_id,
+            payload_snapshot={
+                "export_id": export_id,
+                "cohort_id": cohort_id,
+                "variables": list(variables),
+                "at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        db.session.add(row)
+        db.session.commit()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        try:
+            current_app.logger.warning(
+                "research_export audit write failed: %s", exc,
+            )
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -612,3 +632,94 @@ def _extract_source_code(r: dict) -> str | None:
         c = codings[1]
         return f"{c.get('system','')}|{c.get('code','')}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# One-off migration: results/export_audit.log -> dashboard_audit (#214)
+# ---------------------------------------------------------------------------
+
+def register_export_audit_cli(app) -> None:
+    """Adds ``flask migrate-export-audit-log`` to the app.
+
+    Reads the file at ``EXPORT_AUDIT_LOG`` (one JSON object per line,
+    written by the pre-#214 file-based audit) and inserts one
+    DashboardAudit row per entry with route='research_export'.
+    Idempotent: skips entries whose ``export_id`` already exists in
+    dashboard_audit.payload_snapshot.
+    """
+    import click as _click
+
+    @app.cli.command("migrate-export-audit-log")
+    @_click.option(
+        "--log-path", default=None,
+        help="Defaults to app.config['EXPORT_AUDIT_LOG'].",
+    )
+    @_click.option("--dry-run", is_flag=True)
+    def migrate_export_audit_log(log_path, dry_run):
+        from flask import current_app as _ca
+        from sqlalchemy import cast, String
+        path = log_path or _ca.config.get(
+            "EXPORT_AUDIT_LOG", "results/export_audit.log",
+        )
+        try:
+            fh = open(path, "r")
+        except OSError as exc:
+            _click.echo(f"no log to migrate at {path}: {exc}")
+            return
+
+        # Pre-fetch existing export_ids so we are idempotent.
+        existing = set()
+        rows = (
+            db.session.query(DashboardAudit.payload_snapshot)
+            .filter(DashboardAudit.route == "research_export")
+            .all()
+        )
+        for (snap,) in rows:
+            if isinstance(snap, dict) and snap.get("export_id"):
+                existing.add(snap["export_id"])
+
+        added = skipped = malformed = 0
+        with fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except (TypeError, ValueError):
+                    malformed += 1
+                    continue
+                export_id = entry.get("export_id")
+                if not export_id:
+                    malformed += 1
+                    continue
+                if export_id in existing:
+                    skipped += 1
+                    continue
+                row = DashboardAudit(
+                    user_guid=entry.get("user"),
+                    user_org_guids=[],
+                    route="research_export",
+                    patient_guid=None,
+                    n_rows_returned=entry.get("row_count"),
+                    response_status=200,
+                    session_id=None,
+                    payload_snapshot={
+                        "export_id": export_id,
+                        "cohort_id": entry.get("cohort_id"),
+                        "variables": entry.get("variables") or [],
+                        "at": entry.get("at"),
+                        "migrated_from_file": True,
+                    },
+                )
+                if not dry_run:
+                    db.session.add(row)
+                existing.add(export_id)
+                added += 1
+        if not dry_run:
+            db.session.commit()
+        _click.echo(
+            f"migrate-export-audit-log: added={added} "
+            f"skipped={skipped} malformed={malformed} "
+            f"{'(dry-run, no commit)' if dry_run else ''}"
+        )

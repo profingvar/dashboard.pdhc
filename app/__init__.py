@@ -82,7 +82,10 @@ def create_app(config=None):
     from app.routes.api import bp as api_bp, register_metadata
     from app.routes.auth import bp as auth_bp
     from app.routes.nurse import bp as nurse_bp
-    from app.routes.researcher import bp as researcher_bp
+    from app.routes.researcher import (
+        bp as researcher_bp,
+        register_export_audit_cli,
+    )
     from app.routes.workspace import bp as workspace_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
@@ -91,6 +94,7 @@ def create_app(config=None):
     app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
     register_metadata(app)
+    register_export_audit_cli(app)
 
     log_dir = _results_dir()
     handler = logging.FileHandler(os.path.join(log_dir, "app.log"))

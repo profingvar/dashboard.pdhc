@@ -98,6 +98,11 @@ class DashboardAudit(db.Model):
     n_rows_returned = db.Column(db.Integer, nullable=True)
     response_status = db.Column(db.Integer, nullable=False)
     session_id = db.Column(db.String(128), nullable=True, index=True)
+    # Ticket #214: arbitrary per-event details. Currently used by the
+    # researcher CSV export to carry export_id + cohort_id + variables;
+    # nullable for every other route so the existing @audit_read
+    # decorator stays unaffected.
+    payload_snapshot = db.Column(JSONB, nullable=True)
 
 
 class Cohort(db.Model):
