@@ -73,7 +73,13 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
         user_guid = _user_guid(blob)
         org_ids = _org_ids(blob)
         session_id = _session_id(blob)
-        patient_guid = _patient_guid_from_request()
+        # Ticket #213: routes whose patient guid isn't on the URL
+        # (e.g. POST /admin/cache/scrub takes it in the JSON body) can
+        # override the auto-derived value via g._audit_patient_guid.
+        patient_guid = (
+            getattr(g, "_audit_patient_guid", None)
+            or _patient_guid_from_request()
+        )
         route_rule = _route_rule()
         # Allow the route to override n_rows (streamed responses, custom
         # aggregations) by setting g._audit_n_rows.
@@ -81,13 +87,19 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
         if override is not None:
             n_rows = int(override)
         # Ticket #212: routes signal admin-override status via
-        # g._audit_event_type ('admin_override' | 'admin_override_required')
-        # and g._audit_admin_justification. Untouched by every other route
-        # so the column stays at the 'read' default.
+        # g._audit_event_type ('admin_override' | 'admin_override_required'
+        # | 'cache_scrub' for #213, ...) and g._audit_admin_justification.
+        # Untouched by every other route so the column stays at the
+        # 'read' default.
         event_type = getattr(g, "_audit_event_type", None) or "read"
         admin_justification = getattr(
             g, "_audit_admin_justification", None,
         )
+        # Ticket #213: routes can attach a per-event JSONB blob via
+        # g._audit_payload_snapshot (e.g. the cache-scrub filter +
+        # deleted_count). Defaults to None so the column stays NULL on
+        # the @audit_read default path.
+        payload_snapshot = getattr(g, "_audit_payload_snapshot", None)
 
         row = DashboardAudit(
             user_guid=user_guid,
@@ -99,6 +111,7 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
             session_id=session_id,
             event_type=event_type,
             admin_justification=admin_justification,
+            payload_snapshot=payload_snapshot,
         )
         db.session.add(row)
         db.session.commit()

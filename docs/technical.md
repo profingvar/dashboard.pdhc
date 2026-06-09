@@ -52,6 +52,49 @@ curves, and a per-patient dashboard. Part of the PDHC microservice suite.
 - `GATEWAY_BASE_URL` — e.g. `https://gateway.pdhc.se`
 - `GATEWAY_TOKEN` — bearer token (keep in `.env` only; see API keys)
 - `SECRET_KEY` — Flask session secret
+- `OBSERVATION_CACHE_TTL_HOURS` — retention TTL for cached observations
+  (default 48; see "ObservationCache retention" below)
+
+## ObservationCache retention (PDL Ch 4 §§ 3-4, ticket #213)
+
+ObservationCache rows are a **derived, time-bounded copy** of patient
+observations the dashboard pulled from gateway. They must not survive
+indefinitely — the source of truth (gateway, CDRs) may block, scrub,
+or update a row, and a stale dashboard copy would defeat both
+right-to-block (PDL Ch 4 § 4) and need-to-know (PDL Ch 4 § 1).
+
+The retention policy has two parts:
+
+1. **Time-based sweep.** Rows whose `fetched_at` is older than
+   `OBSERVATION_CACHE_TTL_HOURS` (default 48h) are removed by the
+   `flask cache-sweep` CLI. Run hourly from cron on the macmini:
+   ```
+   0 * * * * cd /usr/local/www/dashboard.pdhc/current \
+              && docker exec dashboard_pdhc_app flask cache-sweep \
+              >> shared/logs/cache_sweep.log 2>&1
+   ```
+   `flask cache-sweep --dry-run` reports the count that would be
+   removed without touching the table — useful when tuning TTL.
+
+2. **Targeted admin scrub.** SU admins can immediately drop rows
+   matching `patient_guid` / `org_guid` / both via
+   `POST /admin/cache/scrub`:
+   ```json
+   {
+     "patient_guid": "...",     // optional
+     "org_guid":     "...",     // optional; at least one required
+     "reason":       "patient deletion request"
+   }
+   ```
+   The endpoint writes a `dashboard_audit` row with
+   `event_type='cache_scrub'`, `admin_justification=<reason>`,
+   `n_rows_returned=<deleted_count>`, and a `payload_snapshot` JSONB
+   carrying the verbatim filter + count. Non-SU callers get 403; an
+   empty filter returns 400 (a no-filter scrub would wipe everything).
+
+   Audit consumers (`/admin/audit`, #215) can join `cache_scrub`
+   rows with the same patient's `read` / `admin_override` rows to
+   reconstruct who saw what before it was scrubbed.
 
 ## API keys (Rule 8)
 - **Storage**: `.env` only, never committed. `.gitignore` excludes `.env`.
@@ -70,6 +113,7 @@ curves, and a per-patient dashboard. Part of the PDHC microservice suite.
 | `/patient/<guid>` | GET | patient dashboard |
 | `/refresh` | POST | pull observations from gateway for user's orgs |
 | `/api/v1/series?patient&concept` | GET | FHIR Bundle of Observations |
+| `/admin/cache/scrub` | POST | SU-only: drop ObservationCache rows by patient/org (#213) |
 
 ## Running locally
 ```

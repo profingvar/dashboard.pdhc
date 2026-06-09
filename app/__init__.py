@@ -71,6 +71,14 @@ def create_app(config=None):
         "DASHBOARD_PDHC_SERVICE_KEY",
         os.environ.get("DASHBOARD_PDHC_SERVICE_KEY", ""),
     )
+    # Ticket #213 — ObservationCache retention. Rows whose `fetched_at`
+    # is older than this many hours are dropped by the `flask cache-sweep`
+    # CLI (run from cron). Default 48h matches the upper end of the
+    # ticket's 24-48h band.
+    app.config.setdefault(
+        "OBSERVATION_CACHE_TTL_HOURS",
+        int(os.environ.get("OBSERVATION_CACHE_TTL_HOURS", "48")),
+    )
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 
@@ -95,6 +103,11 @@ def create_app(config=None):
     app.register_blueprint(workspace_bp)
     register_metadata(app)
     register_export_audit_cli(app)
+
+    # Ticket #213. POST /admin/cache/scrub + `flask cache-sweep` CLI.
+    from app.routes.admin import bp as admin_bp, register_cache_sweep_cli
+    app.register_blueprint(admin_bp)
+    register_cache_sweep_cli(app)
 
     log_dir = _results_dir()
     handler = logging.FileHandler(os.path.join(log_dir, "app.log"))

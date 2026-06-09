@@ -86,6 +86,8 @@ DB: `dashboard_pdhc_db`. Auth: `AUTH_MODE=off|sso` (off for local dev).
 
 ## 15. Documentation (Rule 25)
 15.a `docs/technical.md` — architecture, data flow, models, env vars, API.
+   See **ObservationCache retention** for the TTL sweep + admin scrub
+   policy (#213, PDL Ch 4 §§ 3-4).
 15.b `docs/user_manual.md` — login, refresh, selecting concepts, reading curves.
 15.c Both updated at the end of every step where behaviour changes.
 

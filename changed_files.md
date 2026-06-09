@@ -178,3 +178,28 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
     column propagation + off-org detection + form rendering + 'admin_override'
     audit row + whitespace-only-justification handling + non-admin path
     + partial overlap (no lift) + no-data case.
+
+- 2026-06-09 (#213 Dashboard PDL #3 — ObservationCache retention + admin scrub):
+  - app/services/cache_retention.py (NEW): `sweep_expired_observations(ttl_hours)`
+    drops rows by `fetched_at`; `scrub_observations(patient_guid?, org_guid?)`
+    requires at least one filter, raises `ValueError` otherwise.
+  - app/routes/admin.py (NEW): `POST /admin/cache/scrub` (SU-only, 403 otherwise,
+    400 when no filter). Writes a `dashboard_audit` row with
+    `event_type='cache_scrub'`, `admin_justification=<reason>`,
+    `n_rows_returned=<deleted_count>`, `payload_snapshot={patient_guid, org_guid,
+    reason, deleted_count}`. Also registers the `flask cache-sweep
+    [--ttl-hours N] [--dry-run]` CLI.
+  - app/services/audit.py: `_write_audit_row` now also honours
+    `g._audit_payload_snapshot` (JSONB blob override) and
+    `g._audit_patient_guid` (so body-driven routes like the scrub
+    can override the URL-derived patient).
+  - app/__init__.py: new config `OBSERVATION_CACHE_TTL_HOURS` (default 48
+    hours, env-overridable); registers admin blueprint + CLI.
+  - docs/technical.md: new "ObservationCache retention" section
+    (cron snippet + endpoint shape), new endpoint row, new env var row.
+  - readme.md: §15.a cross-link to the retention section.
+  - app/tests/test_cache_retention.py (NEW, 14 tests): sweep TTL-clamp +
+    rollback; scrub filter requirement + patient/org/both predicates +
+    rollback; admin route 403/400/200/500 + audit-row shape (event_type,
+    patient_guid override, payload_snapshot, n_rows, justification);
+    whitespace-only filters treated as missing.
