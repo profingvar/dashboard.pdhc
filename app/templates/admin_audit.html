@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block h1 %}Audit kontroller (PDL Ch 4 § 3){% endblock %}
+{% block content %}
+<div class="card">
+  <p style="margin:0;color:var(--text-muted);font-size:0.92em;">
+    Every patient-data read on this dashboard writes one row here.
+    Filters narrow the view to one operator, one patient, one route,
+    or one event type — useful for the kontroller duty PDL kap. 4 § 3
+    imposes on every v&aring;rdgivare.
+  </p>
+</div>
+
+<div class="card">
+  <form method="get" style="display:grid;grid-template-columns:repeat(3, 1fr);gap:0.6rem;">
+    <label style="font-size:0.9em;">From (UTC)
+      <input type="text" name="from" value="{{ filters['from'] }}"
+             placeholder="2026-06-01T00:00:00Z" style="width:100%;">
+    </label>
+    <label style="font-size:0.9em;">To (UTC)
+      <input type="text" name="to" value="{{ filters['to'] }}"
+             placeholder="2026-06-09T00:00:00Z" style="width:100%;">
+    </label>
+    <label style="font-size:0.9em;">Event type
+      <select name="event_type" style="width:100%;">
+        <option value="">(any)</option>
+        {% for opt in ['read', 'admin_override_required', 'admin_override',
+                        'cache_scrub', 'research_export',
+                        'admin_audit_view', 'admin_audit_export'] %}
+          <option value="{{ opt }}"
+                  {% if filters['event_type'] == opt %}selected{% endif %}>
+            {{ opt }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:0.9em;">User guid
+      <input type="text" name="user_guid" value="{{ filters['user_guid'] }}"
+             style="width:100%;font-family:monospace;">
+    </label>
+    <label style="font-size:0.9em;">Patient guid
+      <input type="text" name="patient_guid" value="{{ filters['patient_guid'] }}"
+             style="width:100%;font-family:monospace;">
+    </label>
+    <label style="font-size:0.9em;">Route
+      <input type="text" name="route" value="{{ filters['route'] }}"
+             placeholder="GET /patient/<guid>" style="width:100%;font-family:monospace;">
+    </label>
+    <div style="grid-column:1 / -1;display:flex;gap:0.5rem;justify-content:flex-end;align-items:center;">
+      <span style="color:var(--text-muted);font-size:0.85em;">
+        {{ rows|length }} of {{ total }} matching · page {{ page }}
+      </span>
+      <button type="submit" class="btn btn-primary btn-sm">Apply filter</button>
+      <a href="{{ url_for('admin.audit_view') }}" class="btn btn-sm">Reset</a>
+      <a class="btn btn-sm"
+         href="{{ url_for('admin.audit_export_csv') }}?{{ request.query_string.decode() }}">
+        Download CSV
+      </a>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="overflow-x:auto;">
+  <table style="width:100%;border-collapse:collapse;font-size:0.86em;">
+    <thead>
+      <tr style="background:rgba(0,0,0,0.04);text-align:left;">
+        <th style="padding:0.4rem;">Timestamp (UTC)</th>
+        <th style="padding:0.4rem;">Event</th>
+        <th style="padding:0.4rem;">Route</th>
+        <th style="padding:0.4rem;">User</th>
+        <th style="padding:0.4rem;">Patient</th>
+        <th style="padding:0.4rem;">Rows</th>
+        <th style="padding:0.4rem;">Status</th>
+        <th style="padding:0.4rem;">Justification / detail</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:0.4rem;font-family:monospace;font-size:0.84em;white-space:nowrap;">
+          {{ r['timestamp'] or '' }}
+        </td>
+        <td style="padding:0.4rem;">
+          <span style="
+            font-size:0.78em;
+            padding:0.1rem 0.4rem;
+            border-radius:3px;
+            background:
+              {% if r['event_type'].startswith('admin_override') %}#fee9c8
+              {% elif r['event_type'] == 'cache_scrub' %}#ffe2e2
+              {% elif r['event_type'] == 'research_export' %}#dbeafe
+              {% else %}#e5e7eb{% endif %};
+            color:#444;">
+            {{ r['event_type'] }}
+          </span>
+        </td>
+        <td style="padding:0.4rem;font-family:monospace;font-size:0.84em;">
+          {{ r['route'] }}
+        </td>
+        <td style="padding:0.4rem;font-family:monospace;font-size:0.82em;">
+          {{ (r['user_guid'] or '')[:13] }}{% if r['user_guid'] and r['user_guid']|length > 13 %}…{% endif %}
+        </td>
+        <td style="padding:0.4rem;font-family:monospace;font-size:0.82em;">
+          {{ (r['patient_guid'] or '')[:13] }}{% if r['patient_guid'] and r['patient_guid']|length > 13 %}…{% endif %}
+        </td>
+        <td style="padding:0.4rem;text-align:right;">
+          {{ r['n_rows_returned'] if r['n_rows_returned'] is not none else '' }}
+        </td>
+        <td style="padding:0.4rem;text-align:right;">{{ r['response_status'] }}</td>
+        <td style="padding:0.4rem;">
+          {% if r['admin_justification'] %}
+            <div style="white-space:pre-wrap;font-size:0.86em;">{{ r['admin_justification'] }}</div>
+          {% endif %}
+          {% if r['payload_snapshot'] %}
+            <details style="margin-top:0.2rem;">
+              <summary style="font-size:0.8em;color:var(--text-muted);cursor:pointer;">payload</summary>
+              <pre style="font-size:0.78em;margin:0.2rem 0 0;padding:0.3rem;background:rgba(0,0,0,0.03);border-radius:4px;overflow-x:auto;">{{ r['payload_snapshot']|tojson(indent=2) }}</pre>
+            </details>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not rows %}
+    <p style="padding:0.6rem 0;color:var(--text-muted);font-size:0.9em;">No matching audit rows.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+  <span style="font-size:0.85em;color:var(--text-muted);">
+    Page {{ page }} · {{ page_size }} rows/page · {{ total }} matching
+  </span>
+  <div style="display:flex;gap:0.4rem;">
+    {% if page > 1 %}
+      {% set prev_qs = request.args.to_dict() %}
+      {% set _ = prev_qs.update({'page': page - 1}) %}
+      <a class="btn btn-sm"
+         href="{{ url_for('admin.audit_view', **prev_qs) }}">← Prev</a>
+    {% endif %}
+    {% if page * page_size < total %}
+      {% set next_qs = request.args.to_dict() %}
+      {% set _ = next_qs.update({'page': page + 1}) %}
+      <a class="btn btn-sm"
+         href="{{ url_for('admin.audit_view', **next_qs) }}">Next →</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

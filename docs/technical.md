@@ -114,6 +114,8 @@ The retention policy has two parts:
 | `/refresh` | POST | pull observations from gateway for user's orgs |
 | `/api/v1/series?patient&concept` | GET | FHIR Bundle of Observations |
 | `/admin/cache/scrub` | POST | SU-only: drop ObservationCache rows by patient/org (#213) |
+| `/admin/audit` | GET | SU-only: browse `dashboard_audit` rows with filters + pagination (#215) |
+| `/admin/audit/export.csv` | GET | SU-only: CSV export of the filtered set (cap 50000 rows) (#215) |
 
 ## Running locally
 ```

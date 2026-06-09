@@ -203,3 +203,20 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
     rollback; admin route 403/400/200/500 + audit-row shape (event_type,
     patient_guid override, payload_snapshot, n_rows, justification);
     whitespace-only filters treated as missing.
+
+- 2026-06-09 (#215 Dashboard PDL #5 — /admin/audit operator view):
+  - app/routes/admin.py: added `GET /admin/audit` (SU-only, 403 otherwise)
+    with date-range + user_guid + patient_guid + route + event_type
+    filters, 100-row pages; and `GET /admin/audit/export.csv` (SU-only,
+    50k-row cap, JSON-encodes list/dict cells). Each emits its own
+    `dashboard_audit` row with `event_type='admin_audit_view'` /
+    `'admin_audit_export'` so audit-of-the-audit is itself searchable.
+  - app/templates/admin_audit.html (NEW): filter form + table + pager.
+    Coloured badges per event_type, payload_snapshot in <details>,
+    Swedish-first kontroll framing.
+  - docs/technical.md: two new endpoint rows.
+  - app/tests/test_admin_audit_view.py (NEW, 12 tests): SU-auth (view +
+    export), filter construction (blank → no predicates, all six →
+    six predicates, unparseable date → skipped, whitespace → skipped),
+    pagination clamp, row rendering, audit-of-audit row shape, CSV
+    header + content + filter-preserved payload + JSON-encoded cells.
