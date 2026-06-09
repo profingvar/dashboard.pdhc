@@ -80,6 +80,14 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
         override = getattr(g, "_audit_n_rows", None)
         if override is not None:
             n_rows = int(override)
+        # Ticket #212: routes signal admin-override status via
+        # g._audit_event_type ('admin_override' | 'admin_override_required')
+        # and g._audit_admin_justification. Untouched by every other route
+        # so the column stays at the 'read' default.
+        event_type = getattr(g, "_audit_event_type", None) or "read"
+        admin_justification = getattr(
+            g, "_audit_admin_justification", None,
+        )
 
         row = DashboardAudit(
             user_guid=user_guid,
@@ -89,6 +97,8 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
             n_rows_returned=n_rows,
             response_status=int(status),
             session_id=session_id,
+            event_type=event_type,
+            admin_justification=admin_justification,
         )
         db.session.add(row)
         db.session.commit()

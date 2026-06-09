@@ -103,6 +103,21 @@ class DashboardAudit(db.Model):
     # nullable for every other route so the existing @audit_read
     # decorator stays unaffected.
     payload_snapshot = db.Column(JSONB, nullable=True)
+    # Ticket #212: SU-admin off-org reads become an explicit, audited
+    # lift instead of a silent bypass.
+    #   event_type: 'read' (default) | 'admin_override_required' (admin
+    #     tried to view a patient outside their orgs without a
+    #     justification — the view rendered the confirmation form, no
+    #     patient data leaked) | 'admin_override' (admin proceeded with
+    #     a justification).
+    #   admin_justification: verbatim text the admin entered; NULL for
+    #     every non-override row. Immutable once written (no UPDATE
+    #     path in any audit code).
+    event_type = db.Column(
+        db.String(32), nullable=False, default="read",
+        server_default="read", index=True,
+    )
+    admin_justification = db.Column(db.Text, nullable=True)
 
 
 class Cohort(db.Model):

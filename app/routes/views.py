@@ -73,9 +73,55 @@ def landing():
 @bp.get("/patient/<guid>")
 @audit_read
 def patient(guid):
-    user_orgs = org_guids_for(g.current_user)
+    user = g.current_user
+    user_orgs = list(getattr(user, "org_ids", []) or [])
+    is_admin = bool(getattr(user, "is_admin", False))
+
+    # Ticket #212. PDL Ch 4 §1 — no exception to need-to-know without an
+    # explicit reason + audit trail. An SU admin reading a patient whose
+    # data lives outside their own ``organization_ids`` used to silently
+    # bypass the org filter. Now they must supply a written
+    # justification, and a distinct audit-row shape records it verbatim.
+    if is_admin:
+        patient_orgs = {
+            row[0] for row in (
+                db.session.query(ObservationCache.org_guid)
+                .filter_by(patient_guid=guid)
+                .distinct()
+                .all()
+            )
+            if row[0] is not None
+        }
+        # No overlap means the admin would have seen zero rows under the
+        # normal in-org rule — that's the "off-org read" the lift covers.
+        admin_off_org = bool(
+            patient_orgs and not (patient_orgs & set(user_orgs))
+        )
+    else:
+        patient_orgs = set()
+        admin_off_org = False
+
+    justification = (request.args.get("justification") or "").strip()
+
+    if admin_off_org and not justification:
+        # Confirmation step: render the lift form, log the attempt, do
+        # NOT touch the patient's data. The audit row's event_type
+        # records that an attempt happened so /admin/audit (#215) can
+        # show off-org-read attempts even when no justification was
+        # ever supplied.
+        g._audit_event_type = "admin_override_required"
+        g._audit_n_rows = 0
+        return render_template(
+            "admin_override_required.html",
+            patient_guid=guid,
+        )
+
+    if admin_off_org and justification:
+        g._audit_event_type = "admin_override"
+        g._audit_admin_justification = justification
+
     q = ObservationCache.query.filter_by(patient_guid=guid)
-    if not g.current_user.is_admin:
+    if not is_admin:
         if not user_orgs:
             abort(403)
         q = q.filter(ObservationCache.org_guid.in_(user_orgs))

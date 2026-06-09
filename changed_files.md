@@ -155,3 +155,26 @@ restart (start.sh failed at the docker-context check because the
 mac-side colima socket forward is broken right now; the dashboard
 app itself talks to its DB on `localhost:9026`, no docker call
 needed). Verified `https://dashboard.pdhc.se/healthz` 200.
+
+- 2026-06-09 (#212 Dashboard PDL #2 — admin off-org bypass becomes audited lift):
+  - app/migrations/versions/2026_06_09_dashboard_audit_admin_override.py (NEW, rev `a8bc21200001` ← `e21404aa01`):
+    adds `event_type VARCHAR(32) NOT NULL DEFAULT 'read'` + index +
+    `admin_justification TEXT NULL` to `dashboard_audit`.
+  - app/models/__init__.py: DashboardAudit gains `event_type` and `admin_justification` columns.
+  - app/services/audit.py: `_write_audit_row` reads `g._audit_event_type` /
+    `g._audit_admin_justification` (set by the patient view); defaults to `read` / NULL.
+  - app/routes/views.py: `/patient/<guid>` detects off-org admin reads
+    (admin's `organization_ids` does not overlap the patient's distinct
+    `org_guid` set in ObservationCache), gates them behind a written
+    justification, and emits a distinct audit-row shape:
+      * `event_type='admin_override_required'` when admin off-org with no
+        justification (form rendered, no data leaked, n_rows=0)
+      * `event_type='admin_override'` + `admin_justification=<verbatim>`
+        when admin proceeds.
+    Non-admin off-org reads continue to hit the existing 404/empty path.
+  - app/templates/admin_override_required.html (NEW): Swedish-first
+    confirmation form (PDL Ch 4 § 1 / Lag 2022:913 § 2 framing).
+  - app/tests/test_admin_override_audit.py (NEW, 10 tests): decorator
+    column propagation + off-org detection + form rendering + 'admin_override'
+    audit row + whitespace-only-justification handling + non-admin path
+    + partial overlap (no lift) + no-data case.
