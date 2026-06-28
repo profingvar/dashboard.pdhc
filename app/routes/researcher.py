@@ -39,6 +39,7 @@ from app.analyse.federation import (
     fanout,
     merge_histograms,
 )
+from app.analyse.aggregations import aggregate_per_cdr_results
 from app.services.role_guards import researcher_required
 
 
@@ -208,22 +209,29 @@ def cohort_histogram(cohort_id: str, canonical: str):
     buckets = max(1, min(int(request.args.get("buckets", "20")), 100))
     cdr_filter = (cohort["filter"].get("cdr_ids") or [])
 
-    resp = fanout(
+    # Phase 3 of the CDR1/Analyse split (ticket #289). Previously this
+    # called cdr1's Observation/$stats which used Postgres
+    # percentile_cont; that route is now gone. We fetch raw matching
+    # Observations from each CDR and run compute_stats locally before
+    # merging across CDRs.
+    raw = fanout(
         _registry(),
         method="GET",
-        path="api/v1/fhir/Observation/$stats",
+        path="api/v1/fhir/Observation",
         cdr_ids=cdr_filter or None,
-        params={"code": code_arg, "buckets": str(buckets)},
+        params={"code": code_arg, "_count": "10000"},
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
-    merged = merge_histograms(resp.results, buckets=buckets)
+    per_cdr_params = aggregate_per_cdr_results(
+        raw.results, kind="stats", buckets=buckets)
+    merged = merge_histograms(per_cdr_params, buckets=buckets)
     return jsonify({
         "cohort_id": cohort_id,
         "canonical": canonical,
-        "fanout_mode": resp.mode,
-        "succeeded_cdrs": resp.succeeded,
-        "failed_cdrs": resp.failed,
+        "fanout_mode": raw.mode,
+        "succeeded_cdrs": raw.succeeded,
+        "failed_cdrs": raw.failed,
         **merged,
     })
 

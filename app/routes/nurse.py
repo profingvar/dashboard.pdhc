@@ -25,6 +25,7 @@ from app.analyse.federation import (
     lttb_downsample,
     merge_agp_bands,
 )
+from app.analyse.aggregations import aggregate_per_cdr_results
 from app.services.role_guards import nurse_required
 
 
@@ -148,15 +149,18 @@ def patient_summary(guid: str):
 def patient_agp(guid: str):
     """Ambulatory Glucose Profile for one patient.
 
-    Calls the CDR's `Observation/$agp` SQL-aggregation operation
-    instead of streaming raw CGM points back. Per-CDR responses are
-    ~2KB regardless of window size; merge happens in
-    federation.merge_agp_bands.
+    Phase 3 of the CDR1/Analyse split (ticket #289). Previously this
+    route called cdr1's ``Observation/$agp`` SQL-aggregation; that
+    operation has been removed from cdr1 and moved into the analyse
+    layer. We now fetch raw CGM Observations from each federated CDR
+    and run :func:`compute_agp` on each per-CDR result before
+    handing the per-CDR Parameters list to ``merge_agp_bands``.
 
-    Previously this route pulled `_count=30000` of CGM rows back from
-    each CDR, hit the dashboard's 8s CDR_FANOUT_TIMEOUT on the 14-90 d
-    window, and silently returned empty bands. See the cdr.pdhc
-    fhir_read.py _agp_postgres comment for the SQL.
+    Raw fetch path: ``GET /api/v1/fhir/Observation`` with
+    ``_count=30000`` for a 14–90 d CGM window. The fanout timeout
+    accommodates the bigger payload; if pages overflow, the
+    per-CDR aggregation degrades to whatever rows came back (the
+    plan's §6 risk accepts a < 1 s p95 budget regression).
     """
     window = request.args.get("window", "14d")
     days = 14 if window == "14d" else 90
@@ -164,26 +168,28 @@ def patient_agp(guid: str):
 
     auth = _auth_headers()
     cgm_canonical = "https://termbank.pdhc.se/CodeSystem/loinc|41653-7"
-    resp = fanout(
+    raw = fanout(
         _registry(),
         method="GET",
-        path="api/v1/fhir/Observation/$agp",
+        path="api/v1/fhir/Observation",
         params={
             "patient": guid,
             "code": cgm_canonical,
             "date": f"ge{since}",
+            "_count": "30000",
         },
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
+    per_cdr_params = aggregate_per_cdr_results(raw.results, kind="agp")
 
-    merged = merge_agp_bands(resp.results)
+    merged = merge_agp_bands(per_cdr_params)
     return jsonify({
         "guid": guid,
         "window": window,
-        "fanout_mode": resp.mode,
-        "succeeded_cdrs": resp.succeeded,
-        "failed_cdrs": resp.failed,
+        "fanout_mode": raw.mode,
+        "succeeded_cdrs": raw.succeeded,
+        "failed_cdrs": raw.failed,
         **merged,
     })
 
