@@ -105,6 +105,12 @@ def create_app(config=None):
     # #291 — analyse-layer observations search (mirrors cdr1's removed
     # /api/v1/observations endpoint). Gateway's proxy lands here.
     from app.analyse.observations_search import bp as observations_search_bp
+    # #292 — analyse-layer auxiliary endpoints (federated row counts,
+    # canonical-table query, openEHR composition search). Mirrors and
+    # replaces the equivalents that used to live on cdr1.
+    from app.analyse.stats import bp as analyse_stats_bp
+    from app.analyse.canonical import bp as analyse_canonical_bp
+    from app.analyse.openehr import bp as analyse_openehr_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp)
@@ -112,6 +118,9 @@ def create_app(config=None):
     app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
     app.register_blueprint(observations_search_bp)
+    app.register_blueprint(analyse_stats_bp)
+    app.register_blueprint(analyse_canonical_bp)
+    app.register_blueprint(analyse_openehr_bp)
     register_metadata(app)
     register_export_audit_cli(app)
 
