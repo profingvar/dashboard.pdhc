@@ -5,6 +5,17 @@ Read-only dashboard over observations delivered to gateway.pdhc. Local Mac bring
 Ports: 9026 Postgres · 9027 Flask app · 9028/9029 reserved.
 DB: `dashboard_pdhc_db`. Auth: `AUTH_MODE=off|sso` (off for local dev).
 
+## Analyse layer
+
+The internal `app/analyse/` subpackage is the federation +
+aggregation engine: it fans out reads across CDR1–6, merges
+histograms, computes AGP bands, and is the sole reader of CDR2–6
+per the cdr1-analyse-split plan. The nurse and researcher routes
+consume this package; the HTML views still pull cached values
+from `gateway.pdhc`. The narrowing is tracked in
+`~/T7_sidewinder/plans/cdr1_analyse_split_plan.md` (tickets
+#287–#293).
+
 ---
 
 ## 1. Repo scaffolding

@@ -32,8 +32,8 @@ from flask import (
 
 from app.models import db, Cohort, DashboardAudit
 from app.services.audit import audit_read
-from app.services.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
-from app.services.federation import (
+from app.analyse.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
+from app.analyse.federation import (
     CdrRegistry,
     concat_series,
     fanout,
@@ -274,7 +274,7 @@ def cohort_boxplot(cohort_id: str, canonical: str):
         vals_sorted = sorted(vals)
         if not vals_sorted:
             continue
-        from app.services.federation import _percentile  # reuse
+        from app.analyse.federation import _percentile  # reuse
         summary.append({
             "group": label,
             "n": len(vals_sorted),
@@ -360,7 +360,7 @@ def cohort_trend(cohort_id: str):
         month = eff[:7]  # YYYY-MM
         by_month[month].append(float(val))
 
-    from app.services.federation import _percentile
+    from app.analyse.federation import _percentile
     series = []
     for month in sorted(by_month.keys()):
         vals = sorted(by_month[month])

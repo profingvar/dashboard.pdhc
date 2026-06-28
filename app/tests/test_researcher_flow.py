@@ -128,7 +128,7 @@ def test_define_cohort_returns_id_and_count(app, admin_client):
                             "subject": {"reference": "Patient/p3"}}},
          ]}),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes)):
         resp = admin_client.post(
             "/api/cohort",
@@ -154,7 +154,7 @@ def test_cohort_histogram_merges_two_cdrs(app, admin_client):
         (lambda m, u, p, j: "/api/v1/fhir/Patient" in u,
          {"entry": [{"resource": _mk_patient("p1")}]}),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_define)):
         resp = admin_client.post(
             "/api/cohort",
@@ -171,7 +171,7 @@ def test_cohort_histogram_merges_two_cdrs(app, admin_client):
         (lambda m, u, p, j: "$stats" in u and "cdr1" in u, a),
         (lambda m, u, p, j: "$stats" in u and "cdr2" in u, b),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_hist)):
         h = admin_client.get(
             f"/api/cohort/{cohort_id}/variable/"
@@ -190,7 +190,7 @@ def test_cohort_export_csv_has_expected_header(app, admin_client):
          {"entry": [{"resource": _mk_patient("p1")},
                      {"resource": _mk_patient("p2")}]}),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_define)):
         resp = admin_client.post(
             "/api/cohort",
@@ -207,7 +207,7 @@ def test_cohort_export_csv_has_expected_header(app, admin_client):
              {"resource": _mk_obs("p99", "4548-4", 9.5)},
          ]}),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_export)):
         r = admin_client.get(
             f"/api/cohort/{cohort_id}/export"
@@ -237,7 +237,7 @@ def test_scatter_truncates_above_cap(app, admin_client):
         (lambda m, u, p, j: "/api/v1/fhir/Patient" in u,
          {"entry": pat_entries}),
     ]
-    with patch("app.services.federation.requests.request",
+    with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_define)):
         resp = admin_client.post(
             "/api/cohort",
@@ -266,7 +266,7 @@ def test_scatter_truncates_above_cap(app, admin_client):
             return _FakeResp(200, _resp(method, url, params or {}, json or {}))
         return _FakeResp(404, {})
 
-    with patch("app.services.federation.requests.request", side_effect=_req_disp):
+    with patch("app.analyse.federation.requests.request", side_effect=_req_disp):
         r = admin_client.get(
             f"/api/cohort/{cohort_id}/scatter"
             "?x=https://termbank.pdhc.se/CodeSystem/loinc/4548-4"

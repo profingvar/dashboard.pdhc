@@ -18,7 +18,7 @@ from typing import Any
 from flask import Blueprint, abort, current_app, g, jsonify, request
 
 from app.services.audit import audit_read
-from app.services.federation import (
+from app.analyse.federation import (
     CdrRegistry,
     agp_hourly_bands,
     fanout,
