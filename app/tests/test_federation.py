@@ -17,12 +17,12 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.cohort import (
+from app.analyse.cohort import (
     CohortFilter,
     intersect_patient_sets,
     to_predicate_searches,
 )
-from app.services.federation import (
+from app.analyse.federation import (
     CdrEndpoint,
     CdrRegistry,
     agp_hourly_bands,
@@ -107,7 +107,7 @@ def test_fanout_complete_when_all_ok():
     def _req(method, url, params=None, json=None, headers=None, timeout=None):
         return _FakeResp(200, {"ok": True})
 
-    with patch("app.services.federation.requests.request", side_effect=_req):
+    with patch("app.analyse.federation.requests.request", side_effect=_req):
         r = fanout(reg, path="x")
     assert r.mode == "complete"
     assert len(r.succeeded) == 5
@@ -120,7 +120,7 @@ def test_fanout_degraded_with_minority_failures():
     def _req(method, url, params=None, json=None, headers=None, timeout=None):
         return _FakeResp(503 if "cdr2" in url else 200, {"ok": True})
 
-    with patch("app.services.federation.requests.request", side_effect=_req):
+    with patch("app.analyse.federation.requests.request", side_effect=_req):
         r = fanout(reg, path="x")
     assert r.mode == "degraded"
     assert "cdr2" in r.failed
@@ -135,7 +135,7 @@ def test_fanout_error_when_majority_fails():
             return _FakeResp(503, {})
         return _FakeResp(200, {"ok": True})
 
-    with patch("app.services.federation.requests.request", side_effect=_req):
+    with patch("app.analyse.federation.requests.request", side_effect=_req):
         r = fanout(reg, path="x")
     assert r.mode == "error"
     assert len(r.failed) == 3
@@ -149,7 +149,7 @@ def test_fanout_passes_org_and_admin_headers():
         captured.update(headers or {})
         return _FakeResp(200, {"ok": True})
 
-    with patch("app.services.federation.requests.request", side_effect=_req):
+    with patch("app.analyse.federation.requests.request", side_effect=_req):
         fanout(reg, path="x", org_guids_header="org-1,org-2", is_admin_header=True,
                bearer_token="abc")
     assert captured.get("X-Org-Guids") == "org-1,org-2"
@@ -179,7 +179,7 @@ def _stats_body(*, n, mean, sd, mn, mx, hist: list[tuple[float, float, int]]) ->
 
 
 def _fake_result(cdr_id, body, *, ok=True):
-    from app.services.federation import FanoutResult
+    from app.analyse.federation import FanoutResult
     return FanoutResult(
         cdr_id=cdr_id, base_url=f"http://{cdr_id}", region_label=cdr_id,
         ok=ok, status_code=200 if ok else 503, body=body, elapsed_ms=10,

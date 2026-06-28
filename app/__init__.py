@@ -35,7 +35,7 @@ def create_app(config=None):
         "MONITOR_PDHC_SERVICE_KEY",
         os.environ.get("MONITOR_PDHC_SERVICE_KEY", ""),
     )
-    # CDR endpoints + outbound key (used by services/federation.py).
+    # CDR endpoints + outbound key (used by analyse/federation.py).
     # Env shape is a comma-separated URL list (e.g. "https://cdr2.pdhc.se,
     # https://cdr3.pdhc.se,..."). The federation expects dicts with
     # cdr_id + base_url, so parse the cdr<N> shortname out of each
