@@ -35,6 +35,13 @@ def create_app(config=None):
         "MONITOR_PDHC_SERVICE_KEY",
         os.environ.get("MONITOR_PDHC_SERVICE_KEY", ""),
     )
+    # Ticket #291 — gateway.pdhc calls dashboard's /api/v1/observations
+    # search via X-Source-Service: gateway.pdhc + X-Service-Key. The
+    # operator copies the matching value from gateway's .env.
+    app.config.setdefault(
+        "GATEWAY_PDHC_SERVICE_KEY",
+        os.environ.get("GATEWAY_PDHC_SERVICE_KEY", ""),
+    )
     # CDR endpoints + outbound key (used by analyse/federation.py).
     # Env shape is a comma-separated URL list (e.g. "https://cdr2.pdhc.se,
     # https://cdr3.pdhc.se,..."). The federation expects dicts with
@@ -95,12 +102,16 @@ def create_app(config=None):
         register_export_audit_cli,
     )
     from app.routes.workspace import bp as workspace_bp
+    # #291 — analyse-layer observations search (mirrors cdr1's removed
+    # /api/v1/observations endpoint). Gateway's proxy lands here.
+    from app.analyse.observations_search import bp as observations_search_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(nurse_bp)
     app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
+    app.register_blueprint(observations_search_bp)
     register_metadata(app)
     register_export_audit_cli(app)
 

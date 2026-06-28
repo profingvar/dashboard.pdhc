@@ -134,8 +134,11 @@ def _public_path(path: str) -> bool:
 
 # Service-key auth: trusted sibling tools (perf benchmarks, monitoring,
 # CI smoke tests) may call dashboard APIs without an SSO session.
+# Ticket #291: gateway.pdhc joins as the analyse-pull caller — its
+# /api/v1/observations proxy now lands here instead of cdr1.
 KNOWN_SERVICES = {
     "monitor.pdhc": "MONITOR_PDHC_SERVICE_KEY",
+    "gateway.pdhc": "GATEWAY_PDHC_SERVICE_KEY",
 }
 
 
