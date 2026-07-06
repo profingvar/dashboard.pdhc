@@ -39,10 +39,12 @@ def _registry() -> CdrRegistry:
 
 
 def _auth_headers() -> dict:
+    from app.auth import scope_org_guids  # M0 #415
     blob = getattr(g, "access_blob", None) or {}
     if isinstance(blob, dict):
         is_admin = bool(blob.get("is_su_admin"))
-        org_ids = blob.get("organization_ids") or []
+        # Zone-1 scope from affiliations[] (dual-read fallback), shared helper.
+        org_ids = scope_org_guids(blob)
     else:
         is_admin = bool(getattr(blob, "is_su_admin", False))
         org_ids = getattr(blob, "organization_ids", None) or []

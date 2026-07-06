@@ -220,3 +220,13 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
     six predicates, unparseable date → skipped, whitespace → skipped),
     pagination clamp, row rendering, audit-of-audit row shape, CSV
     header + content + filter-preserved payload + JSON-encoded cells.
+
+## 2026-07-06 — M0 #415 (partial): affiliations[] Zone-1 scope + session_phases
+- app/auth.py — scope_org_guids() (affiliations[].care_unit_guid, dual-read
+  fallback) wired into _blob_to_user.org_ids; _phases() (session_phases w/
+  fallback) into has_analysis_access.
+- app/routes/nurse.py — _auth_headers() uses scope_org_guids(blob).
+- app/tests/test_reform_scope.py — NEW, 8 tests.
+- DEFERRED (ticket stays open): drop synthetic roles[] service-key hack;
+  EHDS opt-out + research-consent joins on federated reads (analysis
+  enforcement, overlaps #422). Note: test_auth.py has 6 PRE-EXISTING failures.
