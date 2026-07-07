@@ -2,10 +2,36 @@
 import os
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import patch
+import pytest
 from app import create_app
 from app.models import db, User, ObservationCache
 from app.auth import scope_to_user_orgs, has_analysis_access, _blob_to_user
 from flask import g
+from flask import session as flask_session
+
+
+@pytest.fixture(autouse=True)
+def _echo_revalidation():
+    """Ticket #435 (analog of gateway.pdhc #424). The SSO request loader
+    (``app.auth`` line ~247) re-validates the bearer token against SSO on
+    *every* request (no caching, so an SSO-side logout takes effect
+    immediately). That means a directly-set ``session['access_blob']`` is
+    not trusted on its own — the re-validation call to the unreachable test
+    SSO returns None and the loader 302-redirects before the phase gate.
+    Patch ``app.auth.validate_sso_token`` to echo back whatever blob the
+    test 'logged in' via ``_login_as`` (stored in the session), simulating a
+    successful re-validation. Tests that exercise the no-token path
+    (``test_sso_unauth_redirects_to_login``) are unaffected: the loader
+    returns before calling ``validate_sso_token``.
+    """
+    def _echo(_token):
+        try:
+            return flask_session.get("access_blob")
+        except RuntimeError:  # outside a request context
+            return None
+    with patch("app.auth.validate_sso_token", side_effect=_echo):
+        yield
 
 
 def _app(auth_mode="off"):
@@ -86,14 +112,21 @@ def test_sso_unauth_redirects_to_login():
 def test_sso_authed_session_passes_phase_gate():
     app = _app("sso")
     c = app.test_client()
+    uid = str(uuid.uuid4())
     blob = {
-        "user_guid": str(uuid.uuid4()),
+        "user_guid": uid,
         "email": "u@example.com",
         "user_type": "professional",
         "is_su_admin": False,
         "effective_phases": ["analysis"],
         "organization_ids": [str(uuid.uuid4())],
     }
+    # Seed the User the blob refers to — the analysis dashboard "/" records a
+    # refresh_log row FK'd to users.guid, which otherwise FK-violates (ticket
+    # #435: separate from the revalidation-mock fix, needed for a green 200).
+    with app.app_context():
+        db.session.add(User(guid=uid, username="u@example.com", is_admin=False, is_su=False))
+        db.session.commit()
     _login_as(c, blob)
     r = c.get("/")
     assert r.status_code == 200
