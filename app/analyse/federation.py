@@ -178,6 +178,11 @@ def fanout(
         headers["X-Org-Guids"] = org_guids_header
     if is_admin_header:
         headers["X-Is-Admin"] = "1"
+    # X2 (#423): forward the operator session onto every federated CDR read.
+    # Resolved HERE in the request thread — the ThreadPoolExecutor workers
+    # below have no Flask request context.
+    from app.services.session_headers import outbound_session_headers
+    headers.update(outbound_session_headers())
     if extra_headers:
         headers.update(extra_headers)
 

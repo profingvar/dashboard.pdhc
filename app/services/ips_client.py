@@ -91,11 +91,13 @@ class IpsClient:
         self.timeout = timeout
 
     def _headers(self) -> dict:
+        from app.services.session_headers import outbound_session_headers
         h = {"Accept": "application/json"}
         if self.token:
             h["Authorization"] = f"Bearer {self.token}"
         if self.service_key:
             h["X-Service-Key"] = self.service_key
+        h.update(outbound_session_headers())
         return h
 
     def fetch_active_blocks(self, patient_guid: str) -> list[Block]:

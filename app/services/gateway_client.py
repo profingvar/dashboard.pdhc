@@ -45,9 +45,11 @@ class GatewayClient:
         self.timeout = timeout
 
     def _headers(self):
+        from app.services.session_headers import outbound_session_headers
         return {
             "Accept": "application/fhir+json",
             "Authorization": f"Bearer {self.token}",
+            **outbound_session_headers(),
         }
 
     def fetch_observations(self, org_guid: str) -> list[dict]:
