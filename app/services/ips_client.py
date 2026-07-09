@@ -40,6 +40,16 @@ DEFAULT_TTL_SECONDS = 30  # legal 2026-06-04
 DEFAULT_TIMEOUT = 4.0
 
 
+class IpsUnreachable(Exception):
+    """ips.pdhc could not answer a consent question on this attempt.
+
+    Raised (never swallowed) by the analysis-filter path so research
+    reads FAIL CLOSED: without ips's verdict the dashboard must not
+    return patient data for secondary-use purposes (#415/#422). The
+    block-fetch path keeps its historical fail-open-with-banner
+    behaviour — blocks compose with org scoping, consent does not."""
+
+
 @dataclass(frozen=True)
 class Block:
     """Subset of PatientBlock we care about for filtering + banner."""
@@ -127,6 +137,46 @@ class IpsClient:
         payload = r.json() or {}
         raw = payload.get("blocks") or payload.get("entry") or []
         return [Block.from_dict(b) for b in raw if isinstance(b, dict)]
+
+    def analysis_filter(
+        self,
+        patient_guids: list,
+        purpose: str,
+        research_project_guids: list | None = None,
+    ) -> dict:
+        """POST /api/v1/patients/analysis-filter (#415/#422) — ips is the
+        single legal source of truth for ehds_opt_out /
+        consented_research_projects / quality_registry_opt_out (D1 #404).
+
+        Returns the verdict dict ``{"allowed": [...], "excluded":
+        [{"patient_guid", "reason"}, ...]}``. Raises ``IpsUnreachable`` on
+        any network error or non-200 so secondary-use reads fail closed.
+        Never cached: consent revocation must bite immediately."""
+        if not patient_guids:
+            return {"allowed": [], "excluded": []}
+        if not self.base_url:
+            raise IpsUnreachable("IPS_BASE_URL not configured")
+        url = f"{self.base_url}/api/v1/patients/analysis-filter"
+        try:
+            r = requests.post(
+                url,
+                json={
+                    "patient_guids": list(patient_guids),
+                    "purpose": purpose,
+                    "research_project_guids": list(research_project_guids or []),
+                },
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+        except requests.RequestException as e:
+            raise IpsUnreachable(f"analysis-filter network error: {e}") from e
+        if r.status_code != 200:
+            raise IpsUnreachable(f"analysis-filter returned {r.status_code}")
+        body = r.json() or {}
+        return {
+            "allowed": list(body.get("allowed") or []),
+            "excluded": list(body.get("excluded") or []),
+        }
 
 
 # ---------------------------------------------------------------------------

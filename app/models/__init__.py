@@ -1,7 +1,13 @@
 import uuid
 from datetime import datetime, timezone
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import JSON, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB as _PG_JSONB
+
+# Dialect-aware JSON: JSONB on Postgres (production — unchanged, no
+# migration), plain JSON on SQLite so the hermetic test suite can
+# create_all() (#415; same pattern as cdr_app/app/models/resources.py).
+JSONB = JSON().with_variant(_PG_JSONB(astext_type=Text()), "postgresql")
 
 db = SQLAlchemy()
 

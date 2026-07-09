@@ -23,7 +23,12 @@ from flask import abort, g
 
 
 def _roles() -> set[str]:
-    """Read the caller's roles. Returns ``set()`` if no blob is loaded."""
+    """Read the caller's roles. Returns ``set()`` if no blob is loaded.
+
+    M0 #415: roles derive from affiliations[].role (the reform-canonical
+    source — one role per active affiliation), with a dual-read fallback
+    to the legacy flat roles[] for pre-reform tokens. Service-key callers
+    carry neither, so every role guard denies them by construction."""
     blob = getattr(g, "access_blob", None) or {}
     if not isinstance(blob, dict):
         # When AUTH_MODE=off the blob is a dataclass-shaped namespace; both
@@ -32,6 +37,9 @@ def _roles() -> set[str]:
         if isinstance(roles, (list, tuple, set)):
             return {str(r) for r in roles}
         return set()
+    affs = blob.get("affiliations") or []
+    if affs:
+        return {str(a["role"]).lower() for a in affs if a.get("role")}
     roles = blob.get("roles") or []
     if isinstance(roles, str):
         roles = [roles]

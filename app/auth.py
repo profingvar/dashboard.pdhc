@@ -75,6 +75,22 @@ def scope_org_guids(blob: dict) -> list:
     return list(blob.get("organization_ids") or [])
 
 
+def research_project_guids(blob: dict) -> list:
+    """Reader-side research scope (M0 #415): the union of
+    research_project_guids across the caller's affiliations, order-preserving.
+    Only researcher affiliations carry projects (S9/#400), so no role filter
+    is applied here. Intersected against the patient's
+    consented_research_projects by ips's analysis-filter — never locally."""
+    seen: set = set()
+    out: list = []
+    for a in blob.get("affiliations") or []:
+        for guid in a.get("research_project_guids") or []:
+            if guid not in seen:
+                seen.add(guid)
+                out.append(guid)
+    return out
+
+
 def has_analysis_access(blob: Optional[dict]) -> bool:
     if not blob:
         return False
@@ -180,37 +196,24 @@ def _service_key_outcome(app):
 
 
 def _service_blob(source_service: str) -> dict:
-    """Synthetic SU blob for service-key callers — admin + both clinical
-    roles so federation/researcher/nurse routes all pass.
+    """Machine identity for service-key callers (M0 #415).
 
-    For E2E tests that need to assert role-based denial, the request
-    can carry ``X-Test-Roles: nurse`` (or comma-separated) which both
-    drops ``is_su_admin`` and replaces the role list. Only applied
-    when the service-key path is the chosen auth — never on real SSO
-    sessions."""
-    test_roles = request.headers.get("X-Test-Roles", "").strip()
-    if test_roles:
-        projected = [r.strip() for r in test_roles.split(",") if r.strip()]
-        return {
-            "user_guid": f"00000000-0000-0000-0000-service-{source_service[:8]}",
-            "email": f"service:{source_service}:test={test_roles}",
-            "display_name": f"service:{source_service}",
-            "user_type": "service",
-            "is_su_admin": False,
-            "roles": projected,
-            "effective_phases": ["analysis"],
-            "organization_ids": [],
-            "service_source": source_service,
-        }
+    Pre-reform this was a synthetic SU blob with roles=[nurse, researcher,
+    admin] so any route would pass — a stopgap the reform removes. Service
+    callers now carry NO clinical roles and NO admin bit: they can only
+    reach the analyse-layer service endpoints, which gate on
+    ``service_source`` explicitly (observations_search / stats / canonical,
+    #291/#292). Clinical UI routes (nurse/researcher/admin guards) require
+    a real operator session with affiliations[]."""
     return {
         "user_guid": f"00000000-0000-0000-0000-service-{source_service[:8]}",
         "email": f"service:{source_service}",
         "display_name": f"service:{source_service}",
         "user_type": "service",
-        "is_su_admin": True,
-        "roles": ["nurse", "researcher", "admin"],
-        "effective_phases": ["analysis", "ingestion"],
+        "is_su_admin": False,
+        "session_phases": ["analysis"],
         "organization_ids": [],
+        "affiliations": [],
         "service_source": source_service,
     }
 

@@ -30,8 +30,10 @@ from flask import (
     Blueprint, Response, abort, current_app, g, jsonify, request, stream_with_context,
 )
 
+from app.auth import research_project_guids, scope_org_guids
 from app.models import db, Cohort, DashboardAudit
 from app.services.audit import audit_read
+from app.services.ips_client import IpsUnreachable, _default_client as _ips_client
 from app.analyse.cohort import CohortFilter, intersect_patient_sets, to_predicate_searches
 from app.analyse.federation import (
     CdrRegistry,
@@ -60,7 +62,9 @@ def _auth_headers() -> dict:
     blob = getattr(g, "access_blob", None) or {}
     if isinstance(blob, dict):
         is_admin = bool(blob.get("is_su_admin"))
-        org_ids = blob.get("organization_ids") or []
+        # M0 #415: Zone-1 scope from affiliations[] (dual-read fallback to
+        # organization_ids) — same derivation as nurse.py / app.auth.
+        org_ids = scope_org_guids(blob)
     else:
         is_admin = bool(getattr(blob, "is_su_admin", False))
         org_ids = getattr(blob, "organization_ids", None) or []
@@ -131,7 +135,39 @@ def _resolve_members(filt: CohortFilter) -> tuple[set[str], dict]:
             "fanout_mode": resp.mode,
         })
     members = intersect_patient_sets(per_predicate_sets) if per_predicate_sets else set()
+    members, consent_summary = _apply_research_consent(members)
+    summary["consent"] = consent_summary
     return members, summary
+
+
+def _apply_research_consent(members: set[str]) -> tuple[set[str], dict]:
+    """EHDS opt-out + per-project research-consent join (#415/#422).
+
+    Every cohort member set passes through ips's analysis-filter with
+    purpose=research before it is persisted or aggregated — ips owns the
+    consent flags (D1 #404), so the verdict is never computed locally.
+    ips unreachable → 503, fail closed: no verdict, no research read."""
+    if not members:
+        return members, {"checked": 0, "excluded": 0, "reasons": {}}
+    blob = getattr(g, "access_blob", None) or {}
+    projects = research_project_guids(blob) if isinstance(blob, dict) else []
+    try:
+        verdict = _ips_client().analysis_filter(
+            sorted(members), "research", projects)
+    except IpsUnreachable as e:
+        current_app.logger.error("analysis-filter unavailable: %s", e)
+        abort(503, description=(
+            "consent filter (ips.pdhc) unavailable — research reads fail closed"))
+    allowed = set(verdict["allowed"])
+    reasons: dict[str, int] = {}
+    for ex in verdict["excluded"]:
+        reason = (ex or {}).get("reason", "unknown")
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return members & allowed, {
+        "checked": len(members),
+        "excluded": len(members) - len(members & allowed),
+        "reasons": reasons,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -182,10 +218,22 @@ def list_cohorts():
 
 
 def _get_cohort_or_404(cohort_id: str) -> dict:
+    """Load a cohort and re-apply the research-consent verdict (#415).
+
+    Members were consent-filtered at define time, but a consent revoked
+    AFTER definition must bite on every later aggregate read too — so the
+    stored member list passes through ips's analysis-filter again here.
+    The stored row is not rewritten (the definition is an audit artefact);
+    only the in-request view shrinks."""
     row = db.session.query(Cohort).filter_by(guid=cohort_id).one_or_none()
     if row is None:
         abort(404, description="cohort not found")
-    return _row_to_dict(row)
+    cohort = _row_to_dict(row)
+    consented, consent_summary = _apply_research_consent(set(cohort["members"]))
+    cohort["members"] = list(consented)
+    cohort["n"] = len(consented)
+    cohort["consent"] = consent_summary
+    return cohort
 
 
 def _owner_label() -> str:
