@@ -65,6 +65,52 @@ def audit_read(fn):
 # Internals
 # ---------------------------------------------------------------------------
 
+def x1_tuple(blob, route_rule: str) -> dict:
+    """X1 (#407) — the extended access-log tuple fields that don't have
+    dedicated columns: person_guid, role_guid (from the ACTIVE
+    affiliation), purpose and access_basis (closed enums,
+    plans/pdhc_data_shapes.md §5).
+
+    Purpose is route-classed: researcher cohort surface → research,
+    admin surface → administration, everything patient-facing → care
+    (the dashboard's clinical views are care follow-up, not secondary
+    use). access_basis: su_admin for admins, research_consent for
+    research reads (the #415 ips consent join is what admits them),
+    same_unit otherwise (dashboard reads are Zone-1 scoped)."""
+    if not isinstance(blob, dict):
+        blob = {}
+    affs = blob.get("affiliations") or []
+    active = None
+    active_guid = blob.get("active_affiliation_guid")
+    if active_guid:
+        active = next((a for a in affs
+                       if a.get("affiliation_guid") == active_guid), None)
+    if active is None and len(affs) == 1:
+        active = affs[0]
+
+    if route_rule.startswith(("GET /api/cohort", "POST /api/cohort")) \
+            or "/api/cohort" in route_rule:
+        purpose = "research"
+    elif "/admin" in route_rule:
+        purpose = "administration"
+    else:
+        purpose = "care"
+
+    if blob.get("is_su_admin"):
+        basis = "su_admin"
+    elif purpose == "research":
+        basis = "research_consent"
+    else:
+        basis = "same_unit"
+
+    return {
+        "person_guid": blob.get("user_guid"),
+        "role_guid": (active or {}).get("role_guid"),
+        "purpose": purpose,
+        "access_basis": basis,
+    }
+
+
 def _write_audit_row(*, status: int, n_rows: int | None) -> None:
     """Insert a single DashboardAudit row. Never raises — a failed
     audit write must not break the response to the caller."""
@@ -101,6 +147,13 @@ def _write_audit_row(*, status: int, n_rows: int | None) -> None:
         # the @audit_read default path.
         payload_snapshot = getattr(g, "_audit_payload_snapshot", None)
 
+        # X1 (#407): merge the extended tuple into the JSONB detail —
+        # role_guid from the active affiliation + purpose/access_basis
+        # closed enums. Routes may pre-set keys via payload_snapshot;
+        # explicit values win over the derived defaults.
+        payload_snapshot = {**x1_tuple(blob, route_rule),
+                            **(payload_snapshot or {})}
+
         row = DashboardAudit(
             user_guid=user_guid,
             user_org_guids=list(org_ids or []),
@@ -134,7 +187,10 @@ def _user_guid(blob: Any) -> str | None:
 
 def _org_ids(blob: Any) -> list[str]:
     if isinstance(blob, dict):
-        return list(blob.get("organization_ids") or [])
+        # M0/X1: attribute the read to care units — affiliations[] first,
+        # legacy organization_ids fallback (same dual-read as app.auth).
+        from app.auth import scope_org_guids
+        return scope_org_guids(blob)
     return list(getattr(blob, "organization_ids", None) or [])
 
 

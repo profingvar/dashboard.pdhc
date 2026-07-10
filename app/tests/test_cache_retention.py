@@ -222,12 +222,18 @@ class TestCacheScrubEndpoint:
         assert row.n_rows_returned == 7
         assert row.patient_guid == "p1"
         assert row.response_status == 200
-        assert row.payload_snapshot == {
+        # X1 (#407): every audit row also carries the extended tuple —
+        # assert the scrub payload as a subset plus the tuple keys.
+        snap = row.payload_snapshot
+        assert {k: snap[k] for k in
+                ("patient_guid", "org_guid", "reason", "deleted_count")} == {
             "patient_guid": "p1",
             "org_guid": None,
             "reason": "patient deletion request",
             "deleted_count": 7,
         }
+        assert snap["purpose"] == "administration"
+        assert snap["access_basis"] == "su_admin"
 
     def test_scrub_by_org_only(self, admin_app, captured):
         admin_app._scrub_stub.return_value = 13
