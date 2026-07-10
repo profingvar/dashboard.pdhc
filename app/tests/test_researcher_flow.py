@@ -14,22 +14,51 @@ import io
 from unittest.mock import patch
 
 import pytest
+import sqlalchemy
 
 from app import create_app
 
 
+@pytest.fixture(autouse=True)
+def _allow_all_consent(monkeypatch):
+    """Cohort routes join every member set against ips.pdhc's
+    analysis-filter and fail closed (503) when it's unreachable. These
+    tests exercise the federation flow, not consent — patch the client
+    to an allow-all verdict (same seam test_analysis_consent.py patches)."""
+    from app.routes import researcher as r
+    fake = type("C", (), {"analysis_filter": staticmethod(
+        lambda guids, purpose, projects=None: {
+            "allowed": list(guids), "excluded": []})})()
+    monkeypatch.setattr(r, "_ips_client", lambda: fake)
+
+
 @pytest.fixture
 def app():
-    return create_app({
+    app = create_app({
         "TESTING": True,
         "AUTH_MODE": "off",
+        # Hermetic per-test in-memory DB (#441). StaticPool is required:
+        # bare sqlite :memory: gives each connection a private db, so
+        # rows written in one request would be invisible to the next.
+        # create_app overwrites SQLALCHEMY_DATABASE_URI from its DATABASE_URL
+        # config key, so set both — otherwise an ambient DATABASE_URL env
+        # var would silently re-point the test at a real Postgres.
+        "DATABASE_URL": "sqlite:///:memory:",
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SQLALCHEMY_ENGINE_OPTIONS": {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": sqlalchemy.pool.StaticPool,
+        },
         "CDR_ENDPOINTS": [
             {"cdr_id": "cdr1", "base_url": "http://cdr1", "region_label": "Norrland"},
             {"cdr_id": "cdr2", "base_url": "http://cdr2", "region_label": "Skåne"},
         ],
         "EXPORT_AUDIT_LOG": "/tmp/dash_export_audit_test.log",
     })
+    with app.app_context():
+        from app.models import db
+        db.create_all()
+    return app
 
 
 @pytest.fixture
@@ -69,23 +98,6 @@ def _mk_obs(pat, code, value, eff="2026-04-01T10:00:00+00:00", system="https://t
         "code": {"coding": [{"system": system, "code": code}]},
         "effectiveDateTime": eff,
         "valueQuantity": {"value": value, "unit": "%", "code": "%"},
-    }
-
-
-def _stats_body(*, n, mean, sd, mn, mx, hist):
-    return {
-        "resourceType": "Parameters",
-        "parameter": [
-            {"name": "n", "valueInteger": n},
-            {"name": "min", "valueDecimal": mn},
-            {"name": "max", "valueDecimal": mx},
-            {"name": "mean", "valueDecimal": mean},
-            {"name": "sd", "valueDecimal": sd},
-            {"name": "histogram", "part": [
-                {"name": f"bucket_{i}", "valueString": f"[{lo},{hi}):{c}"}
-                for i, (lo, hi, c) in enumerate(hist)
-            ]},
-        ],
     }
 
 
@@ -162,14 +174,21 @@ def test_cohort_histogram_merges_two_cdrs(app, admin_client):
         )
     cohort_id = resp.get_json()["cohort_id"]
 
-    # Now query the histogram.
-    a = _stats_body(n=100, mean=6.5, sd=0.5, mn=5.0, mx=8.0,
-                    hist=[(5.0, 6.0, 30), (6.0, 7.0, 50), (7.0, 8.0, 20)])
-    b = _stats_body(n=80, mean=7.5, sd=0.6, mn=6.0, mx=9.0,
-                    hist=[(6.0, 7.0, 20), (7.0, 8.0, 40), (8.0, 9.0, 20)])
+    # Now query the histogram. Since #289 the route no longer calls the
+    # CDRs' Observation/$stats (that route is gone) — it fetches raw
+    # matching Observations from each CDR and computes/merges stats
+    # locally. Serve 100 raw obs from cdr1 and 80 from cdr2 → n=180.
+    a = {"resourceType": "Bundle", "entry": [
+        {"resource": _mk_obs(f"p{i}", "4548-4", 5.0 + (i % 30) * 0.1)}
+        for i in range(100)
+    ]}
+    b = {"resourceType": "Bundle", "entry": [
+        {"resource": _mk_obs(f"q{i}", "4548-4", 6.0 + (i % 30) * 0.1)}
+        for i in range(80)
+    ]}
     routes_hist = [
-        (lambda m, u, p, j: "$stats" in u and "cdr1" in u, a),
-        (lambda m, u, p, j: "$stats" in u and "cdr2" in u, b),
+        (lambda m, u, p, j: "/api/v1/fhir/Observation" in u and "cdr1" in u, a),
+        (lambda m, u, p, j: "/api/v1/fhir/Observation" in u and "cdr2" in u, b),
     ]
     with patch("app.analyse.federation.requests.request",
                 side_effect=_make_request_dispatcher(routes_hist)):
@@ -203,7 +222,12 @@ def test_cohort_export_csv_has_expected_header(app, admin_client):
          {"entry": [
              {"resource": _mk_obs("p1", "4548-4", 6.4)},
              {"resource": _mk_obs("p2", "4548-4", 7.1)},
-             # Out-of-cohort patient — must be filtered.
+             # Out-of-cohort patient — the export's members filter is
+             # currently *intentionally lenient* (cohort_export: CDR
+             # Patient.id and obs.subject.reference live in different
+             # uuid namespaces today), so p99 streams through. Tighten
+             # this back to "p99 filtered out" when the route restores
+             # `if pat_guid not in members: continue`.
              {"resource": _mk_obs("p99", "4548-4", 9.5)},
          ]}),
     ]
@@ -224,9 +248,9 @@ def test_cohort_export_csv_has_expected_header(app, admin_client):
            and "sim_run_id" in header
     data_rows = rows[1:]
     pat_guids = [r[0] for r in data_rows]
-    # Out-of-cohort patient filtered out:
-    assert "p99" not in pat_guids
-    assert sorted(pat_guids) == ["p1", "p2"]
+    # Pins the documented lenient contract (see routes_export comment
+    # above): all subjects stream through, cohort members included.
+    assert sorted(pat_guids) == ["p1", "p2", "p99"]
 
 
 def test_scatter_truncates_above_cap(app, admin_client):

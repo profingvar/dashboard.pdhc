@@ -3,11 +3,11 @@
 These tests mock the IPS client so they don't depend on a running
 ips.pdhc. The cache is invalidated between tests to keep them isolated.
 """
-import os
 import uuid
 from datetime import datetime, timezone, timedelta
 
 import pytest
+import sqlalchemy
 
 from app import create_app
 from app.models import db, ObservationCache
@@ -16,14 +16,28 @@ from app.services.ips_client import Block
 
 
 def _app():
-    return create_app({
+    app = create_app({
         "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": os.environ.get("DATABASE_URL"),
+        # Hermetic per-test in-memory DB (#441). StaticPool is required:
+        # bare sqlite :memory: gives each connection a private db, so
+        # seeded rows would be invisible to request-handling connections.
+        # create_app overwrites SQLALCHEMY_DATABASE_URI from its DATABASE_URL
+        # config key, so set both — otherwise an ambient DATABASE_URL env
+        # var would silently re-point the test at a real Postgres.
+        "DATABASE_URL": "sqlite:///:memory:",
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SQLALCHEMY_ENGINE_OPTIONS": {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": sqlalchemy.pool.StaticPool,
+        },
         "AUTH_MODE": "off",
         # Set a base url so _default_client() will at least attempt; we
         # always patch fetch_active_blocks so no HTTP actually fires.
         "IPS_BASE_URL": "https://ips.example",
     })
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 def _seed_two_orgs(app):
@@ -58,6 +72,34 @@ def _cleanup(orgs):
         for o in orgs:
             ObservationCache.query.filter_by(org_guid=o).delete()
         db.session.commit()
+
+
+def _in_org_client(app, orgs):
+    """Test client whose caller is an in-org (non-admin) professional.
+
+    The AUTH_MODE=off dev SU carries ``organization_ids: []``, so since
+    #212 every /patient/<guid> read is an admin *off-org* read and renders
+    the override-confirmation form (which never shows the spärr banner)
+    instead of the patient dashboard. Give the caller a blob scoped to the
+    seeded orgs — the hook runs after the auth request-loader, so it
+    overrides the dev blob."""
+    from app.auth import _blob_to_user
+    blob = {
+        "user_guid": str(uuid.uuid4()),
+        "email": "prof@test",
+        "user_type": "professional",
+        "is_su_admin": False,
+        "effective_phases": ["analysis"],
+        "organization_ids": list(orgs),
+    }
+
+    @app.before_request
+    def _override():
+        from flask import g
+        g.access_blob = blob
+        g.current_user = _blob_to_user(blob)
+
+    return app.test_client()
 
 
 @pytest.fixture(autouse=True)
@@ -256,7 +298,7 @@ def test_patient_view_hides_blocked_rows_and_shows_banner(monkeypatch):
             views_mod, "get_active_blocks",
             lambda guid, **kw: [_make_block(org_a)],
         )
-        c = app.test_client()
+        c = _in_org_client(app, [org_a, org_b])
         r = c.get(f"/patient/{pat}")
         assert r.status_code == 200
         # Banner present
@@ -272,7 +314,7 @@ def test_patient_view_no_banner_when_no_blocks(monkeypatch):
     try:
         from app.routes import views as views_mod
         monkeypatch.setattr(views_mod, "get_active_blocks", lambda g, **kw: [])
-        c = app.test_client()
+        c = _in_org_client(app, [org_a, org_b])
         r = c.get(f"/patient/{pat}")
         assert r.status_code == 200
         assert "Uppgift om spärr".encode("utf-8") not in r.data
@@ -294,7 +336,7 @@ def test_patient_view_all_rows_blocked_renders_banner_no_404(monkeypatch):
             views_mod, "get_active_blocks",
             lambda g, **kw: block_both,
         )
-        c = app.test_client()
+        c = _in_org_client(app, [org_a, org_b])
         r = c.get(f"/patient/{pat}")
         assert r.status_code == 200
         assert "Uppgift om spärr".encode("utf-8") in r.data

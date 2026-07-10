@@ -1,9 +1,9 @@
 """SSO + AUTH_MODE=off tests. Mirrors gateway.pdhc/tests/test_sso_auth.py pattern."""
-import os
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 import pytest
+import sqlalchemy
 from app import create_app
 from app.models import db, User, ObservationCache
 from app.auth import scope_to_user_orgs, has_analysis_access, _blob_to_user
@@ -35,16 +35,30 @@ def _echo_revalidation():
 
 
 def _app(auth_mode="off"):
-    return create_app({
+    app = create_app({
         "TESTING": True,
         "SECRET_KEY": "test",
-        "SQLALCHEMY_DATABASE_URI": os.environ.get("DATABASE_URL"),
+        # Hermetic per-test in-memory DB (#441). StaticPool is required:
+        # bare sqlite :memory: gives each connection a private db, so
+        # seeded rows would be invisible to request-handling connections.
+        # create_app overwrites SQLALCHEMY_DATABASE_URI from its DATABASE_URL
+        # config key, so set both — otherwise an ambient DATABASE_URL env
+        # var would silently re-point the test at a real Postgres.
+        "DATABASE_URL": "sqlite:///:memory:",
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SQLALCHEMY_ENGINE_OPTIONS": {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": sqlalchemy.pool.StaticPool,
+        },
         "AUTH_MODE": auth_mode,
         "SSO_BASE_URL": "https://sso.pdhc.se",
         "SSO_CLIENT_ID": "test-cid",
         "SSO_CLIENT_SECRET": "test-secret",
         "SSO_CALLBACK_URL": "https://dashboard.pdhc.se/auth/callback",
     })
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 def _login_as(client, blob, token="test-token"):

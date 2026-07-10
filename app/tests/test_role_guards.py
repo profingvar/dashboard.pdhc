@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+import sqlalchemy
 
 from app import create_app
 
@@ -32,9 +33,23 @@ def app_with_blob():
     app = create_app({
         "TESTING": True,
         "AUTH_MODE": "off",
+        # Hermetic per-test in-memory DB (#441). StaticPool is required:
+        # bare sqlite :memory: gives each connection a private db, so
+        # rows written in one request would be invisible to the next.
+        # create_app overwrites SQLALCHEMY_DATABASE_URI from its DATABASE_URL
+        # config key, so set both — otherwise an ambient DATABASE_URL env
+        # var would silently re-point the test at a real Postgres.
+        "DATABASE_URL": "sqlite:///:memory:",
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SQLALCHEMY_ENGINE_OPTIONS": {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": sqlalchemy.pool.StaticPool,
+        },
         "CDR_ENDPOINTS": [],  # empty registry — endpoints not exercised here
     })
+    with app.app_context():
+        from app.models import db
+        db.create_all()
     blob_holder = {"blob": {}}
 
     @app.before_request

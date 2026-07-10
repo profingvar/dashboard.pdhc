@@ -1,16 +1,30 @@
-import os
 import uuid
 from unittest.mock import patch
+import sqlalchemy
 from app import create_app
 from app.models import db, User, ObservationCache, RefreshLog
 from app.services.gateway_client import GatewayClient, normalise, refresh_org
 
 
 def _app():
-    return create_app({
+    app = create_app({
         "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": os.environ.get("DATABASE_URL"),
+        # Hermetic per-test in-memory DB (#441). StaticPool is required:
+        # bare sqlite :memory: gives each connection a private db, so
+        # seeded rows would be invisible to request-handling connections.
+        # create_app overwrites SQLALCHEMY_DATABASE_URI from its DATABASE_URL
+        # config key, so set both — otherwise an ambient DATABASE_URL env
+        # var would silently re-point the test at a real Postgres.
+        "DATABASE_URL": "sqlite:///:memory:",
+        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        "SQLALCHEMY_ENGINE_OPTIONS": {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": sqlalchemy.pool.StaticPool,
+        },
     })
+    with app.app_context():
+        db.create_all()
+    return app
 
 
 SAMPLE_BUNDLE = {
