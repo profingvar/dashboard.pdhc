@@ -1,17 +1,31 @@
-Current focus: dashboard.pdhc.se is live and serving (gunicorn daemon, pid
-in /usr/local/www/dashboard.pdhc/shared/gunicorn.pid, logs in shared/logs/).
-See progress.md §18 for deployment state.
+Current focus: #462 clinical-dashboard redesign (D3+D5 landed 2026-07-13).
 
-Open items (none blocking):
-  1. services.html false-greens — bug is in www.pdhc.se's polling JS
-     (`mode: 'no-cors'` + hard-coded DB dot). Owners for services.html and
-     for request.pdhc (DB creds drift) and cdr.pdhc (connection drops).
-     Details in progress.md §18 "services.html diagnosis".
-  2. /healthz on dashboard.pdhc, rosetta.pdhc, contract.pdhc, plan.pdhc does
-     not ping the DB. Standardise the JSON shape to
-     {status, database, service, version}.
-  3. Compose project name on macmini is "current" (accidental from symlink).
-     Plan dump→rename→restore maintenance window.
-  4. Orphan docker volume dashboard_pdhc_dashboard_pdhc_pgdata from a prior
-     failed attempt — verify empty, remove.
-  5. Prune releases/2026-04-09T10-36-42Z after another smoke-verified day.
+Decisions + boundary: docs/redesign_462_decisions.md (operator #469 answers).
+Tickets: #463 D1, #464 D2, #465 D3(done), #466 D4, #467 D5(done),
+#468 D6(cdr.pdhc), #469 open-questions.
+
+DONE this session (local, tested, 211/211 green — NOT deployed):
+  - #467 D5 SavedDesign — /api/v1/designs CRUD, owner-private reusable
+    template, migration sd071322aa01 (single head).
+  - #465 D3 patient picker — GET /select, org-affiliation scoped, reads
+    CDR1 via app/services/cdr1_client.py (care-delivery basis).
+
+Q1 (legal basis) CONFIRMED: care-delivery, dashboard declares purpose →
+CDR1 skips #422 analysis-consent; spärr via existing ips_client; vård-
+relation model → legal (#437). Q6 (cache) still open.
+
+Next / blocked:
+  1. #468 (cdr.pdhc, D6) — CDR1 must honour X-Access-Purpose:care-delivery
+     (skip check_patient_allowed) AND expose a per-org patient-index +
+     per-patient concept counts. UNBLOCKS the picker's "has data" +
+     volume sort AND #464's per-patient reads. This is the real gate now.
+  2. #463 (D1) — move dashboard off the analysis phase gate onto care-
+     access; relocate the analyse/federation engine toward analyse.pdhc.
+  3. #464 (D2) per-patient CDR1 reads; #466 (D4) charts.
+
+Live smoke of /select against CDR1 deferred until: tunnel up + #468 done +
+CDR1_BASE_URL/DASHBOARD_PDHC_SERVICE_KEY set on the server.
+
+Legacy items (pre-#462, still open, none blocking):
+  - services.html false-greens (www.pdhc.se polling JS).
+  - /healthz DB ping standardisation on contract.pdhc / plan.pdhc.

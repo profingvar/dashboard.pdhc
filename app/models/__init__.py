@@ -126,6 +126,47 @@ class DashboardAudit(db.Model):
     admin_justification = db.Column(db.Text, nullable=True)
 
 
+class SavedDesign(db.Model):
+    """User-private, reusable dashboard design template (#467 / #462 D5).
+
+    A 'design' is a reusable TEMPLATE — a set of diagram definitions
+    (each: a parameter concept, an optional mirror parameter on a second
+    y-axis, the y-axis mode, and the time-window scaler position) that is
+    re-applied to ANY patient. Per the operator's #469 answers (2026-07-13):
+
+      - Q3: reusable template (NOT patient-bound) and PRIVATE to the owner.
+        Every query filters on ``owner_user_guid``; there is no admin
+        cross-user view — these are personal view configs, not patient
+        data, so the #212 admin-override machinery does not apply.
+
+    ``owner_user_guid`` is the SSO ``user_guid`` string (String(128), not
+    UUID, to match DashboardAudit — service-key callers carry synthetic
+    non-UUID guids, though in practice only real operators save designs).
+
+    ``spec`` is opaque JSON owned by the frontend (the diagram list). The
+    backend persists it and only lightly validates (must be a JSON object)
+    so the charting shape (D4/#466) can evolve without a migration.
+    """
+    __tablename__ = "saved_design"
+    guid = db.Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    owner_user_guid = db.Column(db.String(128), nullable=False, index=True)
+    name = db.Column(db.String(200), nullable=False)
+    spec = db.Column(JSONB, nullable=False, default=dict)
+    created_at = db.Column(db.DateTime(timezone=True), default=_now, nullable=False)
+    updated_at = db.Column(
+        db.DateTime(timezone=True), default=_now, onupdate=_now, nullable=False,
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "guid": self.guid,
+            "name": self.name,
+            "spec": self.spec or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class Cohort(db.Model):
     """Persisted researcher cohort definition (Phase-4.5).
 

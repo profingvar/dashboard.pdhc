@@ -272,3 +272,40 @@ create_all() can't reproduce — not Phase 4 regressions.
 
 Frontend (§4.4 / §4.5) and Playwright E2E (§4.8 e2e block) deferred
 until the 5 CDRs exist and a real environment can drive them.
+
+---
+
+## #462 clinical dashboard redesign — D3 + D5 (2026-07-13)
+
+Decomposition of #462 into build tickets #463–#469 (see
+`docs/redesign_462_decisions.md` for the locked operator answers to the
+#469 open questions). Started the two Q1-independent tickets.
+
+### D5 — Saved designs (#467) — DONE (local, tested; not deployed)
+- `SavedDesign` model (`app/models/__init__.py`): user-private reusable
+  template. `owner_user_guid` (String128) + `name` + opaque JSONB `spec`.
+  NOT patient-bound (operator #469 Q3).
+- Migration `2026_07_13_saved_design.py` (rev `sd071322aa01`, down
+  `a8bc21200001`; id ≤32 chars). `flask db heads` → single head.
+- `app/routes/designs.py`: CRUD under `/api/v1/designs`, every op scoped
+  to `owner_user_guid`; foreign designs read back 404 (no existence leak).
+- Tests `test_saved_design.py`: 3 (CRUD happy-path, validation, owner
+  isolation). All green.
+
+### D3 — Clinical patient picker (#465) — DONE (dashboard side; live wiring pends #468)
+- `app/services/cdr1_client.py`: `Cdr1Client` reads CDR1 under a
+  care-delivery basis — declares `X-Access-Purpose: care-delivery` so
+  CDR1 selects care_access_policy/spärr over #422 analysis-consent
+  (bypass is CDR-side, #468). Org scope via `X-Org-Guids`; service-key
+  auth; fail-open to `[]` on error. `parse_patient_bundle` pure helper.
+- `app/routes/picker.py` + `templates/select.html`: `GET /select` lists
+  org-affiliation-scoped patients from CDR1, client-side name/id filter,
+  single-select → `/patient/<guid>`. Banner when `CDR1_BASE_URL` unset.
+- Config `CDR1_BASE_URL` (+ `.env.example`).
+- Tests `test_patient_picker.py`: 5 (bundle parse, no-base-url empty,
+  non-admin-no-orgs empty, /select lists+scopes, unconfigured banner).
+
+Full suite: **211 passed**. NOT yet deployed. Live smoke deferred until
+the SSH tunnel is up AND #468 (CDR1 care-delivery read + per-org
+patient-index) lands. Blocked/next: #463 (D1 split + auth re-home),
+#464 (D2 per-patient CDR1 reads), #466 (D4 charts), #468 (D6 CDR side).

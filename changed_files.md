@@ -230,3 +230,17 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - DEFERRED (ticket stays open): drop synthetic roles[] service-key hack;
   EHDS opt-out + research-consent joins on federated reads (analysis
   enforcement, overlaps #422). Note: test_auth.py has 6 PRE-EXISTING failures.
+2026-07-13T18:51:50Z docs/redesign_462_decisions.md — #462 redesign locked decisions (Q1 legal + Q6 cache still open)
+2026-07-13T19:00:58Z app/models/__init__.py — add SavedDesign model (#467)
+2026-07-13T19:00:58Z app/migrations/versions/2026_07_13_saved_design.py — new saved_design table (#467)
+2026-07-13T19:00:58Z app/routes/designs.py — new; SavedDesign CRUD, owner-scoped (#467)
+2026-07-13T19:00:58Z app/routes/picker.py — new; clinical patient picker /select (#465)
+2026-07-13T19:00:58Z app/services/cdr1_client.py — new; CDR1 care-delivery read client (#465)
+2026-07-13T19:00:58Z app/templates/select.html — new; patient picker UI (#465)
+2026-07-13T19:00:58Z app/__init__.py — register designs+picker blueprints, CDR1_BASE_URL config (#465/#467)
+2026-07-13T19:00:58Z .env.example — add CDR1_BASE_URL + DASHBOARD_PDHC_SERVICE_KEY (#465)
+2026-07-13T19:00:58Z app/tests/test_saved_design.py — new; CRUD+owner isolation (#467)
+2026-07-13T19:00:58Z app/tests/test_patient_picker.py — new; bundle parse + /select route (#465)
+2026-07-13T20:34:56Z app/services/cdr1_client.py — rewire list_org_patients to CDR1 /api/v1/clinical/patients + add patient_summary (#465/#468)
+2026-07-13T20:34:56Z app/templates/select.html — add Data points column (#465)
+2026-07-13T20:34:56Z app/tests/test_patient_picker.py — add parse_clinical_patients test (#465)
