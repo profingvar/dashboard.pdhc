@@ -4,11 +4,18 @@ Decisions + boundary: docs/redesign_462_decisions.md (operator #469 answers).
 Tickets: #463 D1, #464 D2, #465 D3(done), #466 D4, #467 D5(done),
 #468 D6(cdr.pdhc), #469 open-questions.
 
-DONE this session (local, tested, 211/211 green — NOT deployed):
+DONE this session (local, tested, 222/222 green — NOT deployed):
   - #467 D5 SavedDesign — /api/v1/designs CRUD, owner-private reusable
     template, migration sd071322aa01 (single head).
   - #465 D3 patient picker — GET /select, org-affiliation scoped, reads
     CDR1 via app/services/cdr1_client.py (care-delivery basis).
+  - #468 D6 (cdr.pdhc) — /api/v1/clinical care-delivery read surface
+    (patients-with-data index + per-patient concept summary).
+  - #463 D1 — route-aware SSO gate: clinical routes → care-delivery,
+    analyse routes keep analysis-phase (app/auth.py). Boundary inventory
+    in docs/redesign_462_decisions.md §D1.
+  - #470 (new) — physical relocation of the analyse engine to analyse.pdhc
+    (deferred; blocked until analyse.pdhc exists).
 
 Q1 (legal basis) CONFIRMED: care-delivery, dashboard declares purpose →
 CDR1 skips #422 analysis-consent; spärr via existing ips_client; vård-

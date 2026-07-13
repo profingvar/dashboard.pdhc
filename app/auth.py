@@ -6,9 +6,12 @@ AUTH_MODE=sso  → OAuth-style flow against sso.pdhc, mirroring gateway.pdhc.
 Validation is delegated to sso.pdhc /api/auth/me/service (no local HMAC),
 matching gateway's working implementation.
 
-Phase gate: dashboard belongs to the *analysis* phase. A user is granted
-access if `is_su_admin` OR (`user_type == "professional"` AND
-`"analysis" in effective_phases`).
+Access gate (#463/D1, route-aware): the clinical dashboard's own routes
+(/, /select, /patient/*, /api/v1/designs, /refresh) use the CARE-DELIVERY
+gate — `is_su_admin` OR (professional with a care relationship, i.e. a
+care-unit scope). The (soon-to-relocate to analyse.pdhc) analyse engine
+routes keep the legacy *analysis* phase gate: `is_su_admin` OR
+(`user_type == "professional"` AND `"analysis" in effective_phases`).
 
 Rule 24: non-admin users only see ObservationCache rows whose org_guid is
 in their `organization_ids` blob field.
@@ -100,6 +103,54 @@ def has_analysis_access(blob: Optional[dict]) -> bool:
         blob.get("user_type") == "professional"
         and "analysis" in _phases(blob)
     )
+
+
+# ---- #463 / #462 D1: care-delivery front door ----------------------------
+#
+# The rebuilt dashboard is a CLINICAL tool. Its own routes must be reachable
+# by a treating clinician WITHOUT the 'analysis' phase — access is a care
+# relationship, not an analysis grant. The (soon-to-relocate to analyse.pdhc)
+# analyse engine keeps the analysis-phase gate. Rather than touch every
+# analyse route, the SSO gate is route-aware: clinical paths → care-delivery,
+# everything else → analysis phase (unchanged).
+
+def _is_clinical_path(path: str) -> bool:
+    """The clinical dashboard's own routes (care-delivery gated)."""
+    return (
+        path == "/"
+        or path == "/refresh"
+        or path.startswith("/select")
+        or path.startswith("/patient/")
+        or path.startswith("/api/v1/designs")
+    )
+
+
+def has_care_delivery_access(blob: Optional[dict]) -> bool:
+    """Care-delivery baseline for the clinical dashboard (#463/D1).
+
+    Access = an SU admin, OR a professional with a care relationship — i.e.
+    at least one care-unit scope (affiliations[].care_unit_guid, dual-read
+    to legacy organization_ids via ``scope_org_guids``). This REPLACES the
+    analysis-phase gate as the dashboard's front door: a treating clinician
+    no longer needs the 'analysis' phase to view their own patients. Spärr
+    is enforced per-patient on the read side (operator #469 Q1); the
+    vårdrelation model is confirmed with legal (#437)."""
+    if not blob:
+        return False
+    if blob.get("is_su_admin"):
+        return True
+    if blob.get("user_type") != "professional":
+        return False
+    return bool(scope_org_guids(blob))
+
+
+def _dashboard_access_allowed(path: str, blob: Optional[dict]) -> bool:
+    """Route-aware gate (#463/D1): clinical routes need care-delivery
+    access; the analyse engine's routes keep the analysis-phase gate until
+    they relocate to analyse.pdhc."""
+    if _is_clinical_path(path):
+        return has_care_delivery_access(blob)
+    return has_analysis_access(blob)
 
 
 # ---------- SSO calls ----------
@@ -258,7 +309,7 @@ def install_request_loader(app):
         if blob.get("must_change_password"):
             base = app.config.get("SSO_BASE_URL", "").rstrip("/")
             return redirect(f"{base}/change-password")
-        if not has_analysis_access(blob):
+        if not _dashboard_access_allowed(request.path, blob):
             abort(403)
         g.access_blob = blob
         g.current_user = _blob_to_user(blob)

@@ -69,6 +69,51 @@ Blocks #464 (D2) + #468 (D6) until confirmed.
 - **Q8 diagrams** = **1 by default, hard cap 3**. Each diagram is **independent**,
   including its **own time window** (the scaler is PER-diagram, not global).
 
+## D1 (#463) — the split, in detail
+
+### Auth re-home (DONE, #463)
+The SSO gate is now route-aware (`app/auth.py`):
+- **Clinical routes** (`/`, `/select`, `/patient/*`, `/api/v1/designs`,
+  `/refresh`) → `has_care_delivery_access`: SU admin, or a professional with
+  a care relationship (a care-unit scope via `scope_org_guids`). A treating
+  clinician no longer needs the 'analysis' phase.
+- **Everything else** (the analyse engine) → the unchanged `has_analysis_access`
+  phase gate, so its security is preserved byte-for-byte until it relocates.
+- AUTH_MODE=off has no gate (dev SU), so local dev + the whole test suite are
+  unaffected. Only the production SSO path changes.
+- Follow-up when this deploys: update CLAUDE.md §11 (which still says the
+  dashboard "belongs to the analysis phase").
+
+### What STAYS (this becomes the clinical dashboard product)
+- Routes: `views.py` (`/`, `/patient` — legacy cache view, replaced by CDR1
+  reads in D2/#464), `picker.py` (`/select`), `designs.py` (`/api/v1/designs`).
+- Services: `cdr1_client.py`, `ips_client.py` (spärr), `audit.py`
+  (PDL kontroller log).
+- Models: `User`, `OrgMembership`, `ObservationCache` (legacy — Q6 pending),
+  `SavedDesign`, `DashboardAudit`, `RefreshLog`.
+- Templates: `landing.html`, `patient.html`, `select.html`, `base.html`.
+- The admin read-audit viewer (`routes/admin.py`) — it audits clinical reads,
+  so it stays with the clinical product.
+
+### What RELOCATES to analyse.pdhc (tracked as a follow-up)
+- `app/analyse/*` — federation, aggregations, stats, cohort, canonical,
+  openehr, observations_search.
+- Routes: `nurse.py`, `researcher.py`, `workspace.py` + their templates
+  (`nurse_workspace.html`, `researcher_workspace.html`, `workspace_selector.html`).
+- Model: `Cohort`.
+- The analyse-layer service endpoints gateway.pdhc calls
+  (`/api/v1/observations`, `/api/v1/canonical`, `/api/v1/stats`,
+  `/api/v1/openehr`) — these are the cdr1/analyse-split surface (#287-293).
+  **Gateway's proxy must be repointed to analyse.pdhc when they move**, or
+  gateway breaks. This is the one hard cross-service dependency.
+
+### Sequencing (why the physical move is a follow-up, not part of #463)
+The analyse engine is LIVE and its only relocation target — analyse.pdhc —
+does not exist yet. Deleting it now would drop nurse/researcher + gateway's
+analyse pull with nowhere to land. So #463 does the auth re-home + this
+boundary; the physical extraction (stand up analyse.pdhc, move the code,
+repoint gateway, delete here) is a separate tracked ticket.
+
 ## Impact on the build tickets
 
 - #463 D1 — this note; the analyse engine relocation is part of the split.

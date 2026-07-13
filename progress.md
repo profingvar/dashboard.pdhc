@@ -309,3 +309,21 @@ Full suite: **211 passed**. NOT yet deployed. Live smoke deferred until
 the SSH tunnel is up AND #468 (CDR1 care-delivery read + per-org
 patient-index) lands. Blocked/next: #463 (D1 split + auth re-home),
 #464 (D2 per-patient CDR1 reads), #466 (D4 charts), #468 (D6 CDR side).
+
+## #463 / #462 D1 — auth re-home (2026-07-13)
+
+The clinical dashboard's front door moves off the analysis-phase gate onto a
+CARE-DELIVERY gate; the analyse engine keeps analysis-phase. Implemented as a
+route-aware SSO gate (app/auth._dashboard_access_allowed) so NO analyse route
+file changes and the whole test suite (AUTH_MODE=off, no gate) is unaffected —
+only the production SSO path changes.
+  - has_care_delivery_access = SU admin OR professional with a care-unit scope
+    (scope_org_guids: affiliations[].care_unit_guid, dual-read organization_ids).
+  - _is_clinical_path: /, /refresh, /select, /patient/*, /api/v1/designs.
+  - Existing test_auth.py SSO tests still pass (blobs carry org scope).
+Boundary inventory (what stays vs relocates to analyse.pdhc) in
+docs/redesign_462_decisions.md §D1. PHYSICAL relocation deferred to #470
+(blocked until analyse.pdhc exists — deleting live analyse code now would drop
+nurse/researcher + gateway's analyse pull with nowhere to land). CLAUDE.md §11
+to be updated when this deploys. Tests: test_care_access_auth.py 10/10; full
+suite 222 passed. NOT deployed.

@@ -244,3 +244,6 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-07-13T20:34:56Z app/services/cdr1_client.py — rewire list_org_patients to CDR1 /api/v1/clinical/patients + add patient_summary (#465/#468)
 2026-07-13T20:34:56Z app/templates/select.html — add Data points column (#465)
 2026-07-13T20:34:56Z app/tests/test_patient_picker.py — add parse_clinical_patients test (#465)
+2026-07-13T20:44:50Z app/auth.py — #463 route-aware SSO gate: clinical routes → care-delivery, analyse routes keep analysis phase; add has_care_delivery_access + _is_clinical_path
+2026-07-13T20:44:50Z app/tests/test_care_access_auth.py — new; #463 care-delivery gate unit + SSO integration (10 tests)
+2026-07-13T20:44:50Z docs/redesign_462_decisions.md — #463 D1 split inventory (stays vs relocates) + auth-change spec
