@@ -47,8 +47,10 @@
   </div>
   {% block content %}{% endblock %}
 </main>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<!-- Chart.js vendored locally (#471) — no CDN dependency; self-contained,
+     survives an offline/locked-down deploy. chart.js@4.4.6 + adapter v3.0.0. -->
+<script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns.bundle.min.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

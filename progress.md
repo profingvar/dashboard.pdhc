@@ -351,3 +351,12 @@ Deferred (→#471): retire legacy /patient + ObservationCache; re-home #212;
 vendor Chart.js (still CDN); spärr lift refinement; plan.pdhc display names.
 
 Tests: test_patient_charts.py 5/5; full suite 227 passed. NOT deployed.
+
+## #471 item 3 — vendor Chart.js (2026-07-13)
+Chart.js 4.4.6 UMD + chartjs-adapter-date-fns v3.0.0 vendored into
+app/static/vendor/; base.html now loads them locally instead of cdn.jsdelivr.
+Self-contained (survives an offline/locked-down deploy), no CSP/external dep.
+Served + referenced verified; full suite 227 passed. Remaining #471 items
+(retire legacy /patient+ObservationCache [blocked on #469 Q6], re-home #212
+[needs legal #437], spärr lift refinement + plan.pdhc display names [need a
+code_canonical↔Concept.guid mapping]) stay open.

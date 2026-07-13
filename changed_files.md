@@ -254,3 +254,6 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-07-13T20:56:03Z app/auth.py — add /api/v1/patient/ to clinical paths (#464)
 2026-07-13T20:56:03Z app/templates/select.html — picker links to charts.charts_page (#464)
 2026-07-13T20:56:03Z app/tests/test_patient_charts.py — new; proxy endpoints + spärr + page (#464)
+2026-07-13T21:03:36Z app/static/vendor/chart.umd.min.js — new; vendored Chart.js 4.4.6 UMD (#471 item 3)
+2026-07-13T21:03:36Z app/static/vendor/chartjs-adapter-date-fns.bundle.min.js — new; vendored date-fns time adapter v3.0.0 (#471 item 3)
+2026-07-13T21:03:36Z app/templates/base.html — reference vendored Chart.js instead of cdn.jsdelivr (#471 item 3)
