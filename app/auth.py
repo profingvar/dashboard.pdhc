@@ -121,6 +121,7 @@ def _is_clinical_path(path: str) -> bool:
         or path == "/refresh"
         or path.startswith("/select")
         or path.startswith("/patient/")
+        or path.startswith("/api/v1/patient/")
         or path.startswith("/api/v1/designs")
     )
 

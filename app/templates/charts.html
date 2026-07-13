@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}Patient charts — dashboard.pdhc{% endblock %}
+{% block h1 %}Patient charts{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="monospace" style="color:var(--text-muted);">Patient GUID: {{ patient_guid }}</p>
+  <p><a href="{{ url_for('picker.select') }}">← back to patient list</a></p>
+</div>
+
+{% if has_blocked_sources %}
+<div class="card" style="border-left:4px solid #b45309;background:rgba(180,83,9,0.06);" role="status" aria-live="polite">
+  <p style="margin:0;font-weight:600;">Uppgift om spärr</p>
+  <p style="margin:.3rem 0 0;color:var(--text-muted);font-size:.92em;">
+    Patienten har spärrade uppgifter hos en eller flera vårdenheter (PDL kap. 4 § 4).
+    Innehåll och avsändare visas inte.
+  </p>
+</div>
+{% endif %}
+
+{% if not cdr1_configured %}
+<div class="card"><p style="margin:0;color:var(--text-muted);">
+  CDR1 is not configured (<code>CDR1_BASE_URL</code> unset) — no data can be
+  loaded in this environment.
+</p></div>
+{% endif %}
+
+<div class="card">
+  <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="btn btn-primary btn-sm" id="addDiagram">+ Add diagram</button>
+    <span style="color:var(--text-muted);font-size:.85em;" id="diagCount"></span>
+    <span style="flex:1;"></span>
+    <select id="designPicker" class="btn-sm" style="min-width:160px;"><option value="">Load design…</option></select>
+    <button type="button" class="btn btn-sm" id="saveDesign">Save design</button>
+  </div>
+  <p id="loadState" style="margin:.4rem 0 0;color:var(--text-muted);font-size:.85em;"></p>
+</div>
+
+<div id="diagrams"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PATIENT = {{ patient_guid | tojson }};
+const API = "/api/v1/patient/" + encodeURIComponent(PATIENT);
+const DESIGNS = "/api/v1/designs";
+const MAX_DIAGRAMS = 3;
+const COLORS = { primary: "#2563eb", mirror: "#d97706" };
+const DAY_MS = 864e5;
+let PARAMS = [];          // [{code, unit, count}]
+let diagrams = [];        // [{el, chart, primary, mirror, t, zero, ymax}]
+let seq = 0;
+
+// continuous time slider t∈[0,1000] → window length in days (1 .. 1825),
+// exponential so the day end is reachable. label: d/w/mo/y.
+function tToDays(t) { return Math.max(1, Math.round(Math.pow(1825, t / 1000))); }
+function daysLabel(d) {
+  if (d < 14) return d + " d";
+  if (d < 60) return Math.round(d / 7) + " w";
+  if (d < 730) return Math.round(d / 30) + " mo";
+  return (d / 365).toFixed(1) + " y";
+}
+function paramLabel(p) {
+  return p.code + (p.unit ? " (" + p.unit + ")" : "") + " · " + p.count;
+}
+function unitOf(code) { const p = PARAMS.find(x => x.code === code); return p ? p.unit : ""; }
+
+async function loadParams() {
+  try {
+    const r = await fetch(API + "/parameters");
+    if (!r.ok) return;
+    const j = await r.json();
+    PARAMS = j.parameters || [];         // already sorted by count desc (CDR)
+  } catch (e) { /* leave empty */ }
+}
+
+function optionList(selected, includeNone) {
+  let html = includeNone ? '<option value="">— none —</option>' : "";
+  for (const p of PARAMS) {
+    const sel = p.code === selected ? " selected" : "";
+    html += '<option value="' + p.code + '"' + sel + '>' +
+            paramLabel(p).replace(/</g, "&lt;") + "</option>";
+  }
+  return html;
+}
+
+function diagramCard(d) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.innerHTML =
+    '<div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;">' +
+      '<label style="font-size:.85em;">Parameter<br><select class="prim btn-sm" style="min-width:200px;">' + optionList(d.primary, false) + '</select></label>' +
+      '<label style="font-size:.85em;">Mirror (2nd axis)<br><select class="mir btn-sm" style="min-width:200px;">' + optionList(d.mirror, true) + '</select></label>' +
+      '<label style="font-size:.85em;flex:1;min-width:180px;">Time window: <span class="wlabel"></span><br><input type="range" class="win" min="0" max="1000" value="' + d.t + '" style="width:100%;"></label>' +
+      '<label style="font-size:.85em;"><input type="checkbox" class="zero"' + (d.zero ? " checked" : "") + '> Zero-based Y</label>' +
+      '<button type="button" class="btn btn-sm rm">Remove</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:.4rem;align-items:center;margin:.4rem 0;font-size:.8em;color:var(--text-muted);">' +
+      'Y max <input type="range" class="ymax" min="0" max="1000" value="1000" style="flex:1;"><span class="ymaxlabel">auto</span></div>' +
+    '<canvas height="120"></canvas>';
+  return el;
+}
+
+function computeYMax(diagram) {
+  // ymax slider 0..1000; at 1000 → auto (null). Otherwise scale to data.
+  const s = diagram.el.querySelector(".ymax");
+  if (Number(s.value) >= 1000) return null;
+  const vals = (diagram._lastPrimary || []).map(p => p.y).filter(v => v != null);
+  if (!vals.length) return null;
+  const dmax = Math.max(...vals) * 1.5 || 1;
+  return dmax * (Number(s.value) / 1000);
+}
+
+async function redraw(diagram) {
+  const days = tToDays(diagram.t);
+  diagram.el.querySelector(".wlabel").textContent = daysLabel(days);
+  if (!diagram.primary) return;
+  const to = new Date();
+  const from = new Date(to.getTime() - days * DAY_MS);
+  const codes = [diagram.primary].concat(diagram.mirror ? [diagram.mirror] : []);
+  const qs = codes.map(c => "code=" + encodeURIComponent(c)).join("&") +
+             "&from=" + from.toISOString() + "&to=" + to.toISOString();
+  let pts = [];
+  try {
+    const r = await fetch(API + "/series?" + qs);
+    if (r.ok) pts = (await r.json()).points || [];
+  } catch (e) { /* draw empty */ }
+
+  const prim = pts.filter(p => p.code === diagram.primary).map(p => ({ x: p.at, y: p.value }));
+  const mir = diagram.mirror ? pts.filter(p => p.code === diagram.mirror).map(p => ({ x: p.at, y: p.value })) : [];
+  diagram._lastPrimary = prim;
+
+  const datasets = [{
+    label: diagram.primary, data: prim, yAxisID: "yL",
+    borderColor: COLORS.primary, backgroundColor: COLORS.primary,
+    showLine: true, pointRadius: 2, tension: .2,
+  }];
+  if (diagram.mirror) datasets.push({
+    label: diagram.mirror, data: mir, yAxisID: "yR",
+    borderColor: COLORS.mirror, backgroundColor: COLORS.mirror,
+    showLine: true, pointRadius: 2, tension: .2,
+  });
+
+  const yL = { type: "linear", position: "left",
+               title: { display: true, text: unitOf(diagram.primary) || "" } };
+  if (diagram.zero) yL.min = 0;
+  const ymax = computeYMax(diagram);
+  if (ymax != null) yL.max = ymax;
+  diagram.el.querySelector(".ymaxlabel").textContent =
+    (ymax == null ? "auto" : ymax.toFixed(1));
+
+  const scales = { x: { type: "time" }, yL };
+  if (diagram.mirror) {
+    scales.yR = { type: "linear", position: "right",
+                  title: { display: true, text: unitOf(diagram.mirror) || "" },
+                  grid: { drawOnChartArea: false } };
+    if (diagram.zero) scales.yR.min = 0;
+  }
+
+  const canvas = diagram.el.querySelector("canvas");
+  if (diagram.chart) diagram.chart.destroy();
+  diagram.chart = new Chart(canvas, {
+    type: "scatter",
+    data: { datasets },
+    options: { responsive: true, interaction: { mode: "nearest" }, scales },
+  });
+}
+
+function wire(diagram) {
+  const el = diagram.el;
+  el.querySelector(".prim").addEventListener("change", e => { diagram.primary = e.target.value; redraw(diagram); });
+  el.querySelector(".mir").addEventListener("change", e => { diagram.mirror = e.target.value; redraw(diagram); });
+  el.querySelector(".win").addEventListener("input", e => { diagram.t = Number(e.target.value); redraw(diagram); });
+  el.querySelector(".zero").addEventListener("change", e => { diagram.zero = e.target.checked; redraw(diagram); });
+  el.querySelector(".ymax").addEventListener("input", () => redraw(diagram));
+  el.querySelector(".rm").addEventListener("click", () => removeDiagram(diagram));
+}
+
+function addDiagram(spec) {
+  if (diagrams.length >= MAX_DIAGRAMS) return;
+  const d = {
+    id: ++seq,
+    primary: (spec && spec.primary) || (PARAMS[0] && PARAMS[0].code) || "",
+    mirror: (spec && spec.mirror) || "",
+    t: spec && spec.t != null ? spec.t : 700,
+    zero: spec ? !!spec.zero : true,
+  };
+  d.el = diagramCard(d);
+  document.getElementById("diagrams").appendChild(d.el);
+  diagrams.push(d);
+  wire(d);
+  redraw(d);
+  updateCount();
+}
+
+function removeDiagram(d) {
+  if (d.chart) d.chart.destroy();
+  d.el.remove();
+  diagrams = diagrams.filter(x => x !== d);
+  updateCount();
+}
+
+function updateCount() {
+  document.getElementById("diagCount").textContent =
+    diagrams.length + " / " + MAX_DIAGRAMS + " diagrams";
+  document.getElementById("addDiagram").disabled = diagrams.length >= MAX_DIAGRAMS;
+}
+
+// ---- designs (reusable templates, private to the user) -------------------
+function currentSpec() {
+  return { diagrams: diagrams.map(d => ({
+    primary: d.primary, mirror: d.mirror, t: d.t, zero: d.zero,
+  })) };
+}
+
+async function saveDesign() {
+  const name = prompt("Save this layout as a reusable design named:");
+  if (!name) return;
+  const r = await fetch(DESIGNS, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: name, spec: currentSpec() }),
+  });
+  setLoadState(r.ok ? "Saved “" + name + "”." : "Save failed.");
+  if (r.ok) refreshDesigns();
+}
+
+async function refreshDesigns() {
+  const sel = document.getElementById("designPicker");
+  try {
+    const r = await fetch(DESIGNS);
+    if (!r.ok) return;
+    const list = (await r.json()).designs || [];
+    sel.innerHTML = '<option value="">Load design…</option>' +
+      list.map(d => '<option value="' + d.guid + '">' +
+        (d.name || d.guid).replace(/</g, "&lt;") + "</option>").join("");
+  } catch (e) { /* ignore */ }
+}
+
+async function applyDesign(guid) {
+  if (!guid) return;
+  const r = await fetch(DESIGNS + "/" + guid);
+  if (!r.ok) { setLoadState("Could not load design."); return; }
+  const spec = (await r.json()).spec || {};
+  const wanted = (spec.diagrams || []).slice(0, MAX_DIAGRAMS);
+  diagrams.slice().forEach(removeDiagram);
+  if (!wanted.length) { addDiagram(); }
+  else wanted.forEach(addDiagram);
+  const missing = wanted.filter(w => w.primary && !PARAMS.some(p => p.code === w.primary));
+  setLoadState(missing.length
+    ? "Applied — " + missing.length + " parameter(s) not present for this patient."
+    : "Applied design.");
+}
+
+function setLoadState(msg) { document.getElementById("loadState").textContent = msg; }
+
+document.getElementById("addDiagram").addEventListener("click", () => addDiagram());
+document.getElementById("saveDesign").addEventListener("click", saveDesign);
+document.getElementById("designPicker").addEventListener("change", e => applyDesign(e.target.value));
+
+(async function init() {
+  await loadParams();
+  refreshDesigns();
+  addDiagram();               // one diagram by default
+})();
+</script>
+{% endblock %}

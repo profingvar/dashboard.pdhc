@@ -21,7 +21,7 @@
     <tbody id="rows">
       {% for p in patients %}
       <tr class="prow" data-search="{{ (p.name ~ ' ' ~ p.guid) | lower }}">
-        <td class="monospace"><a href="{{ url_for('views.patient', guid=p.guid) }}">{{ p.guid[:12] }}…</a></td>
+        <td class="monospace"><a href="{{ url_for('charts.charts_page', guid=p.guid) }}">{{ p.guid[:12] }}…</a></td>
         <td>{{ p.name or '—' }}</td>
         <td>{{ p.birth_date or '—' }}</td>
         <td>{{ p.observation_count if p.observation_count is not none else '—' }}</td>

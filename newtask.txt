@@ -16,6 +16,13 @@ DONE this session (local, tested, 222/222 green — NOT deployed):
     in docs/redesign_462_decisions.md §D1.
   - #470 (new) — physical relocation of the analyse engine to analyse.pdhc
     (deferred; blocked until analyse.pdhc exists).
+  - #464 D2 — CDR1-backed per-patient reads: cdr1_client.patient_series +
+    app/routes/charts.py proxies (parameters/series) with spärr. CDR side:
+    /api/v1/clinical/patient/<guid>/series.
+  - #466 D4 — charts page /patient/<guid>/charts (charts.html): ≤3 diagrams,
+    dual-axis mirror, continuous time slider, zero/y-max, save/load designs.
+  - #471 (new) — cutover follow-up: retire legacy /patient+ObservationCache,
+    re-home #212, vendor Chart.js, spärr lift refinement, plan display names.
 
 Q1 (legal basis) CONFIRMED: care-delivery, dashboard declares purpose →
 CDR1 skips #422 analysis-consent; spärr via existing ips_client; vård-

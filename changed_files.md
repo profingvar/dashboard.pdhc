@@ -247,3 +247,10 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-07-13T20:44:50Z app/auth.py — #463 route-aware SSO gate: clinical routes → care-delivery, analyse routes keep analysis phase; add has_care_delivery_access + _is_clinical_path
 2026-07-13T20:44:50Z app/tests/test_care_access_auth.py — new; #463 care-delivery gate unit + SSO integration (10 tests)
 2026-07-13T20:44:50Z docs/redesign_462_decisions.md — #463 D1 split inventory (stays vs relocates) + auth-change spec
+2026-07-13T20:56:03Z app/services/cdr1_client.py — add patient_series() + params support in _get_json (#464)
+2026-07-13T20:56:03Z app/routes/charts.py — new; /patient/<guid>/charts page + /api/v1/patient/<guid>/{parameters,series} proxies with spärr (#464/#466)
+2026-07-13T20:56:03Z app/templates/charts.html — new; #466 charting UI (≤3 diagrams, dual-axis mirror, continuous time slider, zero/y-max, save/load designs)
+2026-07-13T20:56:03Z app/__init__.py — register charts blueprint (#464/#466)
+2026-07-13T20:56:03Z app/auth.py — add /api/v1/patient/ to clinical paths (#464)
+2026-07-13T20:56:03Z app/templates/select.html — picker links to charts.charts_page (#464)
+2026-07-13T20:56:03Z app/tests/test_patient_charts.py — new; proxy endpoints + spärr + page (#464)

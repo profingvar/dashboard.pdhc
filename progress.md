@@ -327,3 +327,27 @@ docs/redesign_462_decisions.md §D1. PHYSICAL relocation deferred to #470
 nurse/researcher + gateway's analyse pull with nowhere to land). CLAUDE.md §11
 to be updated when this deploys. Tests: test_care_access_auth.py 10/10; full
 suite 222 passed. NOT deployed.
+
+## #464 D2 + #466 D4 — CDR1-backed per-patient charts (2026-07-13)
+
+Built the new clinical patient view WITHOUT disturbing the legacy
+ObservationCache /patient view (retirement + #212 re-home tracked in #471).
+
+#464 (data): cdr1_client.patient_series() → CDR1 /clinical/patient/<guid>/series.
+New app/routes/charts.py JSON proxies the browser calls (browser has no service
+key): /api/v1/patient/<guid>/parameters (sorted concepts) + /series (points,
+spärr-filtered by org_guid via ips_client, coarse — lift refinement in #471).
+Both care-delivery gated (/api/v1/patient/ added to clinical paths).
+
+#466 (charts): new page /patient/<guid>/charts (charts.html). Chart.js.
+Per operator #469 answers: parameter dropdown sorted by data count (Q7 label =
+code+unit); MIRROR a 2nd parameter on an independent right y-axis (Q2 dual-axis);
+1 diagram default, hard cap 3, each independent incl. its own time window (Q8);
+CONTINUOUS time slider mapping exp 1 day..5 years (Q4) + zero-based/autoscale
+toggle + y-max slider (Q4); SAVE/LOAD reusable design templates via
+/api/v1/designs (#467), applied to any patient (Q3). /select now links here.
+
+Deferred (→#471): retire legacy /patient + ObservationCache; re-home #212;
+vendor Chart.js (still CDN); spärr lift refinement; plan.pdhc display names.
+
+Tests: test_patient_charts.py 5/5; full suite 227 passed. NOT deployed.

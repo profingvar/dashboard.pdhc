@@ -119,15 +119,45 @@ class Cdr1Client:
         params = body.get("parameters")
         return params if isinstance(params, list) else []
 
+    def patient_series(
+        self, patient_guid: str, codes: list[str] | None,
+        frm: str | None, to: str | None,
+        org_guids: list[str], *, is_admin: bool = False,
+    ) -> list[dict]:
+        """Time-series points for a patient from CDR1 (#464), optionally
+        filtered to concept codes and an effective-date window. Each point:
+        ``{code, at, value, unit, value_string, org_guid}`` (org_guid lets
+        the caller apply spärr). Empty on error / unconfigured."""
+        if not self.base_url or not patient_guid:
+            return []
+        if not is_admin and not org_guids:
+            return []
+        params: list[tuple[str, str]] = []
+        for c in (codes or []):
+            params.append(("code", c))
+        if frm:
+            params.append(("from", frm))
+        if to:
+            params.append(("to", to))
+        body = self._get_json(
+            f"/api/v1/clinical/patient/{patient_guid}/series",
+            org_guids, is_admin, what="patient series", params=params,
+        )
+        if body is None:
+            return []
+        pts = body.get("points")
+        return pts if isinstance(pts, list) else []
+
     # -- transport ------------------------------------------------------
     def _get_json(
         self, path: str, org_guids: list[str], is_admin: bool, *, what: str,
+        params: list[tuple[str, str]] | None = None,
     ) -> dict | None:
         url = f"{self.base_url}{path}"
         try:
             r = requests.get(
                 url, headers=self._headers(org_guids, is_admin),
-                timeout=self.timeout,
+                params=params or None, timeout=self.timeout,
             )
         except requests.RequestException:
             current_app.logger.warning("CDR1 %s failed (network)", what)

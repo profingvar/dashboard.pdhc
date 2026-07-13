@@ -113,6 +113,8 @@ def create_app(config=None):
     from app.routes.designs import bp as designs_bp
     # #465 / #462 D3 — clinical patient picker (org-affiliation scoped, CDR1).
     from app.routes.picker import bp as picker_bp
+    # #464 D2 + #466 D4 — per-patient CDR1 charts view + JSON proxies.
+    from app.routes.charts import bp as charts_bp
     # #291 — analyse-layer observations search (mirrors cdr1's removed
     # /api/v1/observations endpoint). Gateway's proxy lands here.
     from app.analyse.observations_search import bp as observations_search_bp
@@ -130,6 +132,7 @@ def create_app(config=None):
     app.register_blueprint(workspace_bp)
     app.register_blueprint(designs_bp)
     app.register_blueprint(picker_bp)
+    app.register_blueprint(charts_bp)
     app.register_blueprint(observations_search_bp)
     app.register_blueprint(analyse_stats_bp)
     app.register_blueprint(analyse_canonical_bp)
