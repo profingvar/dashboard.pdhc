@@ -1,5 +1,10 @@
 Current focus: #462 clinical-dashboard redesign (D3+D5 landed 2026-07-13).
 
+PRs (open, base main, NOT merged, NOT deployed):
+  - dashboard: https://github.com/profingvar/dashboard.pdhc/pull/1
+  - cdr:       https://github.com/profingvar/cdr.pdhc/pull/1
+  branch feat/462-clinical-dashboard on both.
+
 Decisions + boundary: docs/redesign_462_decisions.md (operator #469 answers).
 Tickets: #463 D1, #464 D2, #465 D3(done), #466 D4, #467 D5(done),
 #468 D6(cdr.pdhc), #469 open-questions.
