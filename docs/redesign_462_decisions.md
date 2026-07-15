@@ -61,8 +61,15 @@ Blocks #464 (D2) + #468 (D6) until confirmed.
 - **Q5 patient identity** = show ips.pdhc name. Every CDR1 patient is expected to
   have an IPS record (production data + the new sim module generates IPS records
   too), so no "orphan" flow is required — keep only a defensive fallback.
-- **Q6 ObservationCache** = OPEN (legal has priority; decide after Q1). Default
-  lean: live CDR1 reads, cache only if latency demands it.
+- **Q6 ObservationCache** = DECIDED 2026-07-15: **live CDR1 reads only, no
+  read-through cache.** So the legacy ObservationCache surface (landing `/`,
+  legacy `/patient/<guid>`, `/api/v1/series`, GatewayClient, `/refresh` +
+  auto-refresh, the `ObservationCache` model + retention/cache-sweep) is
+  retired — tracked in #471 item 1. SEQUENCING: run that retirement only AFTER
+  the new CDR1 `/charts` path is deployed and live-smoked, and after the #212
+  admin-control re-home (item 2) is settled. Do NOT delete the working legacy
+  view on this branch before the replacement is proven in prod: the deploy
+  keeps BOTH paths; a follow-up change removes the legacy one.
 - **Q7 parameter identity** = dropdown keyed by **plan.pdhc Concept.guid**;
   y-axis label/unit from **concept.unit** (unit lives on the concept, not the
   transaction). Confirmed.
