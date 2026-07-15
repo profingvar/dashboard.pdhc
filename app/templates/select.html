@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Select patient — dashboard.pdhc{% endblock %}
+{% block h1 %}Select patient{% endblock %}
+{% block content %}
+<div class="card">
+  {% if not cdr1_configured %}
+  <p style="color:var(--text-muted);padding:.5rem 0;">
+    CDR1 is not configured in this environment (<code>CDR1_BASE_URL</code> unset),
+    so no patients can be listed yet. This picker reads production patients from
+    CDR1 once wired (#465/#468).
+  </p>
+  {% endif %}
+  <input id="filter" type="search" placeholder="Filter by name or id…"
+         autocomplete="off"
+         style="width:100%;padding:.4rem .6rem;margin-bottom:.6rem;box-sizing:border-box;"
+         oninput="filterPatients(this.value)">
+  <table>
+    <thead>
+      <tr><th>Patient</th><th>Name</th><th>Born</th><th>Data points</th></tr>
+    </thead>
+    <tbody id="rows">
+      {% for p in patients %}
+      <tr class="prow" data-search="{{ (p.name ~ ' ' ~ p.guid) | lower }}">
+        <td class="monospace"><a href="{{ url_for('charts.charts_page', guid=p.guid) }}">{{ p.guid[:12] }}…</a></td>
+        <td>{{ p.name or '—' }}</td>
+        <td>{{ p.birth_date or '—' }}</td>
+        <td>{{ p.observation_count if p.observation_count is not none else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:1rem;">
+        No patients with data for your organisation{% if cdr1_configured %} in CDR1{% endif %}.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p id="empty" style="display:none;text-align:center;color:var(--text-muted);padding:1rem;">
+    No patients match the filter.
+  </p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function filterPatients(q) {
+  q = (q || '').trim().toLowerCase();
+  var rows = document.querySelectorAll('#rows .prow');
+  var shown = 0;
+  rows.forEach(function (r) {
+    var hit = !q || (r.getAttribute('data-search') || '').indexOf(q) !== -1;
+    r.style.display = hit ? '' : 'none';
+    if (hit) shown++;
+  });
+  document.getElementById('empty').style.display =
+    (rows.length && shown === 0) ? '' : 'none';
+}
+</script>
+{% endblock %}

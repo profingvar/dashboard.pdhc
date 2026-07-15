@@ -230,3 +230,31 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - DEFERRED (ticket stays open): drop synthetic roles[] service-key hack;
   EHDS opt-out + research-consent joins on federated reads (analysis
   enforcement, overlaps #422). Note: test_auth.py has 6 PRE-EXISTING failures.
+2026-07-13T18:51:50Z docs/redesign_462_decisions.md — #462 redesign locked decisions (Q1 legal + Q6 cache still open)
+2026-07-13T19:00:58Z app/models/__init__.py — add SavedDesign model (#467)
+2026-07-13T19:00:58Z app/migrations/versions/2026_07_13_saved_design.py — new saved_design table (#467)
+2026-07-13T19:00:58Z app/routes/designs.py — new; SavedDesign CRUD, owner-scoped (#467)
+2026-07-13T19:00:58Z app/routes/picker.py — new; clinical patient picker /select (#465)
+2026-07-13T19:00:58Z app/services/cdr1_client.py — new; CDR1 care-delivery read client (#465)
+2026-07-13T19:00:58Z app/templates/select.html — new; patient picker UI (#465)
+2026-07-13T19:00:58Z app/__init__.py — register designs+picker blueprints, CDR1_BASE_URL config (#465/#467)
+2026-07-13T19:00:58Z .env.example — add CDR1_BASE_URL + DASHBOARD_PDHC_SERVICE_KEY (#465)
+2026-07-13T19:00:58Z app/tests/test_saved_design.py — new; CRUD+owner isolation (#467)
+2026-07-13T19:00:58Z app/tests/test_patient_picker.py — new; bundle parse + /select route (#465)
+2026-07-13T20:34:56Z app/services/cdr1_client.py — rewire list_org_patients to CDR1 /api/v1/clinical/patients + add patient_summary (#465/#468)
+2026-07-13T20:34:56Z app/templates/select.html — add Data points column (#465)
+2026-07-13T20:34:56Z app/tests/test_patient_picker.py — add parse_clinical_patients test (#465)
+2026-07-13T20:44:50Z app/auth.py — #463 route-aware SSO gate: clinical routes → care-delivery, analyse routes keep analysis phase; add has_care_delivery_access + _is_clinical_path
+2026-07-13T20:44:50Z app/tests/test_care_access_auth.py — new; #463 care-delivery gate unit + SSO integration (10 tests)
+2026-07-13T20:44:50Z docs/redesign_462_decisions.md — #463 D1 split inventory (stays vs relocates) + auth-change spec
+2026-07-13T20:56:03Z app/services/cdr1_client.py — add patient_series() + params support in _get_json (#464)
+2026-07-13T20:56:03Z app/routes/charts.py — new; /patient/<guid>/charts page + /api/v1/patient/<guid>/{parameters,series} proxies with spärr (#464/#466)
+2026-07-13T20:56:03Z app/templates/charts.html — new; #466 charting UI (≤3 diagrams, dual-axis mirror, continuous time slider, zero/y-max, save/load designs)
+2026-07-13T20:56:03Z app/__init__.py — register charts blueprint (#464/#466)
+2026-07-13T20:56:03Z app/auth.py — add /api/v1/patient/ to clinical paths (#464)
+2026-07-13T20:56:03Z app/templates/select.html — picker links to charts.charts_page (#464)
+2026-07-13T20:56:03Z app/tests/test_patient_charts.py — new; proxy endpoints + spärr + page (#464)
+2026-07-13T21:03:36Z app/static/vendor/chart.umd.min.js — new; vendored Chart.js 4.4.6 UMD (#471 item 3)
+2026-07-13T21:03:36Z app/static/vendor/chartjs-adapter-date-fns.bundle.min.js — new; vendored date-fns time adapter v3.0.0 (#471 item 3)
+2026-07-13T21:03:36Z app/templates/base.html — reference vendored Chart.js instead of cdn.jsdelivr (#471 item 3)
+2026-07-15T07:13:18Z app/templates/charts.html — use plan.pdhc display names in dropdown + chart legend (#471 item 5)

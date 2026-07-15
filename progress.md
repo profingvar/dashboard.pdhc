@@ -272,3 +272,91 @@ create_all() can't reproduce — not Phase 4 regressions.
 
 Frontend (§4.4 / §4.5) and Playwright E2E (§4.8 e2e block) deferred
 until the 5 CDRs exist and a real environment can drive them.
+
+---
+
+## #462 clinical dashboard redesign — D3 + D5 (2026-07-13)
+
+Decomposition of #462 into build tickets #463–#469 (see
+`docs/redesign_462_decisions.md` for the locked operator answers to the
+#469 open questions). Started the two Q1-independent tickets.
+
+### D5 — Saved designs (#467) — DONE (local, tested; not deployed)
+- `SavedDesign` model (`app/models/__init__.py`): user-private reusable
+  template. `owner_user_guid` (String128) + `name` + opaque JSONB `spec`.
+  NOT patient-bound (operator #469 Q3).
+- Migration `2026_07_13_saved_design.py` (rev `sd071322aa01`, down
+  `a8bc21200001`; id ≤32 chars). `flask db heads` → single head.
+- `app/routes/designs.py`: CRUD under `/api/v1/designs`, every op scoped
+  to `owner_user_guid`; foreign designs read back 404 (no existence leak).
+- Tests `test_saved_design.py`: 3 (CRUD happy-path, validation, owner
+  isolation). All green.
+
+### D3 — Clinical patient picker (#465) — DONE (dashboard side; live wiring pends #468)
+- `app/services/cdr1_client.py`: `Cdr1Client` reads CDR1 under a
+  care-delivery basis — declares `X-Access-Purpose: care-delivery` so
+  CDR1 selects care_access_policy/spärr over #422 analysis-consent
+  (bypass is CDR-side, #468). Org scope via `X-Org-Guids`; service-key
+  auth; fail-open to `[]` on error. `parse_patient_bundle` pure helper.
+- `app/routes/picker.py` + `templates/select.html`: `GET /select` lists
+  org-affiliation-scoped patients from CDR1, client-side name/id filter,
+  single-select → `/patient/<guid>`. Banner when `CDR1_BASE_URL` unset.
+- Config `CDR1_BASE_URL` (+ `.env.example`).
+- Tests `test_patient_picker.py`: 5 (bundle parse, no-base-url empty,
+  non-admin-no-orgs empty, /select lists+scopes, unconfigured banner).
+
+Full suite: **211 passed**. NOT yet deployed. Live smoke deferred until
+the SSH tunnel is up AND #468 (CDR1 care-delivery read + per-org
+patient-index) lands. Blocked/next: #463 (D1 split + auth re-home),
+#464 (D2 per-patient CDR1 reads), #466 (D4 charts), #468 (D6 CDR side).
+
+## #463 / #462 D1 — auth re-home (2026-07-13)
+
+The clinical dashboard's front door moves off the analysis-phase gate onto a
+CARE-DELIVERY gate; the analyse engine keeps analysis-phase. Implemented as a
+route-aware SSO gate (app/auth._dashboard_access_allowed) so NO analyse route
+file changes and the whole test suite (AUTH_MODE=off, no gate) is unaffected —
+only the production SSO path changes.
+  - has_care_delivery_access = SU admin OR professional with a care-unit scope
+    (scope_org_guids: affiliations[].care_unit_guid, dual-read organization_ids).
+  - _is_clinical_path: /, /refresh, /select, /patient/*, /api/v1/designs.
+  - Existing test_auth.py SSO tests still pass (blobs carry org scope).
+Boundary inventory (what stays vs relocates to analyse.pdhc) in
+docs/redesign_462_decisions.md §D1. PHYSICAL relocation deferred to #470
+(blocked until analyse.pdhc exists — deleting live analyse code now would drop
+nurse/researcher + gateway's analyse pull with nowhere to land). CLAUDE.md §11
+to be updated when this deploys. Tests: test_care_access_auth.py 10/10; full
+suite 222 passed. NOT deployed.
+
+## #464 D2 + #466 D4 — CDR1-backed per-patient charts (2026-07-13)
+
+Built the new clinical patient view WITHOUT disturbing the legacy
+ObservationCache /patient view (retirement + #212 re-home tracked in #471).
+
+#464 (data): cdr1_client.patient_series() → CDR1 /clinical/patient/<guid>/series.
+New app/routes/charts.py JSON proxies the browser calls (browser has no service
+key): /api/v1/patient/<guid>/parameters (sorted concepts) + /series (points,
+spärr-filtered by org_guid via ips_client, coarse — lift refinement in #471).
+Both care-delivery gated (/api/v1/patient/ added to clinical paths).
+
+#466 (charts): new page /patient/<guid>/charts (charts.html). Chart.js.
+Per operator #469 answers: parameter dropdown sorted by data count (Q7 label =
+code+unit); MIRROR a 2nd parameter on an independent right y-axis (Q2 dual-axis);
+1 diagram default, hard cap 3, each independent incl. its own time window (Q8);
+CONTINUOUS time slider mapping exp 1 day..5 years (Q4) + zero-based/autoscale
+toggle + y-max slider (Q4); SAVE/LOAD reusable design templates via
+/api/v1/designs (#467), applied to any patient (Q3). /select now links here.
+
+Deferred (→#471): retire legacy /patient + ObservationCache; re-home #212;
+vendor Chart.js (still CDN); spärr lift refinement; plan.pdhc display names.
+
+Tests: test_patient_charts.py 5/5; full suite 227 passed. NOT deployed.
+
+## #471 item 3 — vendor Chart.js (2026-07-13)
+Chart.js 4.4.6 UMD + chartjs-adapter-date-fns v3.0.0 vendored into
+app/static/vendor/; base.html now loads them locally instead of cdn.jsdelivr.
+Self-contained (survives an offline/locked-down deploy), no CSP/external dep.
+Served + referenced verified; full suite 227 passed. Remaining #471 items
+(retire legacy /patient+ObservationCache [blocked on #469 Q6], re-home #212
+[needs legal #437], spärr lift refinement + plan.pdhc display names [need a
+code_canonical↔Concept.guid mapping]) stay open.

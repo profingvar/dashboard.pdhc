@@ -78,6 +78,13 @@ def create_app(config=None):
         "DASHBOARD_PDHC_SERVICE_KEY",
         os.environ.get("DASHBOARD_PDHC_SERVICE_KEY", ""),
     )
+    # #465 / #462 D2-D3 — CDR1 (production CDR) base URL for the clinical
+    # patient picker + per-patient reads. Distinct from CDR_ENDPOINTS
+    # (the CDR2-6 analyse federation). Care-delivery reads only.
+    app.config.setdefault(
+        "CDR1_BASE_URL",
+        os.environ.get("CDR1_BASE_URL", ""),
+    )
     # Ticket #213 — ObservationCache retention. Rows whose `fetched_at`
     # is older than this many hours are dropped by the `flask cache-sweep`
     # CLI (run from cron). Default 48h matches the upper end of the
@@ -102,6 +109,12 @@ def create_app(config=None):
         register_export_audit_cli,
     )
     from app.routes.workspace import bp as workspace_bp
+    # #467 / #462 D5 — user-private reusable dashboard design templates.
+    from app.routes.designs import bp as designs_bp
+    # #465 / #462 D3 — clinical patient picker (org-affiliation scoped, CDR1).
+    from app.routes.picker import bp as picker_bp
+    # #464 D2 + #466 D4 — per-patient CDR1 charts view + JSON proxies.
+    from app.routes.charts import bp as charts_bp
     # #291 — analyse-layer observations search (mirrors cdr1's removed
     # /api/v1/observations endpoint). Gateway's proxy lands here.
     from app.analyse.observations_search import bp as observations_search_bp
@@ -117,6 +130,9 @@ def create_app(config=None):
     app.register_blueprint(nurse_bp)
     app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
+    app.register_blueprint(designs_bp)
+    app.register_blueprint(picker_bp)
+    app.register_blueprint(charts_bp)
     app.register_blueprint(observations_search_bp)
     app.register_blueprint(analyse_stats_bp)
     app.register_blueprint(analyse_canonical_bp)
