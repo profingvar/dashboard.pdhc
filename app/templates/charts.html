@@ -60,9 +60,12 @@ function daysLabel(d) {
   return (d / 365).toFixed(1) + " y";
 }
 function paramLabel(p) {
-  return p.code + (p.unit ? " (" + p.unit + ")" : "") + " · " + p.count;
+  // Prefer the plan.pdhc display name (#471); fall back to the raw code.
+  const name = p.display || p.code;
+  return name + (p.unit ? " (" + p.unit + ")" : "") + " · " + p.count;
 }
 function unitOf(code) { const p = PARAMS.find(x => x.code === code); return p ? p.unit : ""; }
+function displayOf(code) { const p = PARAMS.find(x => x.code === code); return (p && p.display) || code; }
 
 async function loadParams() {
   try {
@@ -130,12 +133,12 @@ async function redraw(diagram) {
   diagram._lastPrimary = prim;
 
   const datasets = [{
-    label: diagram.primary, data: prim, yAxisID: "yL",
+    label: displayOf(diagram.primary), data: prim, yAxisID: "yL",
     borderColor: COLORS.primary, backgroundColor: COLORS.primary,
     showLine: true, pointRadius: 2, tension: .2,
   }];
   if (diagram.mirror) datasets.push({
-    label: diagram.mirror, data: mir, yAxisID: "yR",
+    label: displayOf(diagram.mirror), data: mir, yAxisID: "yR",
     borderColor: COLORS.mirror, backgroundColor: COLORS.mirror,
     showLine: true, pointRadius: 2, tension: .2,
   });
