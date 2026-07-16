@@ -360,3 +360,23 @@ Served + referenced verified; full suite 227 passed. Remaining #471 items
 (retire legacy /patient+ObservationCache [blocked on #469 Q6], re-home #212
 [needs legal #437], spärr lift refinement + plan.pdhc display names [need a
 code_canonical↔Concept.guid mapping]) stay open.
+
+## DEPLOYED to prod — 2026-07-16
+Both PRs #1 merged to main; deployed per docs/deploy_462_runbook.md.
+- CDR1 (cdr.pdhc): git pull --ff-only (5350a73→a920c14) + docker-compose up -d
+  --build app. No schema change. clinical_read live; /api/v1/clinical/patients
+  smoke HTTP 200 count=10.
+- dashboard: new release releases/2026-07-16T11-19-18Z (from tarball 3281af3),
+  cp .env forward, docker-compose up -d --build app, flask db upgrade
+  (a8bc21200001→sd071322aa01, single head), current flipped.
+- EDIT A done: dashboard .env CDR1_BASE_URL=http://host.docker.internal:9046
+  (loopback). EDIT B (PLAN_BASE_URL) deferred → raw concept codes for now.
+- Verified end-to-end: dashboard container→CDR1 (app env) HTTP 200 count=10;
+  host.docker.internal resolves; external /healthz 200 both services; DBs
+  untouched. NOT yet browser/SSO-smoked (operator: /select→/charts).
+- Gotcha: `docker compose` v2 threw 'unknown flag -d' → used docker-compose v1
+  (§8.3 probe). CDR1 compose project-name unpinned warning (data intact).
+- Rollback: dashboard ln -snf releases/2026-07-10T06-54-37Z-x1 current + rebuild;
+  CDR1 git checkout 5350a73 + rebuild.
+- Next: operator browser smoke; then #471 item 1 (retire legacy ObservationCache
+  surface, Q6=CDR1-only); legal on #472/#437; optional PLAN_BASE_URL for names.
