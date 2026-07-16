@@ -86,8 +86,9 @@ def test_auth_off_loads_dev_user():
     c = app.test_client()
     r = c.get("/healthz")
     assert r.status_code == 200
-    # any protected route in off-mode resolves the dev SU
-    r = c.get("/")
+    # any protected route in off-mode resolves the dev SU; '/' now redirects
+    # to the CDR1 picker (#471 item 1).
+    r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
 
 
@@ -142,7 +143,9 @@ def test_sso_authed_session_passes_phase_gate():
         db.session.add(User(guid=uid, username="u@example.com", is_admin=False, is_su=False))
         db.session.commit()
     _login_as(c, blob)
-    r = c.get("/")
+    # '/' redirects to /select (both care-delivery gated); an affiliated/
+    # org-scoped professional passes and lands on the picker (200).
+    r = c.get("/", follow_redirects=True)
     assert r.status_code == 200
 
 

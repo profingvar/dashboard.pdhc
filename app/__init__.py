@@ -85,14 +85,6 @@ def create_app(config=None):
         "CDR1_BASE_URL",
         os.environ.get("CDR1_BASE_URL", ""),
     )
-    # Ticket #213 — ObservationCache retention. Rows whose `fetched_at`
-    # is older than this many hours are dropped by the `flask cache-sweep`
-    # CLI (run from cron). Default 48h matches the upper end of the
-    # ticket's 24-48h band.
-    app.config.setdefault(
-        "OBSERVATION_CACHE_TTL_HOURS",
-        int(os.environ.get("OBSERVATION_CACHE_TTL_HOURS", "48")),
-    )
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 
@@ -101,7 +93,7 @@ def create_app(config=None):
     install_request_loader(app)
 
     from app.routes.views import bp as views_bp
-    from app.routes.api import bp as api_bp, register_metadata
+    from app.routes.api import register_metadata
     from app.routes.auth import bp as auth_bp
     from app.routes.nurse import bp as nurse_bp
     from app.routes.researcher import (
@@ -126,7 +118,6 @@ def create_app(config=None):
     from app.analyse.openehr import bp as analyse_openehr_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
-    app.register_blueprint(api_bp)
     app.register_blueprint(nurse_bp)
     app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
@@ -140,10 +131,10 @@ def create_app(config=None):
     register_metadata(app)
     register_export_audit_cli(app)
 
-    # Ticket #213. POST /admin/cache/scrub + `flask cache-sweep` CLI.
-    from app.routes.admin import bp as admin_bp, register_cache_sweep_cli
+    # Audit view (#215). (The cache-scrub route + cache-sweep CLI were
+    # removed with the ObservationCache surface — #471 item 1.)
+    from app.routes.admin import bp as admin_bp
     app.register_blueprint(admin_bp)
-    register_cache_sweep_cli(app)
 
     log_dir = _results_dir()
     handler = logging.FileHandler(os.path.join(log_dir, "app.log"))
