@@ -380,3 +380,19 @@ Both PRs #1 merged to main; deployed per docs/deploy_462_runbook.md.
   CDR1 git checkout 5350a73 + rebuild.
 - Next: operator browser smoke; then #471 item 1 (retire legacy ObservationCache
   surface, Q6=CDR1-only); legal on #472/#437; optional PLAN_BASE_URL for names.
+
+## #471 item 1 — retire legacy ObservationCache surface (STAGED 2026-07-16)
+Branch feat/471-retire-legacy-cache (PR, NOT merged/deployed — lands after the
+browser smoke). Q6=CDR1-only, so the gateway→cache clinical surface is retired:
+- '/'->redirect /select; '/patient/<guid>'->redirect /patient/<guid>/charts.
+- Removed: /api/v1/series, GatewayClient, cache_retention (sweep+scrub),
+  /admin/cache/scrub, cache-sweep CLI, refresh button, OBSERVATION_CACHE_TTL,
+  dead templates (landing/patient/admin_override_required).
+- KEPT (not destructive): ObservationCache + RefreshLog MODELS + prod tables
+  (dropping the tables is a separate confirm-required data step); ips_client;
+  /admin/audit viewer.
+- #212 admin off-org justification flow REMOVED (lived only on legacy /patient;
+  the live /charts path already lacked it). Care-delivery admin control = item 2
+  (legal #437). #212 logic preserved in git history.
+Tests: 194 passed (33 obsolete removed: gateway_client/cache_retention/
+admin_override_audit + route tests). app boots, /select present, series gone.

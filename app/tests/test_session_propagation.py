@@ -12,7 +12,7 @@ from app.services.session_headers import (
     current_session_id,
     outbound_session_headers,
 )
-from app.services.gateway_client import GatewayClient
+from app.services.cdr1_client import Cdr1Client
 from app.services.ips_client import IpsClient
 from app.analyse import federation
 from app.analyse.federation import CdrEndpoint, CdrRegistry, fanout
@@ -37,11 +37,11 @@ def test_helper_resolves_and_gates():
         assert outbound_session_headers() == {}
 
 
-def test_gateway_and_ips_clients_carry_session():
+def test_cdr1_and_ips_clients_carry_session():
     app = _app()
     with app.test_request_context("/", headers={"X-Operator-Session-Id": SID}):
-        assert GatewayClient(token="t", base_url="http://gw")._headers().get(
-            "X-Operator-Session-Id") == SID
+        assert Cdr1Client(base_url="http://cdr1", service_key="k")._headers(
+            [], False).get("X-Operator-Session-Id") == SID
         assert IpsClient(base_url="http://ips", service_key="k")._headers().get(
             "X-Operator-Session-Id") == SID
 
