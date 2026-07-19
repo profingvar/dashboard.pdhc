@@ -13,8 +13,8 @@ care-unit scope). The (soon-to-relocate to analyse.pdhc) analyse engine
 routes keep the legacy *analysis* phase gate: `is_su_admin` OR
 (`user_type == "professional"` AND `"analysis" in effective_phases`).
 
-Rule 24: non-admin users only see ObservationCache rows whose org_guid is
-in their `organization_ids` blob field.
+Rule 24: non-admin users are org-scoped to their affiliation care-units
+(`scope_org_guids`); CDR1 enforces that scope on reads via X-Org-Guids.
 """
 from __future__ import annotations
 
@@ -194,7 +194,8 @@ def initiate_sso_login(next_url: str, state: str) -> str:
 # ---------- per-request loader ----------
 
 def _upsert_local_user(blob: dict) -> None:
-    """Make sure a local users row exists so RefreshLog FK works."""
+    """Make sure a local ``users`` row exists for the SSO caller (used by
+    OrgMembership + the create-su CLI; keeps the local user table populated)."""
     guid = blob.get("user_guid")
     if not guid:
         return
@@ -325,15 +326,9 @@ def org_guids_for(user) -> list[str]:
     return list(getattr(user, "org_ids", []) or [])
 
 
-def scope_to_user_orgs(query, model_attr):
-    """Apply org filter on a SQLAlchemy query unless user is admin."""
-    user = g.current_user
-    if user.is_admin:
-        return query
-    orgs = org_guids_for(user)
-    if not orgs:
-        return query.filter(model_attr == "__none__")
-    return query.filter(model_attr.in_(orgs))
+# (scope_to_user_orgs was removed with the ObservationCache surface — #471.
+# CDR1 reads are org-scoped on the CDR side via X-Org-Guids; the dashboard
+# derives that list with org_guids_for(user).)
 
 
 # back-compat shim used by existing routes; before_request already loaded

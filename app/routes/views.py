@@ -14,8 +14,8 @@ care-delivery replacement is tracked as #471 item 2 (needs legal, #437). Note
 that the deployed clinical path (``/charts``) already did not carry #212, so
 this change removes no control that was live.
 
-The ``ObservationCache`` / ``RefreshLog`` models + their prod tables are
-intentionally KEPT — dropping them is a separate, confirm-required data step.
+The ``ObservationCache`` / ``RefreshLog`` models and their prod tables were
+subsequently dropped (migration ``drop0719cache01``; data backed up first).
 """
 from __future__ import annotations
 

@@ -268,3 +268,8 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-07-16T11:39:39Z app/templates/{landing,patient,admin_override_required}.html — DELETED (#471.1)
 2026-07-16T11:39:39Z app/tests/{test_gateway_client,test_cache_retention,test_admin_override_audit}.py — DELETED (#471.1)
 2026-07-16T11:39:39Z app/tests/{test_views_api,test_blocks_filter,test_auth,test_session_propagation}.py — updated for retirement (#471.1)
+2026-07-19T19:24:33Z app/models/__init__.py — remove ObservationCache + RefreshLog models (#471 table drop)
+2026-07-19T19:24:33Z app/migrations/versions/2026_07_19_drop_cache_tables.py — new; drop observation_cache + refresh_log (rev drop0719cache01)
+2026-07-19T19:24:33Z app/auth.py — remove unused scope_to_user_orgs; fix stale Rule24 + _upsert_local_user docstrings (#471)
+2026-07-19T19:24:33Z app/routes/views.py — docstring: tables now dropped (#471)
+2026-07-19T19:24:33Z app/tests/{test_models,test_auth,test_blocks_filter}.py — drop ObservationCache/RefreshLog/scope_to_user_orgs coverage (#471)
