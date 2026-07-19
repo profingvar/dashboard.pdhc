@@ -396,3 +396,12 @@ browser smoke). Q6=CDR1-only, so the gateway→cache clinical surface is retired
   (legal #437). #212 logic preserved in git history.
 Tests: 194 passed (33 obsolete removed: gateway_client/cache_retention/
 admin_override_audit + route tests). app boots, /select present, series gone.
+
+## #471 item 1 — DEPLOYED 2026-07-19
+PR #2 merged (main 0ea948f); code-only dashboard redeploy (no migration).
+New release releases/2026-07-19T19-14-02Z, rebuild, current flipped. Verified in
+running image: gateway_client absent; /select + /patient/<guid>/charts present;
+/api/v1/series absent. External /metadata advertises only 'healthz' (no series);
+/healthz 200. Legacy ObservationCache clinical surface is now retired in prod
+(models + tables KEPT — dropping tables is a separate confirm-required step).
+Rollback: ln -snf releases/2026-07-16T11-19-18Z current + rebuild.
