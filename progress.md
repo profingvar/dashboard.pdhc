@@ -416,3 +416,11 @@ migration drop0719cache01 (down_revision sd071322aa01, single head) drops both
 tables (downgrade recreates the empty schemas; data restorable from the dump).
 Tests 192 passed (2 org-scoping tests removed). Deploy = flask db upgrade in the
 dashboard container (like the last deploy).
+
+## #471 drop cache tables — DEPLOYED 2026-07-19
+PR #3 merged (main 88c9a23); deployed release releases/2026-07-19T19-25-58Z,
+flask db upgrade ran drop0719cache01 (sd071322aa01->drop0719cache01).
+Verified: pg_tables query for observation_cache/refresh_log returns empty (both
+dropped); models absent in running image; /healthz 200. Backup retained at
+~/backups/predeploy/dashboard/observation_cache_refresh_log_20260719T192036Z.sql
+(21.7 MB, 7019+185 rows). Rollback: flask db downgrade + restore from that dump.
