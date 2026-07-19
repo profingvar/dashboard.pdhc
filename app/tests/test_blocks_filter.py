@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy
 
 from app import create_app
-from app.models import db, ObservationCache
+from app.models import db
 from app.services import ips_client as ips_mod
 from app.services.ips_client import Block
 

@@ -405,3 +405,14 @@ running image: gateway_client absent; /select + /patient/<guid>/charts present;
 /healthz 200. Legacy ObservationCache clinical surface is now retired in prod
 (models + tables KEPT — dropping tables is a separate confirm-required step).
 Rollback: ln -snf releases/2026-07-16T11-19-18Z current + rebuild.
+
+## #471 — drop the retired ObservationCache + RefreshLog tables (STAGED 2026-07-19)
+Branch feat/471-drop-cache-tables (PR, NOT merged/deployed). The tables were NOT
+empty (observation_cache=7019, refresh_log=185 stale rows from before the
+retirement). Backed up first: pg_dump both to
+~/backups/predeploy/dashboard/observation_cache_refresh_log_<ts>.sql (21.7 MB,
+7019+185 rows verified). Then: removed the models + unused scope_to_user_orgs;
+migration drop0719cache01 (down_revision sd071322aa01, single head) drops both
+tables (downgrade recreates the empty schemas; data restorable from the dump).
+Tests 192 passed (2 org-scoping tests removed). Deploy = flask db upgrade in the
+dashboard container (like the last deploy).

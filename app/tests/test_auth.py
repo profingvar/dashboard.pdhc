@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 import sqlalchemy
 from app import create_app
-from app.models import db, User, ObservationCache
-from app.auth import scope_to_user_orgs, has_analysis_access, _blob_to_user
+from app.models import db, User
+from app.auth import has_analysis_access, _blob_to_user
 from flask import g
 from flask import session as flask_session
 
@@ -65,18 +65,6 @@ def _login_as(client, blob, token="test-token"):
     with client.session_transaction() as sess:
         sess["sso_token"] = token
         sess["access_blob"] = blob
-
-
-def _mk_obs(org):
-    return ObservationCache(
-        source_obs_guid=str(uuid.uuid4()),
-        patient_guid=str(uuid.uuid4()),
-        org_guid=org,
-        concept_guid=str(uuid.uuid4()),
-        concept_name="X",
-        value=1.0, unit="u",
-        observed_at=datetime.now(timezone.utc),
-    )
 
 
 # ---------- AUTH_MODE=off ----------
@@ -162,44 +150,6 @@ def test_sso_authed_without_phase_403():
     _login_as(c, blob)
     r = c.get("/")
     assert r.status_code == 403
-
-
-# ---------- org scoping uses blob organization_ids ----------
-
-def test_org_scoping_filters_non_admin():
-    app = _app("off")
-    with app.app_context():
-        org_a = str(uuid.uuid4())
-        org_b = str(uuid.uuid4())
-        db.session.add_all([_mk_obs(org_a), _mk_obs(org_b)])
-        db.session.commit()
-
-        blob = {"is_su_admin": False, "organization_ids": [org_a]}
-        with app.test_request_context("/"):
-            g.current_user = _blob_to_user(blob)
-            rows = scope_to_user_orgs(ObservationCache.query, ObservationCache.org_guid).all()
-            assert all(r.org_guid == org_a for r in rows)
-            assert any(r.org_guid == org_a for r in rows)
-
-        ObservationCache.query.filter(
-            ObservationCache.org_guid.in_([org_a, org_b])
-        ).delete(synchronize_session=False)
-        db.session.commit()
-
-
-def test_org_scoping_admin_sees_all():
-    app = _app("off")
-    with app.app_context():
-        org_a = str(uuid.uuid4())
-        db.session.add(_mk_obs(org_a))
-        db.session.commit()
-        blob = {"is_su_admin": True, "organization_ids": []}
-        with app.test_request_context("/"):
-            g.current_user = _blob_to_user(blob)
-            rows = scope_to_user_orgs(ObservationCache.query, ObservationCache.org_guid).all()
-            assert any(r.org_guid == org_a for r in rows)
-        ObservationCache.query.filter_by(org_guid=org_a).delete()
-        db.session.commit()
 
 
 # ---------- create-su CLI (Rule 23) ----------

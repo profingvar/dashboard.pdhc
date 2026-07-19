@@ -38,31 +38,10 @@ class OrgMembership(db.Model):
     role = db.Column(db.String(64), nullable=False, default="member")
 
 
-class ObservationCache(db.Model):
-    __tablename__ = "observation_cache"
-    guid = db.Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
-    source_obs_guid = db.Column(UUID(as_uuid=False), unique=True, nullable=False)
-    patient_guid = db.Column(UUID(as_uuid=False), nullable=False, index=True)
-    org_guid = db.Column(UUID(as_uuid=False), nullable=False, index=True)
-    concept_guid = db.Column(UUID(as_uuid=False), nullable=False, index=True)
-    concept_name = db.Column(db.String(256), nullable=False)
-    value = db.Column(db.Float, nullable=True)
-    unit = db.Column(db.String(64), nullable=True)
-    observed_at = db.Column(db.DateTime(timezone=True), nullable=False)
-    raw = db.Column(JSONB, nullable=True)
-    fetched_at = db.Column(db.DateTime(timezone=True), default=_now, nullable=False)
-
-
-class RefreshLog(db.Model):
-    __tablename__ = "refresh_log"
-    guid = db.Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
-    user_guid = db.Column(UUID(as_uuid=False), db.ForeignKey("users.guid"), nullable=False)
-    org_guid = db.Column(UUID(as_uuid=False), nullable=False)
-    started_at = db.Column(db.DateTime(timezone=True), default=_now, nullable=False)
-    finished_at = db.Column(db.DateTime(timezone=True), nullable=True)
-    status = db.Column(db.String(32), nullable=False, default="running")
-    rows_fetched = db.Column(db.Integer, nullable=False, default=0)
-    error = db.Column(db.Text, nullable=True)
+# ObservationCache + RefreshLog were removed in #471 (the legacy gateway->cache
+# clinical surface was retired; operator #469 Q6 = live CDR1 reads only). The
+# tables are dropped by migration drop0719cache01; prod data was backed up to
+# ~/backups/predeploy/dashboard/ first.
 
 
 class DashboardAudit(db.Model):
