@@ -20,6 +20,11 @@ def create_app(config=None):
         DATABASE_URL=os.environ.get("DATABASE_URL", ""),
         AUTH_MODE=os.environ.get("AUTH_MODE", "off"),
         GATEWAY_BASE_URL=os.environ.get("GATEWAY_BASE_URL", ""),
+        # #471.4 (DPO-approved #472): apply the indispensable-care spärr LIFT
+        # on CDR1 series reads (expose lift-covered concepts despite a block).
+        # Default OFF = safe coarse over-hiding; flip on to activate deliberately.
+        SPARR_LIFT_ENABLED=os.environ.get(
+            "SPARR_LIFT_ENABLED", "").strip().lower() in ("1", "true", "yes"),
     )
     if config:
         app.config.update(config)

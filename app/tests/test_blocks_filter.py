@@ -216,3 +216,77 @@ def test_cache_ttl_expiry():
     cache = ips_mod._BlockCache(ttl=0)  # immediate expiry
     cache.put(pat, [])
     assert cache.get(pat) is None
+
+
+# ---------------------------------------------------------------------------
+# #471.4 — CDR1 dict-point lift filter (DPO-approved #472). Pure functions.
+# ---------------------------------------------------------------------------
+from app.services.ips_client import (  # noqa: E402
+    filter_blocked_points, concept_guid_from_canonical,
+)
+
+_CLINIC = "clinic-1111"
+_CA = "concept-aaaa"   # covered by the lift
+_CB = "concept-bbbb"   # not covered
+
+
+def _pt(concept_guid, org=_CLINIC, at="2026-06-15", code=None):
+    return {"code": code or f"urn:pdhc:concept/{concept_guid}",
+            "at": at, "org_guid": org, "value": 1}
+
+
+def _lift(concepts, frm="2026-01-01", until="2026-12-31"):
+    return _make_block(_CLINIC, lift_kind="indispensable_care",
+                       lift_concepts=concepts, lift_from=frm, lift_until=until)
+
+
+def test_concept_guid_from_canonical_parses_and_falls_back():
+    assert concept_guid_from_canonical("urn:pdhc:concept/abc-123") == "abc-123"
+    assert concept_guid_from_canonical("http://loinc.org/8480-6") is None
+    assert concept_guid_from_canonical("urn:pdhc:concept/") is None
+    assert concept_guid_from_canonical(None) is None
+
+
+def test_points_no_blocks_all_kept():
+    kept, exp = filter_blocked_points([_pt(_CA), _pt(_CB)], [])
+    assert len(kept) == 2 and exp == []
+
+
+def test_point_from_unblocked_clinic_kept():
+    kept, exp = filter_blocked_points([_pt(_CA, org="other")], [_make_block(_CLINIC)])
+    assert len(kept) == 1 and exp == []
+
+
+def test_blocked_no_lift_hidden():
+    kept, exp = filter_blocked_points([_pt(_CA)], [_make_block(_CLINIC)])
+    assert kept == [] and exp == []
+
+
+def test_lift_exposes_covered_concept_in_window():
+    kept, exp = filter_blocked_points([_pt(_CA), _pt(_CB)], [_lift([_CA])])
+    assert [p["code"] for p in kept] == [f"urn:pdhc:concept/{_CA}"]
+    assert len(exp) == 1 and exp[0][1].lift_kind == "indispensable_care"
+
+
+def test_lift_does_not_expose_uncovered_concept():
+    kept, exp = filter_blocked_points([_pt(_CB)], [_lift([_CA])])
+    assert kept == [] and exp == []
+
+
+def test_lift_date_outside_window_hidden():
+    kept, exp = filter_blocked_points(
+        [_pt(_CA, at="2025-06-15"), _pt(_CA, at="2027-06-15")], [_lift([_CA])])
+    assert kept == [] and exp == []
+
+
+def test_non_parseable_code_stays_hidden():
+    pt = _pt(_CA, code="http://termbank.pdhc/loinc/8480-6")
+    kept, exp = filter_blocked_points([pt], [_lift([_CA])])
+    assert kept == [] and exp == []
+
+
+def test_consent_lift_not_treated_as_exposure():
+    consent = _make_block(_CLINIC, lift_kind="consent", lift_concepts=[_CA],
+                          lift_from="2026-01-01", lift_until="2026-12-31")
+    kept, exp = filter_blocked_points([_pt(_CA)], [consent])
+    assert kept == [] and exp == []

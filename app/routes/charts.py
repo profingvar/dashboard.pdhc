@@ -13,7 +13,7 @@ clinical paths in app.auth):
 """
 from __future__ import annotations
 
-from flask import Blueprint, g, jsonify, render_template, request
+from flask import Blueprint, current_app, g, jsonify, render_template, request
 
 from app.auth import org_guids_for
 from app.services.audit import audit_read
@@ -22,7 +22,32 @@ from app.services.ips_client import (
     get_active_blocks,
     blocked_clinic_ids,
     has_any_active_block,
+    filter_blocked_points,
+    concept_guid_from_canonical,
 )
+
+
+def _lift_exposure_audit(exposures):
+    """Q4 (#472) audit detail: the lift reference for each exposure, aggregated
+    by lift (blocked clinic + window). Reader + patient + role are already on
+    the audit row; this adds *which* lift exposed *what*."""
+    by_lift: dict = {}
+    for p, lift in exposures:
+        key = (lift.source_scope_id, lift.lift_from_date, lift.lift_until_date)
+        e = by_lift.setdefault(key, {
+            "blocked_clinic": lift.source_scope_id,
+            "lift_kind": lift.lift_kind,
+            "lift_from_date": lift.lift_from_date,
+            "lift_until_date": lift.lift_until_date,
+            "exposed_concepts": set(),
+            "exposed_points": 0,
+        })
+        cg = concept_guid_from_canonical(p.get("code") or p.get("code_canonical"))
+        if cg:
+            e["exposed_concepts"].add(cg)
+        e["exposed_points"] += 1
+    return [{**v, "exposed_concepts": sorted(v["exposed_concepts"])}
+            for v in by_lift.values()]
 
 bp = Blueprint("charts", __name__)
 
@@ -66,14 +91,26 @@ def series(guid):
         guid, codes, frm, to, orgs, is_admin=is_admin,
     )
     # Spärr (operator #469 Q1): drop points from clinics the patient has
-    # blocked. Coarse org-level filter — lift refinement is deferred because
-    # spärr's lift_concept_guids are plan.pdhc Concept guids while CDR
-    # points carry code_canonical (a URI); mapping the two is follow-up
-    # work. Filtering toward hiding is the safe direction.
+    # blocked. Two modes:
+    #  - default (SPARR_LIFT_ENABLED off): COARSE org-level hide — drop every
+    #    point from a blocked clinic (safe, over-hides).
+    #  - SPARR_LIFT_ENABLED (#471.4, DPO-approved #472): apply the
+    #    indispensable-care LIFT — a blocked point is exposed iff an active
+    #    indispensable_care lift on its clinic covers its concept (parsed from
+    #    code_canonical) AND its date; non-parseable code stays hidden. Each
+    #    read that exposes lifted data is specially audited (Q4).
     blocks = get_active_blocks(guid)
     blocked = blocked_clinic_ids(blocks)
     if blocked:
-        pts = [p for p in pts if p.get("org_guid") not in blocked]
+        if current_app.config.get("SPARR_LIFT_ENABLED"):
+            pts, exposures = filter_blocked_points(pts, blocks)
+            if exposures:
+                g._audit_event_type = "sparr_lift_exposure"
+                g._audit_payload_snapshot = {
+                    "sparr_lift": _lift_exposure_audit(exposures),
+                }
+        else:
+            pts = [p for p in pts if p.get("org_guid") not in blocked]
     g._audit_n_rows = len(pts)
     return jsonify(
         patient_guid=guid, points=pts,

@@ -344,6 +344,84 @@ def _row_passes_any_lift(row, lifts: list[Block]) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# CDR1 dict-point variant (#471.4, DPO-approved #472)
+# ---------------------------------------------------------------------------
+# The CDR1 clinical read (routes/charts.py) yields dict points
+# ``{code, at, value, unit, org_guid, ...}`` where ``code`` is the row's
+# ``code_canonical`` (prod form ``urn:pdhc:concept/<guid>``), NOT a stored
+# concept_guid. #472 Q1 approved deriving the concept identity by PARSING that
+# URI as the basis for the indispensable-care lift filter. Same rule as
+# ``_row_passes_any_lift`` above (legal-confirmed 2026-06-04).
+
+_CONCEPT_URI_PREFIX = "urn:pdhc:concept/"
+
+
+def concept_guid_from_canonical(code_canonical):
+    """Parse the plan.pdhc Concept guid out of a CDR ``code_canonical`` URI.
+
+    Returns None for any value that is not ``urn:pdhc:concept/<guid>`` (a
+    termbank URI, a legacy non-guid code, or None) — which, under a block,
+    keeps the point HIDDEN (the DPO-approved under-expose fallback, #472 Q3)."""
+    if isinstance(code_canonical, str) and code_canonical.startswith(_CONCEPT_URI_PREFIX):
+        guid = code_canonical[len(_CONCEPT_URI_PREFIX):].strip()
+        return guid or None
+    return None
+
+
+def _point_lift(concept_guid, observed_iso, lifts: list[Block]):
+    """Return the lift Block that exposes this (concept, date), else None.
+    Dict-point analogue of ``_row_passes_any_lift`` — same window/concept rule,
+    but concept_guid is already parsed and observed_iso is the point's ISO date
+    string (CDR points already carry ISO ``at``; lift dates are ISO too)."""
+    if not concept_guid or not lifts:
+        return None
+    for lift in lifts:
+        allowed = {str(g) for g in (lift.lift_concept_guids or [])}
+        if concept_guid not in allowed:
+            continue
+        if lift.lift_from_date and observed_iso and observed_iso < lift.lift_from_date:
+            continue
+        if lift.lift_until_date and observed_iso and observed_iso > lift.lift_until_date:
+            continue
+        return lift
+    return None
+
+
+def filter_blocked_points(points, blocks: Iterable[Block]):
+    """Spärr filter for CDR1 dict points, with indispensable-care lift exposure.
+
+    Returns ``(kept_points, exposures)`` where ``exposures`` is a list of
+    ``(point, lift)`` tuples for the Q4 special audit (#472). A point from a
+    blocked clinic is EXPOSED only if an active ``indispensable_care`` lift on
+    that clinic covers its concept (parsed from ``code``/``code_canonical``)
+    AND its date. Everything else from a blocked clinic stays hidden; a point
+    with a non-parseable code stays hidden (safe fallback)."""
+    blocks = list(blocks)
+    blocked = blocked_clinic_ids(blocks)
+    if not blocked:
+        return list(points), []
+    lifts_by_scope: dict[str, list[Block]] = {}
+    for b in blocks:
+        if (b.source_scope_type == "clinic"
+                and b.lift_kind == "indispensable_care"
+                and b.lift_concept_guids):
+            lifts_by_scope.setdefault(b.source_scope_id, []).append(b)
+
+    kept, exposures = [], []
+    for p in points:
+        org = p.get("org_guid")
+        if org not in blocked:
+            kept.append(p)
+            continue
+        cg = concept_guid_from_canonical(p.get("code") or p.get("code_canonical"))
+        lift = _point_lift(cg, p.get("at"), lifts_by_scope.get(str(org), []))
+        if lift is not None:
+            kept.append(p)
+            exposures.append((p, lift))
+    return kept, exposures
+
+
 def has_any_active_block(blocks: Iterable[Block]) -> bool:
     """True iff the patient has at least one active block.
 
