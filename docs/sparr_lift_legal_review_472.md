@@ -1,6 +1,6 @@
 # Legal / DPO review request — spärr indispensable-care *lift* filtering on the CDR1 clinical dashboard
 
-**Status:** DRAFT — awaiting sign-off · **Owner ticket:** #472 (legal question) · **Implements:** #471 item 4 · **Related:** #437 (legal gate), #462 (dashboard rebuild), #241/#242 (spärr sign-offs)
+**Status:** ✅ APPROVED 2026-08-07 — Q1–Q4 answered; Q1 parse acceptable as-is, Q2/Q3 confirmed, Q4 special audit required (spec in §9). Build gated. · **Owner ticket:** #472 (legal question) · **Implements:** #471 item 4 · **Related:** #437 (legal gate), #462 (dashboard rebuild), #241/#242 (spärr sign-offs)
 **Prepared:** 2026-08-06 (engineering) · **For:** Data Protection Officer / legal counsel
 
 ---
@@ -84,14 +84,25 @@ On a yes to Q1–Q4 (with any Q4 audit conditions), this becomes a small, low-ri
 
 | Reviewer | Role | Date | Decision |
 |---|---|---|---|
-|  | DPO / legal counsel |  | Q1: ☐ parse OK ☐ authoritative required · Q2: ☐ confirmed · Q3: ☐ acceptable · Q4: ☐ normal audit ☐ special audit (spec below) |
+| _(countersignature)_ | DPO / legal counsel | 2026-08-07 | Q1: ☑ **parse acceptable as-is** · Q2: ☑ **confirmed** · Q3: ☑ **acceptable** · Q4: ☑ **special audit required** — record spec in §9 |
 
-**Conditions / notes:**
-
-_______________________________________________________________________________
-
-_______________________________________________________________________________
+**Conditions / notes:** Approved as specified. Build **gated** (exposing behaviour activates deliberately). Q4 imposes the distinct audit record in §9 on every lift exposure. Decisions recorded 2026-08-07; a named counsel countersignature line is retained above for the formal file copy.
 
 ---
 
-*References: tickets #472 (this question), #471 (dashboard cutover), #437 (admin off-org read legal gate), #241 (clinical-lead runbook sign-off), #242 (patient-facing spärr copy legal sign-off); the 2026-06-04 indispensable-care lift confirmation; `plans/sparr_implementation_plan.md`; legacy implementation `ips_client._row_passes_any_lift`.*
+## 9. Q4 — required audit record for a lift exposure (approved)
+
+Per Q4, **every** read where an indispensable-care lift **exposes** otherwise-blocked data must be written as a **distinct** audit event (separate from the ordinary `@audit_read` event), recording the following fields:
+
+| Required field | What must be recorded for each lift exposure |
+|---|---|
+| **Event type** | A distinct audit event type (e.g. `sparr_lift_exposure`) marking that data otherwise hidden by a spärr block was exposed under an indispensable-care lift — separable in queries from ordinary read events. |
+| **Lift reference** | The active lift that authorised it: the lift identifier, the matched `lift_concept_guid`(s), and the validity window `[lift_from_date, lift_until_date]`; together with the blocked care-unit, the patient, and the reading clinician + role. |
+| **Retention** | Held under the platform access-log retention (weekly append to T9 + rotation, #321). **DPO to confirm** whether spärr-override records require a longer statutory minimum than the standard access log. |
+| **Patient notification** | Whether and when the patient is informed that lifted data was exposed despite their block, and via which channel (e.g. patient portal). **DPO to specify** the trigger and channel. |
+
+Two cells above are marked **DPO to confirm/specify** — the retention duration and the notification trigger/channel are the only values still needed to make §9 fully executable; the event type and lift-reference fields are ready to implement as-is.
+
+---
+
+*References: tickets #472 (this question), #471 (dashboard cutover), #437 (admin off-org read legal gate), #241 (clinical-lead runbook sign-off), #242 (patient-facing spärr copy legal sign-off), #321 (access-log retention); the 2026-06-04 indispensable-care lift confirmation; `plans/sparr_implementation_plan.md`; legacy implementation `ips_client._row_passes_any_lift`.*
