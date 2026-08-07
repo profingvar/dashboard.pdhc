@@ -1,9 +1,15 @@
 """Role-guard tests — execution-plan §4.7 / §4.8.
 
 Verifies that:
-  - a researcher-only token hitting /api/nurse/* gets 403
-  - a nurse-only token hitting /api/cohort gets 403
-  - admin satisfies both
+  - the researcher engine (/api/cohort) is role-gated: nurse-only → 403,
+    researcher → ok, admin → ok
+  - the nurse single-patient views (/api/nurse/*) are NO LONGER role-gated
+    per-route: after the #546 fold they are CARE-DELIVERY clinical paths,
+    enforced by the app-level route gate (``app.auth._is_clinical_path`` →
+    ``has_care_delivery_access``), exactly like the /charts view. So the
+    access decision is tested against those two functions directly here;
+    the live-request 401/302 for an un-authenticated caller is covered in
+    ``test_nurse_sparr.py::test_gate_rejects_when_sso_and_no_bearer``.
 """
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ import pytest
 import sqlalchemy
 
 from app import create_app
+from app.auth import has_care_delivery_access, _is_clinical_path
 
 
 def _patch_blob(blob):
@@ -60,13 +67,21 @@ def app_with_blob():
     return app, blob_holder
 
 
-def test_nurse_endpoint_rejects_researcher_only(app_with_blob):
-    app, holder = app_with_blob
-    holder["blob"] = {"roles": ["researcher"], "is_su_admin": False,
-                       "organization_ids": ["org-1"]}
-    client = app.test_client()
-    resp = client.get("/api/nurse/patient/some-guid")
-    assert resp.status_code == 403
+def test_nurse_paths_are_care_delivery_clinical():
+    """#546: /api/nurse/* is a clinical (care-delivery) path, not analysis."""
+    assert _is_clinical_path("/api/nurse/patient/some-guid") is True
+    assert _is_clinical_path("/api/nurse/patient/g/agp") is True
+
+
+def test_nurse_care_delivery_gate_rejects_analysis_only_professional():
+    """A researcher/analyst professional WITHOUT a care relationship (no
+    care-unit scope) is denied the care-delivery nurse views — the fold's
+    whole point: analysis phase alone no longer opens single-patient care
+    views."""
+    blob = {"user_type": "professional", "is_su_admin": False,
+            "session_phases": ["analysis"], "affiliations": [],
+            "organization_ids": []}
+    assert has_care_delivery_access(blob) is False
 
 
 def test_nurse_endpoint_allows_nurse(app_with_blob):
@@ -110,9 +125,13 @@ def test_admin_satisfies_both(app_with_blob):
     assert research_resp.status_code != 403
 
 
-def test_anonymous_blocked(app_with_blob):
-    app, holder = app_with_blob
-    holder["blob"] = {}
-    client = app.test_client()
-    resp = client.get("/api/nurse/patient/some-guid")
-    assert resp.status_code == 403
+def test_anonymous_blocked_from_care_delivery():
+    """No blob → no care-delivery access (the app-level gate denies /api/nurse
+    and /charts alike). Admin and a care-unit-scoped professional pass."""
+    assert has_care_delivery_access(None) is False
+    assert has_care_delivery_access({}) is False
+    assert has_care_delivery_access({"is_su_admin": True}) is True
+    assert has_care_delivery_access({
+        "user_type": "professional",
+        "affiliations": [{"care_unit_guid": "org-1", "role": "nurse"}],
+    }) is True

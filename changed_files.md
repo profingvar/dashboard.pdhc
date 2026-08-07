@@ -273,3 +273,7 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-07-19T19:24:33Z app/auth.py — remove unused scope_to_user_orgs; fix stale Rule24 + _upsert_local_user docstrings (#471)
 2026-07-19T19:24:33Z app/routes/views.py — docstring: tables now dropped (#471)
 2026-07-19T19:24:33Z app/tests/{test_models,test_auth,test_blocks_filter}.py — drop ObservationCache/RefreshLog/scope_to_user_orgs coverage (#471)
+2026-08-07T17:50:24Z app/routes/nurse.py — #546 nurse-fold: care-delivery re-gate + per-patient spärr (coarse + #471.4 lift + sparr_lift_exposure audit), mirrors charts.py::series
+2026-08-07T17:50:24Z app/auth.py — #546: add /api/nurse/ to _is_clinical_path (nurse views = care-delivery, not analysis-phase)
+2026-08-07T17:50:24Z app/tests/test_nurse_sparr.py — new; nurse spärr + care-delivery gate coverage (9 tests)
+2026-08-07T17:50:24Z app/tests/{test_role_guards,test_analysis_consent,test_care_access_auth}.py — updated to the #546 model (nurse enforced at app-level care-delivery gate, not per-route role guard)

@@ -91,10 +91,11 @@ def test_care_access_none():
 
 
 def test_clinical_path_classification():
+    # #546: /api/nurse/* is now a care-delivery clinical path (nurse fold).
     for p in ("/", "/refresh", "/select", "/patient/abc", "/api/v1/designs",
-              "/api/v1/designs/xyz"):
+              "/api/v1/designs/xyz", "/api/nurse/patient/x", "/api/nurse/patient/g/agp"):
         assert _is_clinical_path(p), p
-    for p in ("/workspace", "/api/nurse/patient/x", "/api/cohort/build",
+    for p in ("/workspace", "/api/cohort/build",
               "/api/v1/observations", "/admin/audit"):
         assert not _is_clinical_path(p), p
 

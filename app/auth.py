@@ -123,6 +123,11 @@ def _is_clinical_path(path: str) -> bool:
         or path.startswith("/patient/")
         or path.startswith("/api/v1/patient/")
         or path.startswith("/api/v1/designs")
+        # #546 nurse-fold: the nurse single-patient views are point-of-care
+        # (care-delivery), not analysis-phase. A treating clinician with a
+        # care relationship reaches them without the 'analysis' phase; the
+        # reads are care-unit-scoped + spärr-filtered per patient (nurse.py).
+        or path.startswith("/api/nurse/")
     )
 
 

@@ -16,7 +16,9 @@ from unittest.mock import patch
 import pytest
 
 from app import create_app
-from app.auth import research_project_guids, _service_blob
+from app.auth import (
+    research_project_guids, _service_blob, has_care_delivery_access,
+)
 from app.services.ips_client import IpsClient, IpsUnreachable
 
 
@@ -75,8 +77,10 @@ def test_roles_derive_from_affiliations(app_with_blob):
     client = app.test_client()
     # researcher route passes on affiliation role (case-insensitive)…
     assert client.get("/api/cohort").status_code == 200
-    # …nurse route still denies
-    assert client.get("/api/nurse/patient/x").status_code == 403
+    # …and this researcher-affiliation blob (no care-unit user_type) has no
+    # care-delivery access, so the #546-folded nurse views (app-level
+    # care-delivery gate, not a per-route role guard) stay closed to it.
+    assert has_care_delivery_access(holder["blob"]) is False
 
 
 def test_roles_affiliations_take_precedence_over_legacy(app_with_blob):
@@ -114,7 +118,10 @@ def test_service_blob_denied_on_clinical_routes(app_with_blob):
         holder["blob"] = _service_blob("gateway.pdhc")
     client = app.test_client()
     assert client.get("/api/cohort").status_code == 403
-    assert client.get("/api/nurse/patient/x").status_code == 403
+    # /api/nurse is now a care-delivery clinical route (#546): a machine
+    # service blob (no admin, user_type=service, no affiliations) has no
+    # care-delivery access, so the app-level gate keeps it out.
+    assert has_care_delivery_access(holder["blob"]) is False
 
 
 # ---------------------------------------------------------------------------

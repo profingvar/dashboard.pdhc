@@ -1,32 +1,56 @@
-"""Nurse workspace API — platform-plan execution §4.2.
+"""Nurse workspace API — individual / point-of-care single-patient views.
 
-Endpoints (all under ``/api/nurse``):
+Part of cd-assist (the individual clinical-decision-assist half of the old
+dashboard — analyse-engine split #533, pivot 2026-08-07). Endpoints (all
+under ``/api/nurse``):
 
   GET /patient/<guid>                       — demographics + conditions +
-                                               regimen + last-N summary
+                                              regimen + last-N summary
   GET /patient/<guid>/agp?window=14d|90d    — AGP shape: bands + summary
   GET /patient/<guid>/variable/<canonical>  — single-variable series,
-                                               LTTB-downsampled to ≤ 2000
-  GET /patient/<guid>/events                — hypo / encounter / med-change
-                                               markers
+                                              LTTB-downsampled to <= 2000
+  GET /patient/<guid>/events                — hypo / encounter markers
+
+Two properties distinguish these from the analyse-engine (researcher) routes
+(#546, the nurse-fold; salvaged from the discarded greenfield cd-assist):
+
+1. Gate — these are CARE-DELIVERY routes, NOT analysis-phase. ``/api/nurse``
+   is registered as a clinical path in ``app.auth._is_clinical_path``, so the
+   request loader gates it on ``has_care_delivery_access`` (a care relationship
+   — at least one care-unit scope — or SU admin), exactly like the /charts
+   clinical view. Care-unit patient-scoping is forwarded to each CDR as
+   ``X-Org-Guids`` / ``X-Is-Admin`` (``_auth_headers`` → ``scope_org_guids``).
+
+2. Spärr — the nurse reads apply spärr per patient, mirroring
+   ``app/routes/charts.py::series`` (operator #469 Q1 + #471.4/#472): fetch the
+   patient's active blocks, then either the COARSE org-level drop (default) or
+   the indispensable-care LIFT when ``SPARR_LIFT_ENABLED`` is set (with the
+   ``sparr_lift_exposure`` audit event). Federation output is reshaped into
+   spärr-ready points carrying ``org_guid`` (from
+   ``Observation.performer[0].identifier.value``), ``code`` (the
+   ``urn:pdhc:concept/<guid>`` canonical) and ``at`` (effectiveDateTime).
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from flask import Blueprint, abort, current_app, g, jsonify, request
 
 from app.services.audit import audit_read
 from app.analyse.federation import (
     CdrRegistry,
-    agp_hourly_bands,
     fanout,
     lttb_downsample,
     merge_agp_bands,
 )
 from app.analyse.aggregations import aggregate_per_cdr_results
-from app.services.role_guards import nurse_required
+from app.services.ips_client import (
+    get_active_blocks,
+    blocked_clinic_ids,
+    has_any_active_block,
+    filter_blocked_points,
+    concept_guid_from_canonical,
+)
 
 
 bp = Blueprint("nurse_api", __name__, url_prefix="/api/nurse")
@@ -39,19 +63,113 @@ def _registry() -> CdrRegistry:
 
 
 def _auth_headers() -> dict:
+    """Care-unit patient scope for the CDR fan-out.
+
+    The care-delivery gate already validated the caller and resolved the
+    Zone-1 care-unit scope; we forward it so each CDR enforces its own Rule 24
+    / care-delivery filter. SU admins send ``X-Is-Admin`` and no org
+    restriction."""
     from app.auth import scope_org_guids  # M0 #415
     blob = getattr(g, "access_blob", None) or {}
     if isinstance(blob, dict):
         is_admin = bool(blob.get("is_su_admin"))
-        # Zone-1 scope from affiliations[] (dual-read fallback), shared helper.
         org_ids = scope_org_guids(blob)
     else:
         is_admin = bool(getattr(blob, "is_su_admin", False))
         org_ids = getattr(blob, "organization_ids", None) or []
     return {
         "is_admin": is_admin,
-        "org_guids": ",".join(str(g) for g in (org_ids or [])),
+        "org_guids": ",".join(str(o) for o in (org_ids or [])),
     }
+
+
+# ---------------------------------------------------------------------------
+# Spärr — mirror charts.py::series (operator #469 Q1 / #471.4 / #472)
+# ---------------------------------------------------------------------------
+
+def _lift_exposure_audit(exposures):
+    """Q4 (#472) audit detail: the lift reference for each exposure, aggregated
+    by lift (blocked clinic + window). Reader + patient + role are already on
+    the audit row; this adds *which* lift exposed *what*. Same shape as
+    charts.py::_lift_exposure_audit."""
+    by_lift: dict = {}
+    for p, lift in exposures:
+        key = (lift.source_scope_id, lift.lift_from_date, lift.lift_until_date)
+        e = by_lift.setdefault(key, {
+            "blocked_clinic": lift.source_scope_id,
+            "lift_kind": lift.lift_kind,
+            "lift_from_date": lift.lift_from_date,
+            "lift_until_date": lift.lift_until_date,
+            "exposed_concepts": set(),
+            "exposed_points": 0,
+        })
+        cg = concept_guid_from_canonical(p.get("code") or p.get("code_canonical"))
+        if cg:
+            e["exposed_concepts"].add(cg)
+        e["exposed_points"] += 1
+    return [{**v, "exposed_concepts": sorted(v["exposed_concepts"])}
+            for v in by_lift.values()]
+
+
+def _apply_sparr(guid: str, points: list[dict]) -> tuple[list[dict], bool]:
+    """Apply spärr to dict points, mirroring charts.py::series exactly.
+
+    Each point must carry ``org_guid`` + ``code``/``code_canonical`` + ``at``.
+    Two modes:
+      - default (SPARR_LIFT_ENABLED off): COARSE org-level hide — drop every
+        point from a blocked clinic (safe, over-hides).
+      - SPARR_LIFT_ENABLED (#471.4, DPO-approved #472): apply the
+        indispensable-care LIFT; a blocked point is exposed iff an active
+        indispensable_care lift on its clinic covers its concept AND its date.
+        Exposures raise the ``sparr_lift_exposure`` audit event.
+
+    Returns ``(kept_points, has_blocked_sources)`` — the boolean drives the
+    PDL Ch 4 §4 ¶3 metadata-only banner."""
+    blocks = get_active_blocks(guid)
+    blocked = blocked_clinic_ids(blocks)
+    if blocked:
+        if current_app.config.get("SPARR_LIFT_ENABLED"):
+            points, exposures = filter_blocked_points(points, blocks)
+            if exposures:
+                g._audit_event_type = "sparr_lift_exposure"
+                g._audit_payload_snapshot = {
+                    "sparr_lift": _lift_exposure_audit(exposures),
+                }
+        else:
+            points = [p for p in points if p.get("org_guid") not in blocked]
+    return points, has_any_active_block(blocks)
+
+
+def _obs_point(obs: dict, **extra) -> dict:
+    """Reshape a FHIR Observation into a spärr-ready point.
+
+    ``org_guid`` is the provider org the CDR ingest recorded on
+    ``Observation.performer[0].identifier.value``; ``code`` is the
+    ``urn:pdhc:concept/<guid>`` canonical (from ``_coding_uri`` on
+    ``Observation.code``); ``at`` is the effective date. These are the three
+    fields ``filter_blocked_points`` / the coarse drop key on."""
+    return {
+        "org_guid": _obs_org_guid(obs),
+        "code": _coding_uri(obs.get("code")),
+        "at": obs.get("effectiveDateTime"),
+        **extra,
+    }
+
+
+def _sparr_filter_entries(guid: str, entries: list[dict]) -> tuple[list[dict], bool]:
+    """Spärr-filter a list of FHIR Observation Bundle *entries*.
+
+    Wraps ``_apply_sparr`` for the routes that work on raw Bundle entries
+    (summary, agp) rather than already-projected points. Each entry is given a
+    transient point view carrying ``_idx`` so kept points map back to their
+    entry. Returns ``(kept_entries, has_blocked_sources)``."""
+    pts = []
+    for i, e in enumerate(entries):
+        obs = e.get("resource") or {}
+        pts.append(_obs_point(obs, _idx=i))
+    kept, has_blocked = _apply_sparr(guid, pts)
+    kept_entries = [entries[p["_idx"]] for p in kept]
+    return kept_entries, has_blocked
 
 
 # ---------------------------------------------------------------------------
@@ -59,17 +177,15 @@ def _auth_headers() -> dict:
 # ---------------------------------------------------------------------------
 
 @bp.get("/patient/<guid>")
-@nurse_required
 @audit_read
 def patient_summary(guid: str):
-    """Find the owning CDR (the one that has this Patient) and return a
-    rolled-up summary for the nurse view.
+    """Owning-CDR lookup + rolled-up near-term clinical picture.
 
-    We fan out a Patient read across all CDRs; the first ok response
-    wins ("the owning CDR"). Then on that CDR we fetch
-    ``$everything?_count=200&_since=<90d ago>`` to populate the
-    near-term clinical picture.
-    """
+    We fan out a Patient read across all CDRs; the first ok response wins
+    ("the owning CDR"). Then on that CDR we fetch
+    ``$everything?_count=500&_since=<90d ago>``. The Observation entries are
+    spärr-filtered before ``latest_values`` is derived; conditions / regimens
+    are already care-unit-scoped by the CDR (X-Org-Guids)."""
     auth = _auth_headers()
 
     pat_resp = fanout(
@@ -98,10 +214,19 @@ def patient_summary(guid: str):
         {"entry": []},
     )
 
+    entries = everything_body.get("entry") or []
+    # Spärr the Observation entries; non-Observation entries pass through the
+    # filter unchanged (no org_guid → never in a blocked clinic set).
+    obs_entries = [e for e in entries
+                   if (e.get("resource") or {}).get("resourceType") == "Observation"]
+    other_entries = [e for e in entries
+                     if (e.get("resource") or {}).get("resourceType") != "Observation"]
+    kept_obs, has_blocked = _sparr_filter_entries(guid, obs_entries)
+
     conditions = []
     regimens = []
     last_obs: dict[str, dict] = {}  # canonical → most-recent obs
-    for entry in everything_body.get("entry") or []:
+    for entry in other_entries:
         r = entry.get("resource") or {}
         rt = r.get("resourceType")
         if rt == "Condition":
@@ -118,18 +243,19 @@ def patient_summary(guid: str):
                 "start": (r.get("effectivePeriod") or {}).get("start"),
                 "status": r.get("status"),
             })
-        elif rt == "Observation":
-            canonical = _coding_uri(r.get("code"))
-            eff = r.get("effectiveDateTime") or ""
-            existing = last_obs.get(canonical)
-            if not existing or eff > existing.get("effective", ""):
-                last_obs[canonical] = {
-                    "canonical": canonical,
-                    "display": _coding_display(r.get("code")),
-                    "value": (r.get("valueQuantity") or {}).get("value"),
-                    "unit": (r.get("valueQuantity") or {}).get("unit"),
-                    "effective": eff,
-                }
+    for entry in kept_obs:
+        r = entry.get("resource") or {}
+        canonical = _coding_uri(r.get("code"))
+        eff = r.get("effectiveDateTime") or ""
+        existing = last_obs.get(canonical)
+        if not existing or eff > existing.get("effective", ""):
+            last_obs[canonical] = {
+                "canonical": canonical,
+                "display": _coding_display(r.get("code")),
+                "value": (r.get("valueQuantity") or {}).get("value"),
+                "unit": (r.get("valueQuantity") or {}).get("unit"),
+                "effective": eff,
+            }
 
     return jsonify({
         "patient": owner.body,
@@ -138,6 +264,7 @@ def patient_summary(guid: str):
         "conditions": conditions,
         "regimen": regimens,
         "latest_values": list(last_obs.values()),
+        "has_blocked_sources": has_blocked,
     })
 
 
@@ -146,24 +273,14 @@ def patient_summary(guid: str):
 # ---------------------------------------------------------------------------
 
 @bp.get("/patient/<guid>/agp")
-@nurse_required
 @audit_read
 def patient_agp(guid: str):
     """Ambulatory Glucose Profile for one patient.
 
-    Phase 3 of the CDR1/Analyse split (ticket #289). Previously this
-    route called cdr1's ``Observation/$agp`` SQL-aggregation; that
-    operation has been removed from cdr1 and moved into the analyse
-    layer. We now fetch raw CGM Observations from each federated CDR
-    and run :func:`compute_agp` on each per-CDR result before
-    handing the per-CDR Parameters list to ``merge_agp_bands``.
-
-    Raw fetch path: ``GET /api/v1/fhir/Observation`` with
-    ``_count=30000`` for a 14–90 d CGM window. The fanout timeout
-    accommodates the bigger payload; if pages overflow, the
-    per-CDR aggregation degrades to whatever rows came back (the
-    plan's §6 risk accepts a < 1 s p95 budget regression).
-    """
+    Fetches raw CGM Observations from each federated CDR, spärr-filters the
+    per-CDR bundles, then runs the per-CDR ``compute_agp`` aggregation and
+    merges the resulting Parameters. Spärr is applied to the raw points BEFORE
+    aggregation so a blocked clinic never contributes to the merged bands."""
     window = request.args.get("window", "14d")
     days = 14 if window == "14d" else 90
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -183,6 +300,16 @@ def patient_agp(guid: str):
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
+
+    # Spärr each per-CDR bundle's Observation entries before aggregation.
+    has_blocked = False
+    for r in raw.results:
+        if not (r.ok and isinstance(r.body, dict)):
+            continue
+        kept, hb = _sparr_filter_entries(guid, r.body.get("entry") or [])
+        has_blocked = has_blocked or hb
+        r.body = {**r.body, "entry": kept}
+
     per_cdr_params = aggregate_per_cdr_results(raw.results, kind="agp")
 
     merged = merge_agp_bands(per_cdr_params)
@@ -192,6 +319,7 @@ def patient_agp(guid: str):
         "fanout_mode": raw.mode,
         "succeeded_cdrs": raw.succeeded,
         "failed_cdrs": raw.failed,
+        "has_blocked_sources": has_blocked,
         **merged,
     })
 
@@ -201,7 +329,6 @@ def patient_agp(guid: str):
 # ---------------------------------------------------------------------------
 
 @bp.get("/patient/<guid>/variable/<path:canonical>")
-@nurse_required
 @audit_read
 def patient_variable(guid: str, canonical: str):
     auth = _auth_headers()
@@ -229,7 +356,9 @@ def patient_variable(guid: str, canonical: str):
         is_admin_header=auth["is_admin"],
     )
 
-    raw_points: list[tuple[float, float, str]] = []
+    # Build spärr-ready dict points (org_guid/code/at) that also carry the
+    # numeric (t, value) needed for downsampling.
+    points: list[dict] = []
     for r in resp.results:
         if not r.ok or not isinstance(r.body, dict):
             continue
@@ -240,18 +369,20 @@ def patient_variable(guid: str, canonical: str):
             if eff and val is not None:
                 ts = _parse_iso(eff)
                 if ts is not None:
-                    raw_points.append((ts, float(val), eff))
-    raw_points.sort(key=lambda p: p[0])
+                    points.append(_obs_point(obs, t=ts, value=float(val)))
 
-    xy = [(p[0], p[1]) for p in raw_points]
+    points, has_blocked = _apply_sparr(guid, points)
+    points.sort(key=lambda p: p["t"])
+
+    xy = [(p["t"], p["value"]) for p in points]
     sampled = lttb_downsample(xy, target=target)
-    sampled_set = set(sampled)
     return jsonify({
         "guid": guid,
         "canonical": canonical,
-        "n_raw": len(raw_points),
+        "n_raw": len(points),
         "n_returned": len(sampled),
-        "downsampled": len(sampled) < len(raw_points),
+        "downsampled": len(sampled) < len(points),
+        "has_blocked_sources": has_blocked,
         "points": [
             {"t": p[0], "value": p[1]}
             for p in sampled
@@ -264,7 +395,6 @@ def patient_variable(guid: str, canonical: str):
 # ---------------------------------------------------------------------------
 
 @bp.get("/patient/<guid>/events")
-@nurse_required
 @audit_read
 def patient_events(guid: str):
     auth = _auth_headers()
@@ -307,6 +437,11 @@ def patient_events(guid: str):
                 "class": (res.get("class") or {}).get("coding", [{}])[0].get("code"),
                 "display": _coding_display(res.get("code")),
                 "cdr_id": r.cdr_id,
+                # spärr keys — encounters carry no provider org / concept code,
+                # so they are never dropped by a clinic block (safe pass-through).
+                "org_guid": _obs_org_guid(res),
+                "code": _coding_uri(res.get("code")),
+                "at": period.get("start"),
             })
     for r in hypo.results:
         if not r.ok or not isinstance(r.body, dict):
@@ -320,14 +455,40 @@ def patient_events(guid: str):
                     "at": res.get("effectiveDateTime"),
                     "count": count,
                     "cdr_id": r.cdr_id,
+                    "org_guid": _obs_org_guid(res),
+                    "code": _coding_uri(res.get("code")),
                 })
+
+    events, has_blocked = _apply_sparr(guid, events)
     events.sort(key=lambda e: e.get("at") or e.get("start") or "")
-    return jsonify({"guid": guid, "events": events, "n": len(events)})
+    # Strip the transient spärr keys from the wire shape (keep cdr_id).
+    for e in events:
+        e.pop("org_guid", None)
+        if e.get("kind") == "hypo":
+            e.pop("code", None)
+    return jsonify({
+        "guid": guid,
+        "events": events,
+        "n": len(events),
+        "has_blocked_sources": has_blocked,
+    })
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _obs_org_guid(res: dict | None) -> str | None:
+    """Provider org GUID from ``performer[0].identifier.value`` — the field the
+    CDR ingest pipeline records org_guid from (cdr.pdhc ingest_pipeline)."""
+    if not res:
+        return None
+    for performer in (res.get("performer") or []):
+        ident = (performer.get("identifier") or {}).get("value")
+        if ident:
+            return ident
+    return None
+
 
 def _coding_uri(cc: dict | None) -> str | None:
     if not cc:

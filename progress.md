@@ -424,3 +424,17 @@ Verified: pg_tables query for observation_cache/refresh_log returns empty (both
 dropped); models absent in running image; /healthz 200. Backup retained at
 ~/backups/predeploy/dashboard/observation_cache_refresh_log_20260719T192036Z.sql
 (21.7 MB, 7019+185 rows). Rollback: flask db downgrade + restore from that dump.
+
+## #546 nurse-fold into cd-assist — LOCAL, verified 2026-08-07
+Pivot #545: cd-assist = this (dashboard) renamed; the nurse single-patient
+views are folded into the care-delivery surface (salvaged from the discarded
+greenfield cd-assist.pdhc). Changes: routes/nurse.py re-gated analysis-phase →
+care-delivery + per-patient spärr (coarse default; #471.4 indispensable-care
+lift under SPARR_LIFT_ENABLED with the sparr_lift_exposure audit event), same
+shape as charts.py::series; auth.py _is_clinical_path now covers /api/nurse/ so
+the app-level gate enforces has_care_delivery_access (nurse dropped its
+per-route @nurse_required — matches /charts which has no per-route guard).
+Tests: full suite 211 passed (new test_nurse_sparr.py = 9; role_guards/
+analysis_consent/care_access_auth updated to the app-level-gate model).
+Next: rebrand → cd-assist (#547, low-friction: keep host, rename internally);
+discard the greenfield cd-assist.pdhc (salvage complete).
