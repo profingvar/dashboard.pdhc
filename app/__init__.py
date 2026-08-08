@@ -101,10 +101,6 @@ def create_app(config=None):
     from app.routes.api import register_metadata
     from app.routes.auth import bp as auth_bp
     from app.routes.nurse import bp as nurse_bp
-    from app.routes.researcher import (
-        bp as researcher_bp,
-        register_export_audit_cli,
-    )
     from app.routes.workspace import bp as workspace_bp
     # #467 / #462 D5 — user-private reusable dashboard design templates.
     from app.routes.designs import bp as designs_bp
@@ -112,29 +108,20 @@ def create_app(config=None):
     from app.routes.picker import bp as picker_bp
     # #464 D2 + #466 D4 — per-patient CDR1 charts view + JSON proxies.
     from app.routes.charts import bp as charts_bp
-    # #291 — analyse-layer observations search (mirrors cdr1's removed
-    # /api/v1/observations endpoint). Gateway's proxy lands here.
-    from app.analyse.observations_search import bp as observations_search_bp
-    # #292 — analyse-layer auxiliary endpoints (federated row counts,
-    # canonical-table query, openEHR composition search). Mirrors and
-    # replaces the equivalents that used to live on cdr1.
-    from app.analyse.stats import bp as analyse_stats_bp
-    from app.analyse.canonical import bp as analyse_canonical_bp
-    from app.analyse.openehr import bp as analyse_openehr_bp
+    # #543 — the group/population "analyse-engine" half (researcher +
+    # /api/cohort, plus the analyse-layer observations_search / stats /
+    # canonical / openehr blueprints) was extracted into the separate
+    # analyse.pdhc service. Only the individual/point-of-care (cd-assist)
+    # surface remains here; the CDR2-5 federation still backs the nurse
+    # single-patient views (app/analyse/federation.py + aggregations.py).
     app.register_blueprint(auth_bp)
     app.register_blueprint(views_bp)
     app.register_blueprint(nurse_bp)
-    app.register_blueprint(researcher_bp)
     app.register_blueprint(workspace_bp)
     app.register_blueprint(designs_bp)
     app.register_blueprint(picker_bp)
     app.register_blueprint(charts_bp)
-    app.register_blueprint(observations_search_bp)
-    app.register_blueprint(analyse_stats_bp)
-    app.register_blueprint(analyse_canonical_bp)
-    app.register_blueprint(analyse_openehr_bp)
     register_metadata(app)
-    register_export_audit_cli(app)
 
     # Audit view (#215). (The cache-scrub route + cache-sweep CLI were
     # removed with the ObservationCache surface — #471 item 1.)

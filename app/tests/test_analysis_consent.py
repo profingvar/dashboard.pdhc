@@ -6,8 +6,11 @@ Covers:
     legacy roles[] fallback)
   - the service-key blob carries no roles / no admin bit → role guards deny
   - IpsClient.analysis_filter() parse + fail-closed (IpsUnreachable)
-  - _apply_research_consent(): members filtered by ips verdict; 503 when
-    ips is unreachable (research reads fail closed)
+
+The group/population research-consent join (_apply_research_consent, the
+/api/cohort route surface) moved to analyse.pdhc with #543; its tests
+were removed here. The ips analysis-filter + blob-derivation coverage
+that also backs the nurse care-delivery fold stays.
 """
 from __future__ import annotations
 
@@ -70,14 +73,17 @@ def app_with_blob():
 
 def test_roles_derive_from_affiliations(app_with_blob):
     app, holder = app_with_blob
+    from flask import g
+    from app.services.role_guards import _roles
     holder["blob"] = {
         "is_su_admin": False,
-        "affiliations": [{"care_unit_guid": "u1", "role": "Researcher"}],
+        "affiliations": [{"care_unit_guid": "u1", "role": "Nurse"}],
     }
-    client = app.test_client()
-    # researcher route passes on affiliation role (case-insensitive)…
-    assert client.get("/api/cohort").status_code == 200
-    # …and this researcher-affiliation blob (no care-unit user_type) has no
+    # roles derive from affiliations[].role, case-insensitive…
+    with app.test_request_context("/"):
+        g.access_blob = holder["blob"]
+        assert "nurse" in _roles()
+    # …and a bare-affiliation blob (no care-unit user_type) has no
     # care-delivery access, so the #546-folded nurse views (app-level
     # care-delivery gate, not a per-route role guard) stay closed to it.
     assert has_care_delivery_access(holder["blob"]) is False
@@ -85,21 +91,29 @@ def test_roles_derive_from_affiliations(app_with_blob):
 
 def test_roles_affiliations_take_precedence_over_legacy(app_with_blob):
     app, holder = app_with_blob
+    from flask import g
+    from app.services.role_guards import _roles
     holder["blob"] = {
         "is_su_admin": False,
         "affiliations": [{"care_unit_guid": "u1", "role": "nurse"}],
-        "roles": ["researcher"],  # legacy list must NOT win
+        "roles": ["admin"],  # legacy list must NOT win
     }
-    client = app.test_client()
-    assert client.get("/api/cohort").status_code == 403
+    with app.test_request_context("/"):
+        g.access_blob = holder["blob"]
+        # affiliation role wins; the legacy flat roles[] is ignored.
+        assert _roles() == {"nurse"}
 
 
 def test_legacy_roles_fallback_still_works(app_with_blob):
     app, holder = app_with_blob
-    holder["blob"] = {"is_su_admin": False, "roles": ["researcher"],
+    from flask import g
+    from app.services.role_guards import _roles
+    holder["blob"] = {"is_su_admin": False, "roles": ["nurse"],
                       "organization_ids": ["o1"]}
-    client = app.test_client()
-    assert client.get("/api/cohort").status_code == 200
+    with app.test_request_context("/"):
+        g.access_blob = holder["blob"]
+        # no affiliations → fall back to the legacy flat roles[] list.
+        assert "nurse" in _roles()
 
 
 def test_service_blob_has_no_roles_and_no_admin(app_with_blob):
@@ -116,9 +130,7 @@ def test_service_blob_denied_on_clinical_routes(app_with_blob):
     app, holder = app_with_blob
     with app.test_request_context("/"):
         holder["blob"] = _service_blob("gateway.pdhc")
-    client = app.test_client()
-    assert client.get("/api/cohort").status_code == 403
-    # /api/nurse is now a care-delivery clinical route (#546): a machine
+    # /api/nurse is a care-delivery clinical route (#546): a machine
     # service blob (no admin, user_type=service, no affiliations) has no
     # care-delivery access, so the app-level gate keeps it out.
     assert has_care_delivery_access(holder["blob"]) is False
@@ -169,54 +181,3 @@ def test_analysis_filter_fails_closed_without_base_url():
     c = IpsClient(base_url="")
     with pytest.raises(IpsUnreachable):
         c.analysis_filter(["a"], "research")
-
-
-# ---------------------------------------------------------------------------
-# _apply_research_consent (route-level join)
-# ---------------------------------------------------------------------------
-
-def test_apply_research_consent_filters_members(app_with_blob):
-    app, holder = app_with_blob
-    holder["blob"] = {
-        "affiliations": [{"care_unit_guid": "u1", "role": "researcher",
-                          "research_project_guids": ["p1"]}],
-    }
-    from app.routes import researcher as r
-    fake = type("C", (), {"analysis_filter": staticmethod(
-        lambda guids, purpose, projects: {
-            "allowed": ["pat-1"],
-            "excluded": [{"patient_guid": "pat-2", "reason": "ehds_opt_out"},
-                         {"patient_guid": "pat-3",
-                          "reason": "no_research_consent"}],
-        })})()
-    with app.test_request_context("/"):
-        from flask import g
-        g.access_blob = holder["blob"]
-        with patch.object(r, "_ips_client", return_value=fake):
-            members, summary = r._apply_research_consent(
-                {"pat-1", "pat-2", "pat-3"})
-    assert members == {"pat-1"}
-    assert summary["checked"] == 3 and summary["excluded"] == 2
-    assert summary["reasons"] == {"ehds_opt_out": 1, "no_research_consent": 1}
-
-
-def test_apply_research_consent_503_when_ips_down(app_with_blob):
-    app, holder = app_with_blob
-    from app.routes import researcher as r
-    fake = type("C", (), {"analysis_filter": staticmethod(
-        lambda *a, **kw: (_ for _ in ()).throw(IpsUnreachable("down")))})()
-    with app.test_request_context("/"):
-        from flask import g
-        g.access_blob = {}
-        with patch.object(r, "_ips_client", return_value=fake):
-            from werkzeug.exceptions import ServiceUnavailable
-            with pytest.raises(ServiceUnavailable):
-                r._apply_research_consent({"pat-1"})
-
-
-def test_apply_research_consent_empty_set_skips_ips(app_with_blob):
-    app, _ = app_with_blob
-    from app.routes import researcher as r
-    with app.test_request_context("/"):
-        members, summary = r._apply_research_consent(set())
-    assert members == set() and summary["checked"] == 0

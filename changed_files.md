@@ -277,3 +277,22 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-08-07T17:50:24Z app/auth.py — #546: add /api/nurse/ to _is_clinical_path (nurse views = care-delivery, not analysis-phase)
 2026-08-07T17:50:24Z app/tests/test_nurse_sparr.py — new; nurse spärr + care-delivery gate coverage (9 tests)
 2026-08-07T17:50:24Z app/tests/{test_role_guards,test_analysis_consent,test_care_access_auth}.py — updated to the #546 model (nurse enforced at app-level care-delivery gate, not per-route role guard)
+2026-08-08T09:41:46Z app/routes/researcher.py — DELETED (#543 group/analyse-engine extracted to analyse.pdhc; owned /api/cohort* + register_export_audit_cli)
+2026-08-08T09:41:46Z app/analyse/cohort.py — DELETED (#543 cohort predicate builder → analyse.pdhc)
+2026-08-08T09:41:46Z app/analyse/observations_search.py — DELETED (#543 → analyse.pdhc)
+2026-08-08T09:41:46Z app/analyse/stats.py — DELETED (#543 → analyse.pdhc)
+2026-08-08T09:41:46Z app/analyse/canonical.py — DELETED (#543 → analyse.pdhc)
+2026-08-08T09:41:46Z app/analyse/openehr.py — DELETED (#543 → analyse.pdhc)
+2026-08-08T09:41:46Z app/__init__.py — #543: drop imports + register_blueprint for researcher_bp/observations_search_bp/analyse_stats_bp/analyse_canonical_bp/analyse_openehr_bp and register_export_audit_cli; kept auth/views/nurse/workspace/designs/picker/charts/admin/metadata + all config (CDR_ENDPOINTS, DASHBOARD_PDHC_SERVICE_KEY, CDR1_BASE_URL)
+2026-08-08T09:41:46Z app/routes/workspace.py — #543: trim to nurse-only; removed /researcher shell + role-selector branching; /workspace now redirects straight to /nurse
+2026-08-08T09:41:46Z app/services/role_guards.py — #543: remove now-unused researcher_required; kept nurse_required + admin_required (+ _roles/_is_admin)
+2026-08-08T09:41:46Z app/tests/test_researcher_flow.py — DELETED (#543 covered removed researcher /api/cohort engine only)
+2026-08-08T09:41:46Z app/tests/test_observations_search.py — DELETED (#543 covered removed module only)
+2026-08-08T09:41:46Z app/tests/test_analyse_aux.py — DELETED (#543 covered removed stats/canonical/openehr only)
+2026-08-08T09:41:46Z app/tests/test_export_audit_to_db.py — DELETED (#543 covered removed researcher export-audit only)
+2026-08-08T09:41:46Z app/tests/test_role_guards.py — #543: dropped the /api/cohort researcher cases; kept nurse care-delivery + admin coverage
+2026-08-08T09:41:46Z app/tests/test_workspace.py — #543: dropped researcher-shell + chooser cases; /workspace now asserts nurse redirect (nurse-only/dual-role/admin all → /nurse)
+2026-08-08T09:41:46Z app/tests/test_care_access_auth.py — #543: dropped /api/cohort/build + /api/v1/observations from the _is_clinical_path non-clinical tuple; kept care-delivery/gate coverage
+2026-08-08T09:41:46Z app/tests/test_x1_tuple.py — #543: dropped the POST /api/cohort route-class assertion; kept care + admin route-class coverage
+2026-08-08T09:41:46Z app/tests/test_analysis_consent.py — #543: dropped /api/cohort role-derivation route calls (converted to direct role_guards._roles() checks) + removed the 3 _apply_research_consent tests (fn lived in deleted researcher.py); kept IpsClient.analysis_filter + research_project_guids + service-blob care-delivery coverage
+2026-08-08T09:41:46Z app/tests/test_federation.py — #543: removed the app.analyse.cohort import + 3 cohort-predicate tests; kept all federation (fanout/histogram/lttb/agp) tests

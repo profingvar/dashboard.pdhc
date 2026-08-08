@@ -62,15 +62,6 @@ def nurse_required(fn):
     return wrapper
 
 
-def researcher_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if _is_admin() or "researcher" in _roles():
-            return fn(*args, **kwargs)
-        abort(403, description="researcher role required")
-    return wrapper
-
-
 def admin_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

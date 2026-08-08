@@ -1,11 +1,14 @@
 """Federation-layer unit tests — execution-plan §4.8.
 
 Covers the items the platform plan calls out for the federation:
-  - cohort_predicate_builder
   - fanout_partial_failure
   - histogram_merge
   - lttb_downsample
   - agp_hourly_bands
+
+The cohort predicate builder moved to analyse.pdhc with #543 (it backed
+the group/population engine); its tests were removed here. The federation
+itself stays — it still backs the nurse single-patient views.
 
 The federation layer never opens a real socket here; we patch
 ``requests.request`` with a programmable fake.
@@ -17,11 +20,6 @@ from unittest.mock import patch
 
 import pytest
 
-from app.analyse.cohort import (
-    CohortFilter,
-    intersect_patient_sets,
-    to_predicate_searches,
-)
 from app.analyse.federation import (
     CdrEndpoint,
     CdrRegistry,
@@ -31,48 +29,6 @@ from app.analyse.federation import (
     lttb_downsample,
     merge_histograms,
 )
-
-
-# ---------------------------------------------------------------------------
-# Cohort predicate builder
-# ---------------------------------------------------------------------------
-
-def test_cohort_predicate_builder_basic():
-    raw = {
-        "cdr_ids": ["cdr1", "cdr3"],
-        "demographics": {"age_min": 40, "age_max": 70, "sex": "female"},
-        "conditions": ["https://termbank.pdhc.se/CodeSystem/snomed/44054006"],
-        "medications": ["https://termbank.pdhc.se/CodeSystem/atc/A10A"],
-    }
-    filt = CohortFilter.from_dict(raw)
-    assert filt.cdr_ids == ["cdr1", "cdr3"]
-    assert filt.age_min == 40 and filt.age_max == 70
-    assert filt.sex == "female"
-    assert filt.conditions == [
-        "https://termbank.pdhc.se/CodeSystem/snomed/44054006"
-    ]
-
-    preds = to_predicate_searches(filt)
-    types = [p[0] for p in preds]
-    assert "Patient" in types
-    assert types.count("Condition") == 1
-    assert "MedicationStatement" in types
-
-    pat_params = next(p[1] for p in preds if p[0] == "Patient")
-    # Two birthdate constraints (le for age_min, ge for age_max) and gender.
-    assert "birthdate" in pat_params
-    assert pat_params["gender"] == "female"
-
-
-def test_cohort_predicate_intersect():
-    a = {"p1", "p2", "p3"}
-    b = {"p2", "p3", "p4"}
-    c = {"p3", "p4"}
-    assert intersect_patient_sets([a, b, c]) == {"p3"}
-
-
-def test_cohort_predicate_empty_returns_empty():
-    assert intersect_patient_sets([]) == set()
 
 
 # ---------------------------------------------------------------------------

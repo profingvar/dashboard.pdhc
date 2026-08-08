@@ -26,9 +26,6 @@ def test_sole_affiliation_fallback():
 
 
 def test_purpose_and_basis_by_route_class():
-    assert x1_tuple(BLOB, "POST /api/cohort") == {
-        "person_guid": "person-1", "role_guid": "role-researcher",
-        "purpose": "research", "access_basis": "research_consent"}
     care = x1_tuple(BLOB, "GET /patient/<guid>")
     assert (care["purpose"], care["access_basis"]) == ("care", "same_unit")
     adm = x1_tuple(BLOB, "GET /admin/audit")

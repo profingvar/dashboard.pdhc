@@ -438,3 +438,43 @@ Tests: full suite 211 passed (new test_nurse_sparr.py = 9; role_guards/
 analysis_consent/care_access_auth updated to the app-level-gate model).
 Next: rebrand → cd-assist (#547, low-friction: keep host, rename internally);
 discard the greenfield cd-assist.pdhc (salvage complete).
+
+## #543 remove group/population analyse-engine — LOCAL, verified 2026-08-08
+Refocus of dashboard.pdhc into "cd-assist" (individual/point-of-care). The
+group/population half was extracted into the separate new service analyse.pdhc,
+so it is removed here.
+
+Removed (source): app/routes/researcher.py (owned /api/cohort* +
+register_export_audit_cli), app/analyse/{cohort,observations_search,stats,
+canonical,openehr}.py. In app/__init__.py the 5 group blueprints
+(researcher_bp, observations_search_bp, analyse_stats_bp, analyse_canonical_bp,
+analyse_openehr_bp) + the register_export_audit_cli import/call are gone.
+role_guards.researcher_required removed (nurse_required + admin_required kept).
+workspace.py trimmed to nurse-only: the /researcher shell and the role-selector
+branching are gone; /workspace now redirects straight to /nurse (nurse is the
+sole remaining clinical shell). The orphan workspace_selector.html /
+researcher_workspace.html templates are left in place (harmless, unrendered).
+
+Deliberately KEPT (back the #546 nurse single-patient fold): app/analyse/
+federation.py + aggregations.py (+ __init__.py) — the CDR2-5 federated reads
+under the dashboard.pdhc service identity — and their config in app/__init__.py
+(CDR_ENDPOINTS, DASHBOARD_PDHC_SERVICE_KEY, CDR1_BASE_URL). app/services/* kept
+intact (audit.py still classifies the /api/cohort route-string — harmless).
+app/models/* and app/migrations/* were NOT touched: the now-orphan Cohort /
+CohortExportAudit tables remain (dropping them is a separate data decision);
+single alembic head unchanged = drop0719cache01.
+
+Tests: deleted the 4 removed-module-only suites (test_researcher_flow,
+test_observations_search, test_analyse_aux, test_export_audit_to_db); trimmed
+the mixed suites (test_role_guards, test_workspace, test_care_access_auth,
+test_x1_tuple, test_analysis_consent, and test_federation for the cohort-
+predicate import) to drop only the group/researcher/api-cohort cases. The
+_apply_research_consent tests were removed because that fn lived in the deleted
+researcher.py; the role-derivation route assertions were converted to direct
+role_guards._roles() unit checks (same guarantee, no removed route). Full suite:
+167 passed, 0 failures. py_compile clean across app/**/*.py. App boots with
+create_app; registered blueprints = admin, auth, charts, designs, nurse_api,
+picker, views, workspace (the 5 group blueprints gone).
+
+Next: analyse.pdhc owns the extracted engine (separate repo/service); rebrand
+dashboard→cd-assist (#547) still pending.

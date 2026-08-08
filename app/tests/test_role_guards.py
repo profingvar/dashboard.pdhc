@@ -1,8 +1,6 @@
 """Role-guard tests — execution-plan §4.7 / §4.8.
 
 Verifies that:
-  - the researcher engine (/api/cohort) is role-gated: nurse-only → 403,
-    researcher → ok, admin → ok
   - the nurse single-patient views (/api/nurse/*) are NO LONGER role-gated
     per-route: after the #546 fold they are CARE-DELIVERY clinical paths,
     enforced by the app-level route gate (``app.auth._is_clinical_path`` →
@@ -95,34 +93,13 @@ def test_nurse_endpoint_allows_nurse(app_with_blob):
     assert resp.status_code != 403
 
 
-def test_researcher_endpoint_rejects_nurse_only(app_with_blob):
-    app, holder = app_with_blob
-    holder["blob"] = {"roles": ["nurse"], "is_su_admin": False,
-                       "organization_ids": ["org-1"]}
-    client = app.test_client()
-    resp = client.post("/api/cohort", json={"cdr_ids": []})
-    assert resp.status_code == 403
-
-
-def test_researcher_endpoint_allows_researcher(app_with_blob):
-    app, holder = app_with_blob
-    holder["blob"] = {"roles": ["researcher"], "is_su_admin": False,
-                       "organization_ids": ["org-1"]}
-    client = app.test_client()
-    resp = client.post("/api/cohort", json={"cdr_ids": []})
-    # Without any CDRs it returns an empty cohort with 0 members → 201.
-    assert resp.status_code in (200, 201)
-
-
-def test_admin_satisfies_both(app_with_blob):
+def test_admin_satisfies_nurse(app_with_blob):
     app, holder = app_with_blob
     holder["blob"] = {"roles": [], "is_su_admin": True,
                        "organization_ids": []}
     client = app.test_client()
     nurse_resp = client.get("/api/nurse/patient/some-guid")
-    research_resp = client.post("/api/cohort", json={"cdr_ids": []})
     assert nurse_resp.status_code != 403
-    assert research_resp.status_code != 403
 
 
 def test_anonymous_blocked_from_care_delivery():

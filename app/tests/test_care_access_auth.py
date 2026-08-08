@@ -95,8 +95,7 @@ def test_clinical_path_classification():
     for p in ("/", "/refresh", "/select", "/patient/abc", "/api/v1/designs",
               "/api/v1/designs/xyz", "/api/nurse/patient/x", "/api/nurse/patient/g/agp"):
         assert _is_clinical_path(p), p
-    for p in ("/workspace", "/api/cohort/build",
-              "/api/v1/observations", "/admin/audit"):
+    for p in ("/workspace", "/admin/audit"):
         assert not _is_clinical_path(p), p
 
 
