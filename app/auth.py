@@ -128,6 +128,12 @@ def _is_clinical_path(path: str) -> bool:
         # care relationship reaches them without the 'analysis' phase; the
         # reads are care-unit-scoped + spärr-filtered per patient (nurse.py).
         or path.startswith("/api/nurse/")
+        # #543/#546: cd-assist is a care-delivery-only service now (the group
+        # engine moved to analyse.pdhc). The nurse workspace PAGE + its
+        # /workspace entry are care-delivery too, matching the /api/nurse data,
+        # so a pure care-delivery nurse can actually open the UI.
+        or path == "/workspace"
+        or path.startswith("/nurse")
     )
 
 

@@ -296,3 +296,6 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-08-08T09:41:46Z app/tests/test_x1_tuple.py — #543: dropped the POST /api/cohort route-class assertion; kept care + admin route-class coverage
 2026-08-08T09:41:46Z app/tests/test_analysis_consent.py — #543: dropped /api/cohort role-derivation route calls (converted to direct role_guards._roles() checks) + removed the 3 _apply_research_consent tests (fn lived in deleted researcher.py); kept IpsClient.analysis_filter + research_project_guids + service-blob care-delivery coverage
 2026-08-08T09:41:46Z app/tests/test_federation.py — #543: removed the app.analyse.cohort import + 3 cohort-predicate tests; kept all federation (fanout/histogram/lttb/agp) tests
+2026-08-08T09:57:27Z app/auth.py — nurse-page gate: /nurse + /workspace are care-delivery clinical paths (a pure care-delivery nurse can open the UI)
+2026-08-08T09:57:27Z app/templates/base.html — rebrand user-facing to cd-assist (title/brand/h1); remove dead Researcher nav link (#543)
+2026-08-08T09:57:27Z app/tests/test_care_access_auth.py — nurse workspace page now care-delivery; care-only reaches it

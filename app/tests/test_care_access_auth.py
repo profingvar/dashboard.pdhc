@@ -91,11 +91,13 @@ def test_care_access_none():
 
 
 def test_clinical_path_classification():
-    # #546: /api/nurse/* is now a care-delivery clinical path (nurse fold).
+    # #546/#543: /api/nurse/* + the nurse workspace page (/nurse, /workspace)
+    # are care-delivery clinical paths; cd-assist has no analyse routes left.
     for p in ("/", "/refresh", "/select", "/patient/abc", "/api/v1/designs",
-              "/api/v1/designs/xyz", "/api/nurse/patient/x", "/api/nurse/patient/g/agp"):
+              "/api/v1/designs/xyz", "/api/nurse/patient/x", "/api/nurse/patient/g/agp",
+              "/nurse", "/workspace"):
         assert _is_clinical_path(p), p
-    for p in ("/workspace", "/admin/audit"):
+    for p in ("/admin/audit",):
         assert not _is_clinical_path(p), p
 
 
@@ -123,12 +125,15 @@ def test_care_only_user_reaches_select():
     assert c.get("/select").status_code == 200
 
 
-def test_care_only_user_blocked_from_analyse_route():
+def test_care_only_user_reaches_nurse_workspace():
     app = _app("sso")
     c = app.test_client()
     _login_as(c, _CARE_ONLY)
-    # /workspace is analyse-engine → analysis-phase gate → 403 for care-only.
-    assert c.get("/workspace").status_code == 403
+    # #543/#546: cd-assist has no analyse routes left; the nurse workspace is
+    # care-delivery, so a care-only nurse (nurse affiliation, no analysis phase)
+    # reaches /workspace, which redirects to the nurse view.
+    r = c.get("/workspace")
+    assert r.status_code in (302, 200)
 
 
 def test_analysis_user_reaches_select():
