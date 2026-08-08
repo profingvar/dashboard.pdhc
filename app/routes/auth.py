@@ -10,7 +10,7 @@ from flask import (
 )
 from app.auth import (
     initiate_sso_login, validate_sso_token, has_analysis_access,
-    _upsert_local_user,
+    has_care_delivery_access, _upsert_local_user,
 )
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -44,8 +44,14 @@ def callback():
     if not blob:
         flash("SSO token validation failed.", "danger")
         return redirect(url_for("auth.login"))
-    if not has_analysis_access(blob):
-        flash("Access denied — analysis phase membership required.", "danger")
+    # cd-assist is a care-delivery service now (#543) with only a vestigial
+    # analysis surface. Admit anyone who can reach SOME route — a care
+    # relationship OR the analysis phase — so a pure care-delivery nurse can
+    # log in (#546). The per-request route-aware loader (app.auth) then gates
+    # each path; a user with neither is cleanly rejected here.
+    if not (has_care_delivery_access(blob) or has_analysis_access(blob)):
+        flash("Access denied — a care relationship or analysis-phase "
+              "membership is required.", "danger")
         return redirect(url_for("auth.login"))
     _upsert_local_user(blob)
     session["sso_token"] = token
@@ -90,7 +96,7 @@ LOGGED_OUT_PAGE = """\
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Logged out — dashboard.pdhc</title>
+<title>Logged out — cd-assist</title>
 <style>
   body { font-family: system-ui, sans-serif; display: flex; justify-content: center;
          align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }

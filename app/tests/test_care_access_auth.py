@@ -141,3 +141,34 @@ def test_analysis_user_reaches_select():
     c = app.test_client()
     _login_as(c, _ANALYSIS)
     assert c.get("/select").status_code == 200
+
+
+def test_callback_admits_care_only_user():
+    """#546: the SSO callback admits a pure care-delivery user (care
+    relationship, no analysis phase) — previously it was analysis-gated,
+    which blocked a care-only nurse from ever logging in."""
+    app = _app("sso")
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["sso_state"] = "st1"
+        s["sso_next"] = "/select"
+    # callback resolves the token via app.routes.auth's own imported name.
+    with patch("app.routes.auth.validate_sso_token", return_value=_CARE_ONLY):
+        r = c.get("/auth/callback?token=tok&state=st1", follow_redirects=False)
+    assert r.status_code == 302
+    assert "/auth/login" not in r.headers.get("Location", "")  # admitted, not bounced
+
+
+def test_callback_rejects_user_with_no_access():
+    """A user with neither a care relationship nor the analysis phase is
+    cleanly bounced back to login."""
+    app = _app("sso")
+    c = app.test_client()
+    with c.session_transaction() as s:
+        s["sso_state"] = "st2"
+    no_access = {"user_type": "professional", "is_su_admin": False,
+                 "session_phases": [], "affiliations": [], "organization_ids": []}
+    with patch("app.routes.auth.validate_sso_token", return_value=no_access):
+        r = c.get("/auth/callback?token=tok&state=st2", follow_redirects=False)
+    assert r.status_code == 302
+    assert "/auth/login" in r.headers.get("Location", "")
