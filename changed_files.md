@@ -301,3 +301,4 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-08-08T09:57:27Z app/tests/test_care_access_auth.py — nurse workspace page now care-delivery; care-only reaches it
 2026-08-08T10:34:21Z app/routes/auth.py — SSO callback admits care-delivery OR analysis (care-only nurse can log in #546); logged-out title -> cd-assist
 2026-08-08T10:34:21Z app/tests/test_care_access_auth.py — callback admits care-only / rejects no-access
+- dashboard.pdhc/docs/technical.md (Port Allocation section)

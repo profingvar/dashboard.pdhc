@@ -154,3 +154,14 @@ the Colima DB port destructively.
 ```
 app/.venv/bin/python -m pytest app/tests
 ```
+
+## Port Allocation
+
+All ports bind to `127.0.0.1` (loopback only); external traffic arrives
+via the reverse proxy.
+
+| Port | Service |
+|------|---------|
+| 9027 | Flask application (Gunicorn) |
+| 9026 | PostgreSQL database |
+| 9028–9029 | Reserved |
