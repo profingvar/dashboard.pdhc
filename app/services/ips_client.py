@@ -13,9 +13,9 @@ Ticket #205 / spärr Phase 2. Implements:
   is bounded by the 30 s TTL alone.
 
 The block list lets the dashboard:
-- drop ``ObservationCache`` rows whose ``org_guid`` matches an active
-  block's ``source_scope_id`` (v1 scope is clinic, which lives in the
-  same identifier domain as ``org_guid``).
+- drop CDR1 clinical points (``filter_blocked_points``) whose ``org_guid``
+  matches an active block's ``source_scope_id`` (v1 scope is clinic, which
+  lives in the same identifier domain as ``org_guid``).
 - render the PDL Ch 4 § 4 ¶ 3 banner ("uppgift om att det finns
   spärrade uppgifter…") when the patient has any active block, even
   if every blocked row was already filtered by org membership.
@@ -291,59 +291,6 @@ def blocked_clinic_ids(blocks: Iterable[Block]) -> set[str]:
     }
 
 
-def filter_blocked_rows(rows, blocks: Iterable[Block]):
-    """Drop ObservationCache rows whose org_guid matches an active block.
-
-    Rows are kept iff:
-    - their ``org_guid`` is NOT in any active block's source_scope_id,
-      OR
-    - they satisfy at least one block's *lift filter* — the
-      ``lift_concept_guids`` mechanical filter applied to the row's
-      ``concept_guid`` + observation date. (Legal-confirmed 2026-06-04:
-      indispensable-care lifts MUST be mechanically filtered.)
-    """
-    blocked = blocked_clinic_ids(blocks)
-    if not blocked:
-        return list(rows)
-    # Pre-index lifts by source_scope_id for O(1) lookup.
-    lifts_by_scope: dict[str, list[Block]] = {}
-    for b in blocks:
-        if b.source_scope_type != "clinic":
-            continue
-        if b.lift_kind == "indispensable_care" and b.lift_concept_guids:
-            lifts_by_scope.setdefault(b.source_scope_id, []).append(b)
-
-    out = []
-    for r in rows:
-        org = getattr(r, "org_guid", None)
-        if org not in blocked:
-            out.append(r)
-            continue
-        # The block is active for this scope; check lifts.
-        if _row_passes_any_lift(r, lifts_by_scope.get(str(org), [])):
-            out.append(r)
-    return out
-
-
-def _row_passes_any_lift(row, lifts: list[Block]) -> bool:
-    """True iff at least one lift exposes this row."""
-    if not lifts:
-        return False
-    concept = str(getattr(row, "concept_guid", "") or "")
-    observed = getattr(row, "observed_at", None)
-    observed_iso = observed.isoformat() if observed is not None else None
-    for lift in lifts:
-        allowed = {str(g) for g in (lift.lift_concept_guids or [])}
-        if concept not in allowed:
-            continue
-        if lift.lift_from_date and observed_iso and observed_iso < lift.lift_from_date:
-            continue
-        if lift.lift_until_date and observed_iso and observed_iso > lift.lift_until_date:
-            continue
-        return True
-    return False
-
-
 # ---------------------------------------------------------------------------
 # CDR1 dict-point variant (#471.4, DPO-approved #472)
 # ---------------------------------------------------------------------------
@@ -351,8 +298,9 @@ def _row_passes_any_lift(row, lifts: list[Block]) -> bool:
 # ``{code, at, value, unit, org_guid, ...}`` where ``code`` is the row's
 # ``code_canonical`` (prod form ``urn:pdhc:concept/<guid>``), NOT a stored
 # concept_guid. #472 Q1 approved deriving the concept identity by PARSING that
-# URI as the basis for the indispensable-care lift filter. Same rule as
-# ``_row_passes_any_lift`` above (legal-confirmed 2026-06-04).
+# URI as the basis for the indispensable-care lift filter. (The legacy
+# ObservationCache row-object variant was removed in #471 as dead code;
+# ``filter_blocked_points`` below is the sole live spärr filter.)
 
 _CONCEPT_URI_PREFIX = "urn:pdhc:concept/"
 
@@ -371,8 +319,7 @@ def concept_guid_from_canonical(code_canonical):
 
 def _point_lift(concept_guid, observed_iso, lifts: list[Block]):
     """Return the lift Block that exposes this (concept, date), else None.
-    Dict-point analogue of ``_row_passes_any_lift`` — same window/concept rule,
-    but concept_guid is already parsed and observed_iso is the point's ISO date
+    concept_guid is already parsed and observed_iso is the point's ISO date
     string (CDR points already carry ISO ``at``; lift dates are ISO too)."""
     if not concept_guid or not lifts:
         return None
