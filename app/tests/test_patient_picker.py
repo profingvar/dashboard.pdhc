@@ -92,7 +92,7 @@ def test_select_route_lists_and_scopes(monkeypatch):
     class FakeClient:
         base_url = "https://cdr.pdhc.se"
 
-        def list_org_patients(self, orgs, *, is_admin=False):
+        def list_org_patients(self, orgs, *, is_admin=False, reason=None):
             captured["orgs"] = orgs
             captured["is_admin"] = is_admin
             return [
@@ -102,7 +102,10 @@ def test_select_route_lists_and_scopes(monkeypatch):
 
     monkeypatch.setattr(picker, "build_client", lambda: FakeClient())
 
-    r = app.test_client().get("/select")
+    _c = app.test_client()
+    with _c.session_transaction() as _s:
+        _s["admin_read_reason"] = "unit-test attest"  # #575 break-glass
+    r = _c.get("/select")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
     # both patients rendered, sorted by name (Alpha before Zeta)
@@ -119,10 +122,13 @@ def test_select_route_unconfigured_banner(monkeypatch):
     class FakeClient:
         base_url = ""
 
-        def list_org_patients(self, orgs, *, is_admin=False):
+        def list_org_patients(self, orgs, *, is_admin=False, reason=None):
             return []
 
     monkeypatch.setattr(picker, "build_client", lambda: FakeClient())
-    r = app.test_client().get("/select")
+    _c = app.test_client()
+    with _c.session_transaction() as _s:
+        _s["admin_read_reason"] = "unit-test attest"  # #575 break-glass
+    r = _c.get("/select")
     assert r.status_code == 200
     assert "CDR1_BASE_URL" in r.get_data(as_text=True)

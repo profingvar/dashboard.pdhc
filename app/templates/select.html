@@ -2,6 +2,22 @@
 {% block title %}Select patient — dashboard.pdhc{% endblock %}
 {% block h1 %}Select patient{% endblock %}
 {% block content %}
+{% if attest_required %}
+<div class="card">
+  <h3 style="margin-top:0;">Break-glass access — attestation required</h3>
+  <p style="color:var(--text-muted);">
+    You are an administrator. Listing patients outside your own care unit is an
+    access override that is logged. State the reason for this access to continue.
+  </p>
+  <form method="post" action="{{ url_for('charts.admin_read_attest') }}">
+    <input type="hidden" name="next" value="{{ url_for('picker.select') }}">
+    <textarea name="reason" rows="3" required
+              placeholder="Reason for accessing records outside your care unit…"
+              style="width:100%;box-sizing:border-box;padding:.4rem .6rem;"></textarea>
+    <button type="submit" style="margin-top:.5rem;">Attest &amp; continue</button>
+  </form>
+</div>
+{% else %}
 <div class="card">
   {% if not cdr1_configured %}
   <p style="color:var(--text-muted);padding:.5rem 0;">
@@ -37,6 +53,7 @@
     No patients match the filter.
   </p>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>

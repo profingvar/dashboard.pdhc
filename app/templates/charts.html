@@ -50,6 +50,31 @@ let PARAMS = [];          // [{code, unit, count}]
 let diagrams = [];        // [{el, chart, primary, mirror, t, zero, ymax}]
 let seq = 0;
 
+// #575 break-glass: an admin-override read (outside the operator's care unit)
+// returns 428 ADMIN_READ_REASON_REQUIRED. Prompt for a reason, attest it for
+// the session, and retry the read once.
+async function attestedFetch(url, opts) {
+  let r = await fetch(url, opts);
+  if (r.status === 428) {
+    let body = {};
+    try { body = await r.clone().json(); } catch (e) {}
+    if (body.code === "ADMIN_READ_REASON_REQUIRED") {
+      const reason = window.prompt(
+        "Break-glass access: you are viewing records outside your care unit. " +
+        "State the reason for this access (this is logged):");
+      if (reason && reason.trim()) {
+        await fetch("{{ url_for('charts.admin_read_attest') }}", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: reason.trim() }),
+        });
+        r = await fetch(url, opts);  // retry — the reason is now in the session
+      }
+    }
+  }
+  return r;
+}
+
 // continuous time slider t∈[0,1000] → window length in days (1 .. 1825),
 // exponential so the day end is reachable. label: d/w/mo/y.
 function tToDays(t) { return Math.max(1, Math.round(Math.pow(1825, t / 1000))); }
@@ -69,7 +94,7 @@ function displayOf(code) { const p = PARAMS.find(x => x.code === code); return (
 
 async function loadParams() {
   try {
-    const r = await fetch(API + "/parameters");
+    const r = await attestedFetch(API + "/parameters");
     if (!r.ok) return;
     const j = await r.json();
     PARAMS = j.parameters || [];         // already sorted by count desc (CDR)
@@ -124,7 +149,7 @@ async function redraw(diagram) {
              "&from=" + from.toISOString() + "&to=" + to.toISOString();
   let pts = [];
   try {
-    const r = await fetch(API + "/series?" + qs);
+    const r = await attestedFetch(API + "/series?" + qs);
     if (r.ok) pts = (await r.json()).points || [];
   } catch (e) { /* draw empty */ }
 

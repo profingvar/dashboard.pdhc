@@ -35,12 +35,13 @@ class _FakeClient:
         self._series = series or []
         self.calls = []
 
-    def patient_summary(self, guid, orgs, *, is_admin=False):
-        self.calls.append(("summary", guid, tuple(orgs), is_admin))
+    def patient_summary(self, guid, orgs, *, is_admin=False, reason=None):
+        self.calls.append(("summary", guid, tuple(orgs), is_admin, reason))
         return self._summary
 
-    def patient_series(self, guid, codes, frm, to, orgs, *, is_admin=False):
-        self.calls.append(("series", guid, tuple(codes), frm, to, is_admin))
+    def patient_series(self, guid, codes, frm, to, orgs, *, is_admin=False,
+                       reason=None):
+        self.calls.append(("series", guid, tuple(codes), frm, to, is_admin, reason))
         return self._series
 
 
@@ -58,11 +59,39 @@ def test_parameters_proxied(monkeypatch):
         {"code": "sys|glucose", "unit": "mmol/L", "count": 3},
     ])
     monkeypatch.setattr(charts, "build_client", lambda: fake)
-    r = app.test_client().get("/api/v1/patient/pat-1/parameters")
+    r = app.test_client().get("/api/v1/patient/pat-1/parameters",
+                              headers={"X-Admin-Read-Reason": "unit-test attest"})
     assert r.status_code == 200
     body = r.get_json()
     assert body["patient_guid"] == "pat-1"
     assert [p["code"] for p in body["parameters"]] == ["sys|weight", "sys|glucose"]
+
+
+def test_admin_read_without_reason_is_gated(monkeypatch):
+    # #575: an admin-override read with no attestation -> 428, and nothing is
+    # fetched from CDR1 (the gate short-circuits before build_client is used).
+    app = _app()
+    fake = _FakeClient(summary=[{"code": "c", "unit": "", "count": 1}])
+    monkeypatch.setattr(charts, "build_client", lambda: fake)
+    r = app.test_client().get("/api/v1/patient/pat-1/parameters")
+    assert r.status_code == 428
+    assert r.get_json()["code"] == "ADMIN_READ_REASON_REQUIRED"
+    assert fake.calls == []
+
+
+def test_admin_read_attest_then_read_ok(monkeypatch):
+    # #575: POST the reason -> stored in session -> the read proceeds and the
+    # reason is forwarded to CDR1.
+    app = _app()
+    fake = _FakeClient(summary=[{"code": "c", "unit": "", "count": 1}])
+    monkeypatch.setattr(charts, "build_client", lambda: fake)
+    c = app.test_client()
+    a = c.post("/admin-read-attest", json={"reason": "covering colleague"})
+    assert a.status_code == 200 and a.get_json()["ok"] is True
+    r = c.get("/api/v1/patient/pat-1/parameters")
+    assert r.status_code == 200
+    # reason threaded to the client call (last tuple element)
+    assert fake.calls[0][-1] == "covering colleague"
 
 
 def test_series_proxied_and_code_window_forwarded(monkeypatch):
@@ -74,7 +103,8 @@ def test_series_proxied_and_code_window_forwarded(monkeypatch):
     monkeypatch.setattr(charts, "build_client", lambda: fake)
     monkeypatch.setattr(charts, "get_active_blocks", lambda g: [])
     r = app.test_client().get(
-        "/api/v1/patient/pat-1/series?code=sys|weight&from=2026-01-01T00:00:00Z")
+        "/api/v1/patient/pat-1/series?code=sys|weight&from=2026-01-01T00:00:00Z",
+        headers={"X-Admin-Read-Reason": "unit-test attest"})
     assert r.status_code == 200
     assert len(r.get_json()["points"]) == 1
     # the code + window were forwarded to the client
@@ -92,7 +122,8 @@ def test_series_sparr_drops_blocked_clinic(monkeypatch):
     monkeypatch.setattr(charts, "build_client", lambda: fake)
     monkeypatch.setattr(charts, "get_active_blocks",
                         lambda g: [_block("org-blocked")])
-    r = app.test_client().get("/api/v1/patient/pat-1/series")
+    r = app.test_client().get("/api/v1/patient/pat-1/series",
+                              headers={"X-Admin-Read-Reason": "unit-test attest"})
     body = r.get_json()
     assert [p["org_guid"] for p in body["points"]] == ["org-ok"]
     assert body["has_blocked_sources"] is True

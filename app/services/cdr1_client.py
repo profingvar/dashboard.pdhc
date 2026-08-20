@@ -51,7 +51,8 @@ class Cdr1Client:
         self.timeout = timeout
 
     # -- headers ---------------------------------------------------------
-    def _headers(self, org_guids: list[str], is_admin: bool) -> dict:
+    def _headers(self, org_guids: list[str], is_admin: bool,
+                 reason: str | None = None) -> dict:
         h = {
             "Accept": "application/json",
             # Declare the legal basis so CDR1 selects care_access_policy
@@ -65,6 +66,10 @@ class Cdr1Client:
             h["X-Service-Key"] = self.service_key
         if is_admin:
             h["X-Is-Admin"] = "1"
+            # #575 (#212 re-home): an admin-override read is break-glass — carry
+            # the attestation reason so CDR1 admits it and it lands in the audit.
+            if reason:
+                h["X-Admin-Read-Reason"] = reason
         elif org_guids:
             h["X-Org-Guids"] = ",".join(org_guids)
         # X2 (#423): forward the operator session if one is in scope.
@@ -78,6 +83,7 @@ class Cdr1Client:
     # -- patient directory ----------------------------------------------
     def list_org_patients(
         self, org_guids: list[str], *, is_admin: bool = False,
+        reason: str | None = None,
     ) -> list[dict]:
         """Return the patients (that HAVE data) selectable for these orgs.
 
@@ -94,7 +100,7 @@ class Cdr1Client:
             return []  # non-admin with no affiliation sees nobody (Rule 24)
         body = self._get_json(
             "/api/v1/clinical/patients", org_guids, is_admin,
-            what="patient list",
+            what="patient list", reason=reason,
         )
         if body is None:
             return []
@@ -102,6 +108,7 @@ class Cdr1Client:
 
     def patient_summary(
         self, patient_guid: str, org_guids: list[str], *, is_admin: bool = False,
+        reason: str | None = None,
     ) -> list[dict]:
         """Per-concept data counts for one patient (#468), ordered by count
         desc — feeds the sorted parameter dropdown (D4/#466). Returns
@@ -112,7 +119,7 @@ class Cdr1Client:
             return []
         body = self._get_json(
             f"/api/v1/clinical/patient/{patient_guid}/summary",
-            org_guids, is_admin, what="patient summary",
+            org_guids, is_admin, what="patient summary", reason=reason,
         )
         if body is None:
             return []
@@ -123,6 +130,7 @@ class Cdr1Client:
         self, patient_guid: str, codes: list[str] | None,
         frm: str | None, to: str | None,
         org_guids: list[str], *, is_admin: bool = False,
+        reason: str | None = None,
     ) -> list[dict]:
         """Time-series points for a patient from CDR1 (#464), optionally
         filtered to concept codes and an effective-date window. Each point:
@@ -142,6 +150,7 @@ class Cdr1Client:
         body = self._get_json(
             f"/api/v1/clinical/patient/{patient_guid}/series",
             org_guids, is_admin, what="patient series", params=params,
+            reason=reason,
         )
         if body is None:
             return []
@@ -152,11 +161,12 @@ class Cdr1Client:
     def _get_json(
         self, path: str, org_guids: list[str], is_admin: bool, *, what: str,
         params: list[tuple[str, str]] | None = None,
+        reason: str | None = None,
     ) -> dict | None:
         url = f"{self.base_url}{path}"
         try:
             r = requests.get(
-                url, headers=self._headers(org_guids, is_admin),
+                url, headers=self._headers(org_guids, is_admin, reason),
                 params=params or None, timeout=self.timeout,
             )
         except requests.RequestException:

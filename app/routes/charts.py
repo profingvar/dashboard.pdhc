@@ -13,7 +13,8 @@ clinical paths in app.auth):
 """
 from __future__ import annotations
 
-from flask import Blueprint, current_app, g, jsonify, render_template, request
+from flask import (Blueprint, current_app, g, jsonify, redirect,
+                   render_template, request, session)
 
 from app.auth import org_guids_for
 from app.services.audit import audit_read
@@ -57,6 +58,58 @@ def _scope():
     return org_guids_for(user), bool(getattr(user, "is_admin", False))
 
 
+def _admin_read_gate(is_admin):
+    """Break-glass gate for admin-OVERRIDE reads (#575, re-homes #212).
+
+    An admin operator's read bypasses org scoping (X-Is-Admin) and can see
+    every patient. That override is break-glass: the operator must attest a
+    reason, which the browser sends as ``X-Admin-Read-Reason``. Returns
+    ``(reason, err)``: ``err`` is a 428 response tuple when the reason is
+    missing (the JS prompts + retries); otherwise ``(reason, None)`` with the
+    audit event flagged (event_type=admin_override, justification recorded —
+    the audit columns already exist from #212). Non-admins: ``(None, None)``.
+    """
+    if not is_admin:
+        return None, None
+    # Attest once per session: the reason is set via POST /admin-read-attest
+    # (from the picker form or the charts JS prompt) and kept in the session.
+    # A per-request X-Admin-Read-Reason header is also honoured.
+    reason = (request.headers.get("X-Admin-Read-Reason")
+              or session.get("admin_read_reason") or "").strip()
+    if not reason:
+        g._audit_event_type = "admin_override_required"
+        return None, (jsonify(
+            error="admin-override read requires an attestation reason",
+            code="ADMIN_READ_REASON_REQUIRED"), 428)
+    g._audit_event_type = "admin_override"
+    g._audit_admin_justification = reason
+    return reason, None
+
+
+@bp.post("/admin-read-attest")
+@audit_read
+def admin_read_attest():
+    """Record the operator's break-glass attestation reason for this session
+    (#575). Admin-override reads then carry it until logout/session end."""
+    _, is_admin = _scope()
+    g._audit_n_rows = 0
+    if not is_admin:
+        return jsonify(error="not an admin operator"), 403
+    reason = ""
+    if request.is_json:
+        reason = ((request.get_json(silent=True) or {}).get("reason") or "").strip()
+    reason = reason or (request.form.get("reason") or "").strip()
+    if not reason:
+        return jsonify(error="reason is required"), 400
+    session["admin_read_reason"] = reason
+    g._audit_event_type = "admin_override"
+    g._audit_admin_justification = reason
+    nxt = request.form.get("next")
+    if nxt:
+        return redirect(nxt)
+    return jsonify(ok=True)
+
+
 @bp.get("/patient/<guid>/charts")
 @audit_read
 def charts_page(guid):
@@ -75,7 +128,11 @@ def charts_page(guid):
 @audit_read
 def parameters(guid):
     orgs, is_admin = _scope()
-    params = build_client().patient_summary(guid, orgs, is_admin=is_admin)
+    reason, err = _admin_read_gate(is_admin)
+    if err:
+        return err
+    params = build_client().patient_summary(
+        guid, orgs, is_admin=is_admin, reason=reason)
     g._audit_n_rows = len(params)
     return jsonify(patient_guid=guid, parameters=params)
 
@@ -84,11 +141,14 @@ def parameters(guid):
 @audit_read
 def series(guid):
     orgs, is_admin = _scope()
+    reason, err = _admin_read_gate(is_admin)
+    if err:
+        return err
     codes = [c for c in request.args.getlist("code") if c]
     frm = request.args.get("from")
     to = request.args.get("to")
     pts = build_client().patient_series(
-        guid, codes, frm, to, orgs, is_admin=is_admin,
+        guid, codes, frm, to, orgs, is_admin=is_admin, reason=reason,
     )
     # Spärr (operator #469 Q1): drop points from clinics the patient has
     # blocked. Two modes:
