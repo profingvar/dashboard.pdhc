@@ -47,7 +47,11 @@ def select():
 
     client = build_client()
     patients = client.list_org_patients(orgs, is_admin=is_admin, reason=reason)
-    patients.sort(key=lambda p: (p.get("name") or "￿", p.get("guid") or ""))
+    # Most-recent-activity first (#578): surface patients with fresh data at the
+    # top — matches CDR1's own ordering intent. Stable two-pass so ties (or
+    # missing dates) fall back to a deterministic name/guid order.
+    patients.sort(key=lambda p: (p.get("name") or "", p.get("guid") or ""))
+    patients.sort(key=lambda p: p.get("last_observed_at") or "", reverse=True)
 
     # No CDR1 configured (local dev / not yet wired) — flag it so the page
     # doesn't look falsely empty.
