@@ -18,8 +18,12 @@
 </head>
 <body>
 <nav style="display:flex;align-items:center;gap:1rem;">
-  <a href="{{ url_for('views.landing') }}" style="color:white;font-weight:700;font-size:1rem;">cd-assist</a>
-  <a href="/nurse" style="color:white;font-size:0.9rem;{% if request.path.startswith('/nurse') or request.path == '/workspace' %}text-decoration:underline;{% endif %}">Nurse</a>
+  <a href="https://www.pdhc.se/services.html" style="color:white;font-size:0.9rem;opacity:.85;">PDHC / services</a>
+  <a href="{{ url_for('picker.select') }}" style="color:white;font-weight:700;font-size:1rem;{% if request.path in ['/select', '/'] %}text-decoration:underline;{% endif %}">choose patient</a>
+  <a href="/nurse" style="color:white;font-size:0.9rem;{% if request.path.startswith('/nurse') or request.path == '/workspace' or '/charts' in request.path %}text-decoration:underline;{% endif %}">Dashboard</a>
+  {% if g.current_user and (g.current_user.is_admin or g.current_user.is_su) %}
+  <a href="/admin/audit" style="color:white;font-size:0.9rem;{% if request.path.startswith('/admin') %}text-decoration:underline;{% endif %}">Spärrlogg</a>
+  {% endif %}
   <div style="margin-left:auto;display:flex;align-items:center;gap:0.75rem;">
     {% if g.current_user %}
       <span style="color:white;font-size:0.9rem;">{{ g.current_user.username }}</span>

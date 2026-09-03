@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Select patient — dashboard.pdhc{% endblock %}
-{% block h1 %}Select patient{% endblock %}
+{% block title %}Choose patient · cd-assist{% endblock %}
+{% block h1 %}Choose patient{% endblock %}
 {% block content %}
 {% if attest_required %}
 <div class="card">
@@ -26,24 +26,37 @@
     CDR1 once wired (#465/#468).
   </p>
   {% endif %}
-  <input id="filter" type="search" placeholder="Filter by name or id…"
-         autocomplete="off"
-         style="width:100%;padding:.4rem .6rem;margin-bottom:.6rem;box-sizing:border-box;"
-         oninput="filterPatients(this.value)">
+  <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.6rem;">
+    <input id="filter" type="search" placeholder="Filter by name or id…"
+           autocomplete="off"
+           style="flex:1;padding:.4rem .6rem;box-sizing:border-box;"
+           oninput="filterPatients(this.value)">
+    <a href="{{ url_for('picker.select') }}" class="btn btn-secondary btn-sm"
+       title="Reload the patient list">↻ Uppdatera</a>
+  </div>
   <table>
     <thead>
-      <tr><th>Patient</th><th>Name</th><th>Born</th><th>Data points</th></tr>
+      <tr>
+        <th>Namn</th><th>Födelseår</th><th>Patient-GUID</th>
+        <th style="text-align:right;">Datapunkter</th><th>Senaste data</th>
+      </tr>
     </thead>
     <tbody id="rows">
       {% for p in patients %}
-      <tr class="prow" data-search="{{ (p.name ~ ' ' ~ p.guid) | lower }}">
-        <td class="monospace"><a href="{{ url_for('charts.charts_page', guid=p.guid) }}">{{ p.guid[:12] }}…</a></td>
+      <tr class="prow" data-search="{{ (p.name ~ ' ' ~ p.guid) | lower }}"
+          style="cursor:pointer;"
+          onclick="location.href='{{ url_for('charts.charts_page', guid=p.guid) }}'">
         <td>{{ p.name or '—' }}</td>
-        <td>{{ p.birth_date or '—' }}</td>
-        <td>{{ p.observation_count if p.observation_count is not none else '—' }}</td>
+        <td>{{ p.birth_date[:4] if p.birth_date else '—' }}</td>
+        <td class="monospace">
+          <a href="{{ url_for('charts.charts_page', guid=p.guid) }}"
+             title="{{ p.guid }}" onclick="event.stopPropagation()">{{ p.guid[:8] }}…</a>
+        </td>
+        <td style="text-align:right;font-variant-numeric:tabular-nums;">{{ p.observation_count if p.observation_count is not none else '—' }}</td>
+        <td>{{ p.last_observed_at[:10] if p.last_observed_at else '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:1rem;">
+      <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1rem;">
         No patients with data for your organisation{% if cdr1_configured %} in CDR1{% endif %}.
       </td></tr>
       {% endfor %}

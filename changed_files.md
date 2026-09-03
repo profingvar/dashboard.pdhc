@@ -302,3 +302,8 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 2026-08-08T10:34:21Z app/routes/auth.py — SSO callback admits care-delivery OR analysis (care-only nurse can log in #546); logged-out title -> cd-assist
 2026-08-08T10:34:21Z app/tests/test_care_access_auth.py — callback admits care-only / rejects no-access
 - dashboard.pdhc/docs/technical.md (Port Allocation section)
+
+## 2026-09-03 — #578/#579 (dashboard = individual level): choose-patient list + nav per design
+- app/templates/base.html — nav: PDHC/services · choose patient (→picker) · Dashboard (was Nurse) · Spärrlogg (admin → /admin/audit)
+- app/templates/select.html — "Choose patient": Namn · Födelseår · Patient-GUID (full guid on mouseover) · Datapunkter · Senaste data (last_observed_at) + Uppdatera button; whole row → charts (Dashboard)
+- app/templates/nurse_workspace.html — "Nurse workspace" → "Dashboard"
