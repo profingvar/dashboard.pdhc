@@ -478,3 +478,28 @@ picker, views, workspace (the 5 group blueprints gone).
 
 Next: analyse.pdhc owns the extracted engine (separate repo/service); rebrand
 dashboard→cd-assist (#547) still pending.
+
+## 2026-09-03 — #578/#579 (dashboard=individual) choose-patient list + nav DEPLOYED
+Operator clarified 578/579 target dashboard.pdhc (cd-assist, individual), NOT
+analyse.pdhc (group) — an earlier analyse.pdhc build was the wrong surface
+(left as-is; "reder ut analyse senare").
+
+Applied the 578 design to cd-assist (template-only, reusing existing picker /
+per-patient charts / spärr / admin audit):
+- base.html nav: PDHC/services · choose patient (→picker.select) · Dashboard
+  (was Nurse) · Spärrlogg (admin → existing /admin/audit).
+- select.html "Choose patient": Namn · Födelseår · Patient-GUID (full guid on
+  mouseover) · Datapunkter · Senaste data (last_observed_at) + Uppdatera; row →
+  charts (Dashboard).
+- nurse_workspace.html "Nurse workspace" → "Dashboard".
+Commit 081da0e (origin/main). 167 tests pass.
+
+DEPLOY (release 2026-09-03T07-13-40Z): safest path — copied the current release,
+overwrote ONLY the 3 template files (checksum-verified vs local reform),
+preserved .env, flipped symlink, docker-compose up -d --build (project
+dashboard_pdhc, volume reused). Verified: /healthz 200 local+public; running
+image contains the new nav markers; routes 302; no boot errors. Old release
+2026-08-08T10-34-25Z retained as rollback; predeploy tar in
+~/backups/predeploy/dashboard.pdhc/.
+
+Deferred (with analyse, later): CDR1-5 multi-CDR selector; per-row spärr badge.
