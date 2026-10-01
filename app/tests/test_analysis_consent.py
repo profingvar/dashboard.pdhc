@@ -132,7 +132,13 @@ def test_service_blob_denied_on_clinical_routes(app_with_blob):
         holder["blob"] = _service_blob("gateway.pdhc")
     # /api/nurse is a care-delivery clinical route (#546): a machine
     # service blob (no admin, user_type=service, no affiliations) has no
-    # care-delivery access, so the app-level gate keeps it out.
+    # care-delivery access.
+    #
+    # #729: this asserts the PREDICATE, and until #729 the predicate was never
+    # consulted on the service-key path — the loader returned before the gate.
+    # The comment here used to claim "the app-level gate keeps it out", which
+    # was not true of that branch. It is now, and
+    # tests/test_service_key_gate.py asserts it through the real loader.
     assert has_care_delivery_access(holder["blob"]) is False
 
 

@@ -307,3 +307,9 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - app/templates/base.html — nav: PDHC/services · choose patient (→picker) · Dashboard (was Nurse) · Spärrlogg (admin → /admin/audit)
 - app/templates/select.html — "Choose patient": Namn · Födelseår · Patient-GUID (full guid on mouseover) · Datapunkter · Senaste data (last_observed_at) + Uppdatera button; whole row → charts (Dashboard)
 - app/templates/nurse_workspace.html — "Nurse workspace" → "Dashboard"
+
+## 2026-10-01 — #729: empty KNOWN_SERVICES + gate the service-key branch
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py — KNOWN_SERVICES now empty (gateway.pdhc dead since #540, verified against the live gateway container); install_request_loader applies _dashboard_access_allowed on the service-key branch instead of returning before it.
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py — GATEWAY_PDHC_SERVICE_KEY no longer read into config.
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_service_key_gate.py — NEW, 7 tests through the real loader. Two verified to fail against a reverted fix.
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_analysis_consent.py — corrected a comment that claimed the app-level gate kept a service blob off clinical routes; it asserted the predicate on a path where the predicate was never consulted.

@@ -547,3 +547,55 @@ remains, and its one endpoint here (`/api/v1/observations`) moved to
 analyse.pdhc in #540, so that entry may be dead too.
 
 167 tests pass.
+
+## 2026-10-01 — #729: the service-key path is closed, and gated if it reopens
+
+Two separate defects, both fixed. Done under explicit operator instruction
+(this repo is normally out of scope).
+
+### 1. `KNOWN_SERVICES` is now empty
+`gateway.pdhc` was still listed. It joined for #291 so its
+`/api/v1/observations` proxy could land here instead of cdr1; **#540 repointed
+that proxy to analyse.pdhc** and nobody removed the entry. Verified against the
+live gateway container 2026-10-01: `ANALYSE_BASE_URL` is
+`http://host.docker.internal:9110` (analyse) and there is **no `DASHBOARD*`
+variable at all**. Nothing calls dashboard service-to-service.
+
+An empty dict makes `_service_key_outcome` return `False` for any
+`X-Source-Service` header, so every service-key attempt is 403 before a route is
+reached. `GATEWAY_PDHC_SERVICE_KEY` is no longer read into config.
+
+### 2. The gate now applies to the service-key branch
+`install_request_loader` returned from the service-key branch **before**
+`_dashboard_access_allowed`, so a service-key caller skipped the care-delivery /
+analysis-phase gate and could address every clinical path (`/`, `/workspace`,
+`/refresh`, `/patient/…`, `/api/v1/patient/…`, `/api/v1/designs`, `/api/nurse/…`)
+that an SSO caller without a care relationship is 403'd out of.
+
+The service blob carries no affiliations and no orgs, so org scoping (Rule 24)
+*should* have emptied each read. That is the second line of defence doing the
+first line's job, and ips's block filter failed open once already (e7e81a1), so
+it is not a defence to rely on. An empty `KNOWN_SERVICES` is a fact about today;
+the gate is what holds when someone adds an identity tomorrow.
+
+### Why this was invisible for five months
+`test_analysis_consent.py::test_service_blob_denied_on_clinical_routes` already
+existed, and its comment said *"so the app-level gate keeps it out"*. But it
+asserted `has_care_delivery_access(blob) is False` — the **predicate**, on a path
+where the predicate was never consulted. The ingredient was tested; the dish was
+never cooked. That comment is now corrected and points at the real test.
+
+### Tests
+174 pass (was 167). `tests/test_service_key_gate.py` is new, 7 tests, and goes
+through the **real loader** rather than calling the helper:
+- `KNOWN_SERVICES` is empty; every identity, known or invented, gets 403
+  `Invalid service credentials`; the attempt never reaches routing (403, not 404).
+- The regression test re-admits an identity exactly as a future change would,
+  then asserts the loader still refuses it on the clinical paths.
+- A source check that the gate call is still on that branch.
+
+**Both of those were verified to fail against a deliberately reverted fix** —
+without the gate, `/` returns 302 instead of 403. The source check needed
+hardening to get there: its first version passed on the reverted fix, because
+the branch's own #729 comment names the gate function. A source assertion that
+matches its own explanation is worth nothing.

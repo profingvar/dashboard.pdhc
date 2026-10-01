@@ -231,29 +231,31 @@ def _public_path(path: str) -> bool:
     )
 
 
-# Service-key auth: a trusted sibling service may call dashboard APIs without
-# an SSO session.
-# Ticket #291: gateway.pdhc joined as the analyse-pull caller — its
-# /api/v1/observations proxy landed here instead of cdr1. That endpoint has
-# since moved to analyse.pdhc (#540), so this entry may well be dead too; it is
-# left in place because confirming that is a separate question from #727.
+# Service-key auth: EMPTY as of #729. No sibling service calls dashboard.
 #
-# monitor.pdhc was removed by #727. It was never a service: a synthetic
-# service-key identity created 2026-04-28 so this repo's Playwright, perf and
-# chaos suites could bypass SSO (plans/*_2026-04-28.md), with no repo, container
-# or port. analyse.pdhc dropped it the same day. The e2e/ suite under this repo
-# still authenticates as it and will now fail at the loader with 403 — it has
-# not been run since 2026-04-29 and has never produced a report. A harness that
-# needs to come back should get its OWN key under its own name.
+# Two identities lived here and both are gone:
+#   monitor.pdhc — removed by #727. Never a service: a synthetic service-key
+#     identity created 2026-04-28 so this repo's Playwright, perf and chaos
+#     suites could bypass SSO (plans/*_2026-04-28.md), with no repo, container
+#     or port. The e2e/ suite still authenticates as it and now 403s; it has not
+#     been run since 2026-04-29 and has never produced a report.
+#   gateway.pdhc — removed by #729, as dead weight. It joined for #291 so its
+#     /api/v1/observations proxy could land here instead of cdr1; #540 repointed
+#     that proxy to analyse.pdhc. Verified 2026-10-01 against the live gateway
+#     container: ANALYSE_BASE_URL is :9110 (analyse) and there is no DASHBOARD*
+#     variable at all. Nothing calls dashboard service-to-service.
 #
-# NOTE (#727, filed separately): the service-key branch of install_request_loader
-# returns before _dashboard_access_allowed is applied, so a service-key caller
-# skips the care-delivery / analysis-phase gate entirely. Removing monitor.pdhc
-# removes one of the two identities that could do that; it does not fix the
-# bypass.
-KNOWN_SERVICES = {
-    "gateway.pdhc": "GATEWAY_PDHC_SERVICE_KEY",
-}
+# An EMPTY dict means _service_key_outcome returns False for any X-Source-Service
+# header, so every service-key attempt is 403 before a route is reached. That is
+# the intent: this service is superseded by #462 and should not grow a new
+# machine caller without a deliberate decision.
+#
+# If one is ever added, note that the gate below now applies to it (#729) — the
+# service-key branch of install_request_loader used to return BEFORE
+# _dashboard_access_allowed, so a service-key caller skipped the care-delivery /
+# analysis-phase gate entirely and could address the clinical paths. Keep the
+# gate call there; an empty dict is a fact about today, not a defence.
+KNOWN_SERVICES: dict[str, str] = {}
 
 
 def _service_key_outcome(app):
@@ -307,6 +309,16 @@ def install_request_loader(app):
         sk = _service_key_outcome(app)
         if sk is True:
             blob = _service_blob(g.source_service)
+            # #729: this branch used to return here, BEFORE the gate below, so a
+            # service-key caller skipped _dashboard_access_allowed entirely and
+            # could address every clinical path an SSO caller without a care
+            # relationship is 403'd out of. The service blob carries no
+            # affiliations and no orgs, so org scoping (Rule 24) should have
+            # emptied each read — relying on that is the second line of defence
+            # doing the first line's job, and ips's block filter failed open
+            # once already (e7e81a1).
+            if not _dashboard_access_allowed(request.path, blob):
+                abort(403)
             g.access_blob = blob
             g.current_user = _blob_to_user(blob)
             return None

@@ -38,13 +38,10 @@ def create_app(config=None):
     # MONITOR_PDHC_SERVICE_KEY was read here until #727 removed that identity
     # (a test harness, not a service). Nothing reads it now, so the variable is
     # inert wherever it is still set in the environment.
-    # Ticket #291 — gateway.pdhc calls dashboard's /api/v1/observations
-    # search via X-Source-Service: gateway.pdhc + X-Service-Key. The
-    # operator copies the matching value from gateway's .env.
-    app.config.setdefault(
-        "GATEWAY_PDHC_SERVICE_KEY",
-        os.environ.get("GATEWAY_PDHC_SERVICE_KEY", ""),
-    )
+    # GATEWAY_PDHC_SERVICE_KEY was read here for #291, when gateway's
+    # /api/v1/observations proxy landed on dashboard. #540 repointed that proxy
+    # to analyse.pdhc, and #729 removed the identity, so nothing reads this
+    # variable now; it is inert wherever it is still set.
     # CDR endpoints + outbound key (used by analyse/federation.py).
     # Env shape is a comma-separated URL list (e.g. "https://cdr2.pdhc.se,
     # https://cdr3.pdhc.se,..."). The federation expects dicts with
