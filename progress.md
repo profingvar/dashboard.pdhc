@@ -503,3 +503,47 @@ image contains the new nav markers; routes 302; no boot errors. Old release
 ~/backups/predeploy/dashboard.pdhc/.
 
 Deferred (with analyse, later): CDR1-5 multi-CDR selector; per-row spärr badge.
+
+## 2026-10-01 — #727: monitor.pdhc removed from dashboard's KNOWN_SERVICES
+
+Done under explicit operator instruction, which overrides the standing "do not
+touch other services" rule for this change only.
+
+`monitor.pdhc` was never a service: a synthetic service-key identity created
+2026-04-28 so **this repo's** Playwright (F2), perf, stats (F3) and chaos (F4)
+suites could bypass SSO (`plans/*_2026-04-28.md`). analyse.pdhc removed it the
+same day; this was the last place it still authenticated.
+
+`MONITOR_PDHC_SERVICE_KEY` is no longer read into config, so the variable is
+inert wherever it is still set.
+
+### What this breaks, deliberately
+`e2e/` authenticates as `monitor.pdhc` (`e2e/playwright.config.ts`), as do
+`app/tests/test_chaos_isolation.py` and `test_statistical_validation.py`. They
+will now get 403 at the loader. The suite has one commit touching it
+(2026-04-29, the day after it was written), has never produced a
+`playwright-report` anywhere in this repo, and this service is what #462
+supersedes. A harness that needs to come back should get its OWN key under its
+own name — not reuse a shared one.
+
+### A finding that is NOT fixed here (#727 notes it; needs its own ticket)
+The service-key branch of `install_request_loader` returns **before**
+`_dashboard_access_allowed` is applied:
+
+```python
+sk = _service_key_outcome(app)
+if sk is True:
+    ...
+    return None          # <-- gate never runs
+```
+
+So a service-key caller skips the care-delivery / analysis-phase gate entirely
+and can reach clinical paths (`/patient/…`, `/api/v1/patient/…`, `/api/nurse/…`,
+`/workspace`) that an SSO caller would be 403'd out of. The service blob carries
+no affiliations and no orgs, so org scoping should empty the result — that
+"should" is exactly what wants verifying rather than assuming. Removing
+`monitor.pdhc` removes one of the two identities that could do it; `gateway.pdhc`
+remains, and its one endpoint here (`/api/v1/observations`) moved to
+analyse.pdhc in #540, so that entry may be dead too.
+
+167 tests pass.

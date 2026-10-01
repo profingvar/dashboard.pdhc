@@ -231,12 +231,27 @@ def _public_path(path: str) -> bool:
     )
 
 
-# Service-key auth: trusted sibling tools (perf benchmarks, monitoring,
-# CI smoke tests) may call dashboard APIs without an SSO session.
-# Ticket #291: gateway.pdhc joins as the analyse-pull caller — its
-# /api/v1/observations proxy now lands here instead of cdr1.
+# Service-key auth: a trusted sibling service may call dashboard APIs without
+# an SSO session.
+# Ticket #291: gateway.pdhc joined as the analyse-pull caller — its
+# /api/v1/observations proxy landed here instead of cdr1. That endpoint has
+# since moved to analyse.pdhc (#540), so this entry may well be dead too; it is
+# left in place because confirming that is a separate question from #727.
+#
+# monitor.pdhc was removed by #727. It was never a service: a synthetic
+# service-key identity created 2026-04-28 so this repo's Playwright, perf and
+# chaos suites could bypass SSO (plans/*_2026-04-28.md), with no repo, container
+# or port. analyse.pdhc dropped it the same day. The e2e/ suite under this repo
+# still authenticates as it and will now fail at the loader with 403 — it has
+# not been run since 2026-04-29 and has never produced a report. A harness that
+# needs to come back should get its OWN key under its own name.
+#
+# NOTE (#727, filed separately): the service-key branch of install_request_loader
+# returns before _dashboard_access_allowed is applied, so a service-key caller
+# skips the care-delivery / analysis-phase gate entirely. Removing monitor.pdhc
+# removes one of the two identities that could do that; it does not fix the
+# bypass.
 KNOWN_SERVICES = {
-    "monitor.pdhc": "MONITOR_PDHC_SERVICE_KEY",
     "gateway.pdhc": "GATEWAY_PDHC_SERVICE_KEY",
 }
 

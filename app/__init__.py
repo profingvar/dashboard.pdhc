@@ -35,11 +35,9 @@ def create_app(config=None):
     app.config.setdefault("SSO_CLIENT_ID", os.environ.get("SSO_CLIENT_ID", ""))
     app.config.setdefault("SSO_CLIENT_SECRET", os.environ.get("SSO_CLIENT_SECRET", ""))
     app.config.setdefault("SSO_CALLBACK_URL", os.environ.get("SSO_CALLBACK_URL", ""))
-    # Service-key bypass: monitor.pdhc → benchmarks / smoke / future CI.
-    app.config.setdefault(
-        "MONITOR_PDHC_SERVICE_KEY",
-        os.environ.get("MONITOR_PDHC_SERVICE_KEY", ""),
-    )
+    # MONITOR_PDHC_SERVICE_KEY was read here until #727 removed that identity
+    # (a test harness, not a service). Nothing reads it now, so the variable is
+    # inert wherever it is still set in the environment.
     # Ticket #291 — gateway.pdhc calls dashboard's /api/v1/observations
     # search via X-Source-Service: gateway.pdhc + X-Service-Key. The
     # operator copies the matching value from gateway's .env.
