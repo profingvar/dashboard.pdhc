@@ -59,7 +59,7 @@ metadata-only banner (PDL Ch 4 §4).
 ```
                        ┌── CDR1 (cdr.pdhc.se) ── charts + picker (care-delivery reads)
 browser ──SSO──▶ cd-assist ─┤
- (dashboard.pdhc.se)   └── CDR2..CDR5 fan-out ── nurse summary/AGP/variable/events
+ (dashboard.pdhc.se)   └── CDR2..CDR3 fan-out ── nurse summary/AGP/variable/events
                             │
                    ips.pdhc (spärr blocks)   Postgres 9026 / Flask(gunicorn) 9027
 ```
