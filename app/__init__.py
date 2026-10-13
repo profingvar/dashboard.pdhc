@@ -31,6 +31,33 @@ def create_app(config=None):
 
     app.config["SQLALCHEMY_DATABASE_URI"] = app.config.get("DATABASE_URL") or "sqlite:///:memory:"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+    # ---- #816: session cookie hardening ------------------------------
+    # This cookie carries the SSO token, the access blob and
+    # `admin_read_reason` — the break-glass attestation from #575/#212. nginx
+    # terminates TLS and proxies plain HTTP to gunicorn, so Flask sees an http
+    # request and cannot infer Secure; it has to be set deliberately. The
+    # vhost's `return 301 https://` does not close the gap — a browser holding
+    # a non-Secure cookie attaches it to the cleartext request and only THEN
+    # gets the redirect. HSTS prevents that first request and is absent from
+    # dashboard.pdhc.se.conf (operator-only, #816 Part B).
+    #
+    # Read AFTER the `config` override above, so a test passing AUTH_MODE in
+    # the mapping gets a consistent answer.
+    #
+    # SESSION_COOKIE_SECURE in the environment overrides it, for debugging a
+    # logged-in page on 127.0.0.1:9027 through an ssh forward, which is plain
+    # HTTP. An EMPTY value counts as unset, not false.
+    _cookie_secure = os.environ.get("SESSION_COOKIE_SECURE", "").strip()
+    app.config["SESSION_COOKIE_SECURE"] = (
+        _cookie_secure.lower() in ("1", "true", "yes") if _cookie_secure
+        else app.config.get("AUTH_MODE", "off") != "off")
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    # 'Lax', NOT 'Strict', and load-bearing: SSO login finishes with a
+    # top-level GET redirect from sso.pdhc.se back to this service's
+    # callback. Lax sends the cookie on a top-level navigation; Strict
+    # withholds it and breaks login with no error anyone can read.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config.setdefault("SSO_BASE_URL", os.environ.get("SSO_BASE_URL", ""))
     app.config.setdefault("SSO_CLIENT_ID", os.environ.get("SSO_CLIENT_ID", ""))
     app.config.setdefault("SSO_CLIENT_SECRET", os.environ.get("SSO_CLIENT_SECRET", ""))
