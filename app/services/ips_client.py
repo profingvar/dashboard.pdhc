@@ -112,6 +112,20 @@ class IpsClient:
 
     def fetch_active_blocks(self, patient_guid: str) -> list[Block]:
         if not self.base_url:
+            # An UNCONFIGURED ips used to return [] in silence, and an empty
+            # block list means NOTHING IS HIDDEN and the PDL Ch 4 §4 ¶3 banner
+            # never renders. Found 2026-10-15 by `deploy/smoke_siblings.py`
+            # (#708): `IPS_BASE_URL` is not set in dashboard's production
+            # environment, so every spärr lookup this service has ever made
+            # has returned "no blocks" without asking anyone.
+            #
+            # Still [], because cdr1 applies `care_access_policy` itself on
+            # the care-delivery read and raising here would take the whole
+            # page down over a second layer. But LOUDLY, with a greppable
+            # marker — the same shape request.pdhc uses for its own
+            # fail-open (`SPARR_FAIL_OPEN`), so monitoring can alert on one
+            # pattern across services.
+            _log_unconfigured(patient_guid)
             return []
         url = f"{self.base_url}/api/v1/patients/{patient_guid}/blocks"
         try:
@@ -252,6 +266,42 @@ def get_active_blocks(
     if use_cache:
         _cache.put(patient_guid, blocks)
     return blocks
+
+
+#: Set once a missing `IPS_BASE_URL` has been reported, so a page rendering
+#: fifty charts logs the problem once rather than fifty times. The condition
+#: is a deployment fact, not a per-request one.
+_UNCONFIGURED_REPORTED = False
+
+
+def _log_unconfigured(patient_guid: str | None = None) -> None:
+    global _UNCONFIGURED_REPORTED
+    if _UNCONFIGURED_REPORTED:
+        return
+    _UNCONFIGURED_REPORTED = True
+    try:
+        current_app.logger.error(
+            "SPARR_UNAVAILABLE IPS_BASE_URL is not configured, so every "
+            "spärr lookup returns NO BLOCKS without asking ips: nothing is "
+            "hidden by this service and the PDL Ch 4 §4 ¶3 banner cannot "
+            "render. cdr1 still applies care_access_policy on the "
+            "care-delivery read. (first seen for patient %s)",
+            (patient_guid or "?")[:12])
+    except RuntimeError:            # no application context
+        pass
+
+
+def is_configured() -> bool:
+    """Can spärr be asked about at all?
+
+    Separate from "are there any blocks", and the distinction is the point:
+    `get_active_blocks` returns `[]` for both, so a caller that wants to say
+    "no blocked records" rather than "we could not find out" has to ask this.
+    """
+    try:
+        return bool((current_app.config.get("IPS_BASE_URL") or "").strip())
+    except RuntimeError:
+        return False
 
 
 def _default_client() -> IpsClient:
