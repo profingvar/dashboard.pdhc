@@ -17,6 +17,26 @@
 </div>
 {% endif %}
 
+{# #827 — the PDL banner above renders from "are there blocks?", which is
+   False both when the patient has none and when ips was never asked. In
+   production it was the second case for five months and the page said
+   nothing, which reads as "no blocked records". `sparr_checked` is the
+   distinction; it must appear even though it is not itself a PDL notice,
+   because the absence of the notice above is only meaningful if we asked. #}
+{% if not sparr_checked %}
+<div class="card" style="border-left:4px solid #b45309;background:rgba(180,83,9,0.06);" role="status" aria-live="polite">
+  <p style="margin:0;font-weight:600;">Spärrstatus kunde inte kontrolleras</p>
+  <p style="margin:.3rem 0 0;color:var(--text-muted);font-size:.92em;">
+    Förekomst av spärr är okänd för denna patient. Att ingen spärrmarkering
+    visas ovan betyder här <strong>inte</strong> att spärr saknas.
+  </p>
+  <p style="margin:.3rem 0 0;color:var(--text-muted);font-size:.85em;">
+    Operator: <code>IPS_BASE_URL</code> is unset, or ips.pdhc refused the
+    lookup — grep the error log for <code>SPARR_UNAVAILABLE</code>.
+  </p>
+</div>
+{% endif %}
+
 {% if not cdr1_configured %}
 <div class="card"><p style="margin:0;color:var(--text-muted);">
   CDR1 is not configured (<code>CDR1_BASE_URL</code> unset) — no data can be

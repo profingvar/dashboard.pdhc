@@ -45,6 +45,7 @@ from app.analyse.federation import (
 )
 from app.analyse.aggregations import aggregate_per_cdr_results
 from app.services.ips_client import (
+    is_configured as sparr_is_configured,
     get_active_blocks,
     blocked_clinic_ids,
     has_any_active_block,
@@ -265,6 +266,9 @@ def patient_summary(guid: str):
         "regimen": regimens,
         "latest_values": list(last_obs.values()),
         "has_blocked_sources": has_blocked,
+        # #827 — False means "no block" OR "we never asked ips"; this
+        # says which. See the comment in routes/charts.py.
+        "sparr_checked": sparr_is_configured(),
     })
 
 
@@ -320,6 +324,9 @@ def patient_agp(guid: str):
         "succeeded_cdrs": raw.succeeded,
         "failed_cdrs": raw.failed,
         "has_blocked_sources": has_blocked,
+        # #827 — False means "no block" OR "we never asked ips"; this
+        # says which. See the comment in routes/charts.py.
+        "sparr_checked": sparr_is_configured(),
         **merged,
     })
 
@@ -383,6 +390,9 @@ def patient_variable(guid: str, canonical: str):
         "n_returned": len(sampled),
         "downsampled": len(sampled) < len(points),
         "has_blocked_sources": has_blocked,
+        # #827 — False means "no block" OR "we never asked ips"; this
+        # says which. See the comment in routes/charts.py.
+        "sparr_checked": sparr_is_configured(),
         "points": [
             {"t": p[0], "value": p[1]}
             for p in sampled
@@ -471,6 +481,9 @@ def patient_events(guid: str):
         "events": events,
         "n": len(events),
         "has_blocked_sources": has_blocked,
+        # #827 — False means "no block" OR "we never asked ips"; this
+        # says which. See the comment in routes/charts.py.
+        "sparr_checked": sparr_is_configured(),
     })
 
 

@@ -319,3 +319,7 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/ips_client.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_sparr_unconfigured.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/charts.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/charts.html
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_sparr_banner_distinguishes.py

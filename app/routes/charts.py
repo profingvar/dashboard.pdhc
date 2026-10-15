@@ -20,6 +20,7 @@ from app.auth import org_guids_for
 from app.services.audit import audit_read
 from app.services.cdr1_client import build_client
 from app.services.ips_client import (
+    is_configured as sparr_is_configured,
     get_active_blocks,
     blocked_clinic_ids,
     has_any_active_block,
@@ -120,6 +121,11 @@ def charts_page(guid):
         "charts.html",
         patient_guid=guid,
         has_blocked_sources=has_any_active_block(blocks),
+        # #827 — `has_blocked_sources` is False both when the patient has
+        # no block AND when we could not ask ips at all, and for five
+        # months production was the second case. A page that cannot ask
+        # must not imply there is nothing to hide.
+        sparr_checked=sparr_is_configured(),
         cdr1_configured=bool(build_client().base_url),
     )
 
@@ -175,4 +181,9 @@ def series(guid):
     return jsonify(
         patient_guid=guid, points=pts,
         has_blocked_sources=has_any_active_block(blocks),
+        # #827 — `has_blocked_sources` is False both when the patient has
+        # no block AND when we could not ask ips at all, and for five
+        # months production was the second case. A page that cannot ask
+        # must not imply there is nothing to hide.
+        sparr_checked=sparr_is_configured(),
     )
