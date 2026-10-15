@@ -323,3 +323,4 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/charts.html
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_sparr_banner_distinguishes.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md

@@ -599,3 +599,84 @@ without the gate, `/` returns 302 instead of 403. The source check needed
 hardening to get there: its first version passed on the reverted fix, because
 the branch's own #729 comment names the gate function. A source assertion that
 matches its own explanation is worth nothing.
+
+---
+
+## #827 — spärr was never asked about at all (2026-10-15)
+
+Found by `deploy/smoke_siblings.py` on its first run (#708): `IPS_BASE_URL` was
+**unset in production**. Every spärr lookup this service ever made returned
+`[]` without asking ips, which means no point was dropped by `_apply_sparr`
+and the PDL Ch 4 §4 ¶3 banner never rendered.
+
+### What was NOT exposed
+cdr1 applies `care_access_policy` on the care-delivery read itself and
+dashboard declares `X-Access-Purpose: care-delivery` (#468), so the rows
+arriving here were already spärr-filtered. The smoke confirms cdr1's
+break-glass gate is live (428 `ADMIN_READ_REASON_REQUIRED` on a reasonless
+admin read). This was a **missing second layer and a missing banner**, not
+demonstrated exposure. The banner is the part cdr1 cannot cover.
+
+### Three defects, not one
+
+1. **The variable.** Now `IPS_BASE_URL=https://ips.pdhc.se`. The `.env` also
+   moved from release-local to `shared/.env` with `current/.env` a symlink
+   into it, as analyse got in #758 — release-local means the file dies with
+   its release and each deploy carries a *copy* forward, which is how this
+   drifted out in the first place.
+
+2. **`is_configured()` could never have answered yes.** It read
+   `current_app.config["IPS_BASE_URL"]`; `IpsClient.__init__` read
+   `os.environ`; and `create_app` loaded every other sibling URL into the
+   config but not that one. Setting the variable would have fixed the filter
+   and left the banner silent — with nothing to blame. This is the cdr_6
+   defect from the same #708 sweep, one service over: **two resolution paths
+   for one deployment fact.** `resolve_base_url()` is now the only path.
+
+   No test caught it because all four `is_configured()` tests passed the URL
+   as a **config override**. Production sets it in the **environment**. Five
+   new tests go through `create_app` and the real variable; four fail against
+   the previous commit.
+
+3. **The banner read the wrong question.** `has_blocked_sources` is False both
+   when there is no block and when ips was never asked. `sparr_checked` now
+   travels beside it at all six render/jsonify sites, and `charts.html` carries
+   a second notice for the case the first cannot express — styled as a warning,
+   because not knowing is not a neutral state. The JSON half matters equally:
+   the nurse views are driven by JS, which cannot read a Jinja conditional.
+
+### The open question answered rather than fixed
+The ticket asked: give dashboard an `IPS_API_KEY` and send
+`Authorization: ApiKey` as analyse does, or state that the paths are
+session-only. **There is no path to give a credential to.** Every caller of
+`get_active_blocks` is an HTTP route in `routes/nurse.py` or `routes/charts.py`;
+the only CLI command is `create-su`; there is no scheduler; and
+`KNOWN_SERVICES` is empty (#729), so no service identity can reach dashboard at
+all. Session-only by construction. `_default_client`'s docstring claimed a
+"fallback for service-to-service paths (sim refresh, monitor probes)" and all
+three parts were wrong — ips ignores `X-Service-Key` (#783), `monitor.pdhc` was
+retired (#727), and there is no sim refresh here. Corrected in place.
+
+### Deploy
+Release dir source was a month stale and the running container was *ahead* of
+it (files `docker cp`'d in during the #708 session), so a `--build` would have
+silently reverted last session's work. All 41 tracked `app/` files were hashed
+against local git first: exactly one differed, nothing on the server was
+unique. Then sync → `.env` → `docker-compose up -d --build` (not `docker
+restart`, which keeps create-time env). Dependencies are pinned (#785) so the
+rebuild did not move them.
+
+Rollback: image `dashboard_pdhc-app:pre827`; source+`.env`
+`miserver:~/backups/predeploy/dashboard.pdhc/pre827_20261015T080254Z.tgz`.
+
+### Verified on production
+`printenv IPS_BASE_URL` = `https://ips.pdhc.se`; `resolve_base_url()`,
+`is_configured()`, the config key and `_default_client().base_url` all agree;
+`/healthz` `status: ok` / `database: connected`; `smoke_siblings.py` **13/13**
+(was 10 pass, 3 fail).
+
+### Tests
+196 pass in `app/tests` (was 183), none skipped. 13 new across
+`test_sparr_unconfigured.py` and `test_sparr_banner_distinguishes.py`; 10 of
+the 13 were verified to fail against the reverted fix, and the 3 that pass are
+negative cases that pass trivially when nothing renders.

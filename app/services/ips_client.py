@@ -322,9 +322,33 @@ def is_configured() -> bool:
 
 
 def _default_client() -> IpsClient:
-    """Build a client using the request-context SSO token (if any)
-    plus the dashboard service key as fallback for service-to-service
-    paths (sim refresh, monitor probes)."""
+    """Build a client using the request-context SSO token.
+
+    The service key is still sent, and it is NOT a fallback — #827.
+
+    This docstring used to call it "fallback for service-to-service paths
+    (sim refresh, monitor probes)", and all three parts of that were wrong:
+
+    * ips's `require_auth` reads ONLY `Authorization` and accepts exactly
+      `Bearer` / `ApiKey`. It IGNORES `X-Service-Key`, so the header can
+      never authenticate a lookup here (#783 — three services made this
+      same assumption independently).
+    * `monitor.pdhc` was retired in #727 and authenticates nowhere.
+    * there is no sim refresh in this service, and no session-less spärr
+      caller of any kind: every caller of `get_active_blocks` is an HTTP
+      route in `routes/nurse.py` or `routes/charts.py`, the only CLI
+      command is `create-su`, and there is no scheduler. `KNOWN_SERVICES`
+      is empty (#729), so no service identity can reach dashboard at all.
+
+    So spärr lookups here are session-only, by construction rather than by
+    intention — which is the answer to #827's open question "give dashboard
+    an IPS_API_KEY or state that these paths are session-only". There is no
+    path to give a credential to. The key stays on the request because
+    `analysis_filter` sends it beside the operator's own bearer so ips
+    audits the human and not the machine; it is decorative for the block
+    read, and a reader should know that rather than infer a service path
+    that does not exist.
+    """
     from flask import session  # local import — module is import-time safe
     token = None
     try:
