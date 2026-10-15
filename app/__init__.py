@@ -112,6 +112,17 @@ def create_app(config=None):
         "CDR1_BASE_URL",
         os.environ.get("CDR1_BASE_URL", ""),
     )
+    # #827 — ips.pdhc, for the spärr (PatientBlock) lookup behind every
+    # care-delivery chart and behind the PDL Ch 4 §4 ¶3 banner. This was
+    # read from `os.environ` inside `IpsClient.__init__` but never loaded
+    # HERE, so `ips_client.is_configured()` — which asks the config — kept
+    # answering "not configured" even with the variable set. Exactly the
+    # cdr_6 defect in #783's sibling smoke: one resolution path for the
+    # client, a different one for the question "can we ask at all?".
+    app.config.setdefault(
+        "IPS_BASE_URL",
+        os.environ.get("IPS_BASE_URL", ""),
+    )
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 

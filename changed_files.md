@@ -314,3 +314,8 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_service_key_gate.py — NEW, 7 tests through the real loader. Two verified to fail against a reverted fix.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_analysis_consent.py — corrected a comment that claimed the app-level gate kept a service blob off clinical routes; it asserted the predicate on a path where the predicate was never consulted.
 - 2026-10-13 app/__init__.py — #816: SESSION_COOKIE_SECURE/HTTPONLY/SAMESITE
+
+## 2026-10-15 — #827 two resolution paths for one deployment fact
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/ips_client.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_sparr_unconfigured.py

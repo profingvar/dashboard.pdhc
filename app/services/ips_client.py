@@ -78,6 +78,25 @@ class Block:
         )
 
 
+def resolve_base_url() -> str:
+    """Where ips.pdhc is, by the ONE rule both callers must agree on.
+
+    `IpsClient.__init__` resolved this from `os.environ` while
+    `is_configured()` asked `current_app.config`, and nothing loaded the
+    variable into the config — so setting `IPS_BASE_URL` made the client
+    work and left `is_configured()` answering False forever (#827). Two
+    resolution paths for one deployment fact is the defect; this is the
+    single path. Config first (so a test or `create_app(config=...)` can
+    override), environment second, and no exception outside a request
+    context because the client is constructed there.
+    """
+    try:
+        from_config = (current_app.config.get("IPS_BASE_URL") or "").strip()
+    except RuntimeError:  # no application context
+        from_config = ""
+    return (from_config or os.environ.get("IPS_BASE_URL", "")).strip()
+
+
 class IpsClient:
     """Thin wrapper around ips.pdhc's /api/v1/patients/<g>/blocks endpoint.
 
@@ -95,9 +114,7 @@ class IpsClient:
     ):
         self.token = token
         self.service_key = service_key
-        self.base_url = (
-            base_url or os.environ.get("IPS_BASE_URL", "")
-        ).rstrip("/")
+        self.base_url = (base_url or resolve_base_url()).rstrip("/")
         self.timeout = timeout
 
     def _headers(self) -> dict:
@@ -301,10 +318,7 @@ def is_configured() -> bool:
     `get_active_blocks` returns `[]` for both, so a caller that wants to say
     "no blocked records" rather than "we could not find out" has to ask this.
     """
-    try:
-        return bool((current_app.config.get("IPS_BASE_URL") or "").strip())
-    except RuntimeError:
-        return False
+    return bool(resolve_base_url())
 
 
 def _default_client() -> IpsClient:

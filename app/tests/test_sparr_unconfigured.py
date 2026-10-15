@@ -52,6 +52,18 @@ def _app(**over):
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_ips_url(monkeypatch):
+    """Clear `IPS_BASE_URL` from the environment for every test here.
+
+    The resolution order is config-then-environment (#827), so a developer
+    who happens to have the variable exported would see every "unset" test
+    below silently assert the opposite of what it reads. The tests that DO
+    want it in the environment set it themselves.
+    """
+    monkeypatch.delenv("IPS_BASE_URL", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset():
     ips_mod._cache.invalidate()
     ips_mod._UNCONFIGURED_REPORTED = False
@@ -85,6 +97,60 @@ class TestIsConfigured:
         # Called from module-level code and from a background refresh, where
         # there is no request. Raising there would be a new failure mode.
         assert ips_mod.is_configured() is False
+
+
+class TestItIsAskableTheWayProductionActuallySetsIt:
+    """The four tests above pass `IPS_BASE_URL` as a CONFIG override, and
+    that is how this defect hid for a day.
+
+    Production sets it in the ENVIRONMENT (`env_file: .env` in dashboard's
+    compose), and `create_app` loaded every other sibling url into the
+    config but not this one. So `IpsClient.__init__` read `os.environ` and
+    worked, while `is_configured()` read `current_app.config` and answered
+    False — and #827's remaining scope is to drive the PDL Ch 4 §4 ¶3
+    banner off `is_configured()`. Had that shipped first, the operator would
+    have set the variable, the spärr filter would have started working, and
+    the banner would have stayed silent forever with nothing to blame.
+
+    Asserting the predicate was not enough; the question is whether the real
+    deployment mechanism reaches it.
+    """
+
+    def test_an_ENVIRONMENT_only_url_makes_it_askable(self, monkeypatch):
+        monkeypatch.setenv("IPS_BASE_URL", "https://ips.pdhc.se")
+        with _app().app_context():
+            assert ips_mod.is_configured() is True
+
+    def test_create_app_LOADS_the_environment_value_into_the_config(
+            self, monkeypatch):
+        # The narrower claim, so a future reader can see which half broke:
+        # config is the single place the rest of the app may look.
+        monkeypatch.setenv("IPS_BASE_URL", "https://ips.pdhc.se")
+        assert _app().config["IPS_BASE_URL"] == "https://ips.pdhc.se"
+
+    def test_the_CLIENT_and_the_QUESTION_resolve_to_the_SAME_url(
+            self, monkeypatch):
+        # Two resolution paths for one deployment fact was the defect, not
+        # the missing config key. They must not be able to disagree again.
+        monkeypatch.setenv("IPS_BASE_URL", "https://ips.pdhc.se")
+        with _app().app_context():
+            assert ips_mod.is_configured() is True
+            assert ips_mod._default_client().base_url == "https://ips.pdhc.se"
+
+    def test_an_environment_url_also_reaches_a_lookup(self, monkeypatch):
+        # ...and the lookup therefore stops short-circuiting to [].
+        monkeypatch.setenv("IPS_BASE_URL", "https://ips.pdhc.se")
+        with _app().app_context():
+            c = ips_mod.IpsClient()
+            assert c.base_url == "https://ips.pdhc.se"
+
+    def test_a_config_override_still_WINS_over_the_environment(
+            self, monkeypatch):
+        # A test or `create_app(config=...)` must still be able to point it
+        # somewhere else; config first, environment second.
+        monkeypatch.setenv("IPS_BASE_URL", "https://ips.pdhc.se")
+        with _app(IPS_BASE_URL="https://ips.example").app_context():
+            assert ips_mod.resolve_base_url() == "https://ips.example"
 
 
 class TestTheSilenceIsNowLoud:
