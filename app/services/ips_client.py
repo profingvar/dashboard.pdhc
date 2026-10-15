@@ -117,7 +117,10 @@ class IpsClient:
             # never renders. Found 2026-10-15 by `deploy/smoke_siblings.py`
             # (#708): `IPS_BASE_URL` is not set in dashboard's production
             # environment, so every spärr lookup this service has ever made
-            # has returned "no blocks" without asking anyone.
+            # has returned "no blocks" without asking anyone. **#827**
+            # carries the operator's one-line .env fix (and the
+            # current/.env -> shared/.env symlink, so it does not drift
+            # again) plus repointing the banner onto `is_configured()`.
             #
             # Still [], because cdr1 applies `care_access_policy` itself on
             # the care-delivery read and raising here would take the whole
