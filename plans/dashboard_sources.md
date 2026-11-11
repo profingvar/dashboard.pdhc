@@ -337,3 +337,29 @@ build allergies and medications from stored facts, and can delegate problems.
 | **5. EPS liveness** | frozen snapshot or live composition? |
 | **6. ICD-11 display text** | ship code-only chips, or block Phase 2 on the termbank load (#965)? |
 | **7. zoom** | vendor `chartjs-plugin-zoom`, or drop the zoom requirement? |
+
+## Deferred, deliberately: the cdr1 `substance_resolver` (2026-11-11)
+
+`units.group_series` can open the mmol/L <-> mg/dL bridge only when it knows
+the ANALYTE, and cdr1's `code_canonical` is an opaque
+`urn:pdhc:concept/<guid>`. A resolver would map that guid through plan.pdhc's
+`Concept.canonical_lib` + `canonical_refnumber` (a code system and a code) to
+a substance.
+
+**Not built, because it blocks nothing today.** Measured on cdr1: 10 distinct
+concepts and **none recorded in more than one unit**. The units in use are
+`/d`, `L/min`, `%`, `L` and unitless — no `mmol/L` and no `mg/dL` at all.
+Building it now would put a plan.pdhc dependency in the series path for zero
+current benefit.
+
+**Without it**, a concentration recorded in both molar and mass units SPLITS
+into two series rather than being joined — the correct, safe default: two
+honest charts instead of one with a guessed factor.
+
+**It becomes relevant** the day a CDR receives a concentration in mixed units
+— for instance when the plan's Phase 6 fixtures (glucose, HbA1c) are loaded
+against a real CDR. Re-measure then with:
+
+    SELECT code_canonical, string_agg(DISTINCT value_unit, ',')
+      FROM observation GROUP BY 1 HAVING count(DISTINCT value_unit) > 1;
+

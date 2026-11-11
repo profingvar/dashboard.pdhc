@@ -25,8 +25,9 @@ NEXT, in order:
 
 BLOCKED / NEEDS AN OPERATOR:
   - #980 before the patient card can show a live EPS.
-  - A `substance_resolver` wire for cdr1, or every mixed-unit concentration
-    series there splits (cdr1 code_canonical is an opaque concept guid).
+  - (deferred, latent) a `substance_resolver` for cdr1. Measured 2026-11-11:
+    no cdr1 concept is recorded in more than one unit, so nothing splits
+    today. See plans/dashboard_sources.md for the re-measure query.
   - PLAN_BASE_URL / REQUEST_BASE_URL in the deployed shared/.env (#982).
 
 DO NOT:
