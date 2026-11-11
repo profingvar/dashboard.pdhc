@@ -123,6 +123,19 @@ def create_app(config=None):
         "IPS_BASE_URL",
         os.environ.get("IPS_BASE_URL", ""),
     )
+    # #982 — the same shape as the #827 comment above, on three more
+    # variables. The patient dashboard's clients for plan.pdhc,
+    # request.pdhc and icd11.pdhc each resolve config-then-environment, so
+    # they WORK from `env_file` alone — but `is_configured()` asks the
+    # config, and a key loaded nowhere makes the client and the question
+    # disagree forever. That is not a hypothetical here: it is written down
+    # four lines up, about ips, where it already happened.
+    #
+    # Cross-service base URLs are the PUBLIC subdomain (#830). icd11.pdhc has
+    # a live vhost and answers 302; unlike termbank and cdr_6 it is not one of
+    # §7's deliberate loopback exceptions.
+    for _key in ("PLAN_BASE_URL", "REQUEST_BASE_URL", "ICD11_BASE_URL"):
+        app.config.setdefault(_key, os.environ.get(_key, ""))
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 

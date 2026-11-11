@@ -599,3 +599,57 @@ AWAY because they reported exit 4 (a pytest usage error from zsh not
 word-splitting an unquoted variable) and exit 2 (a collection error from an
 `except` block left without a body). **Exit 1 is an assertion that failed;
 2 and 4 are the instrument not running.**
+
+## #982 — every base URL a client reads is now loaded AND offered (2026-11-11)
+
+Three keys were missing from `create_app` (PLAN, REQUEST, ICD11) and a
+FOURTH was loaded but offered nowhere (IPS). Fixing four instances is not the
+point; the point is that nothing noticed, so this closes the class.
+
+THE DEFECT IS WRITTEN DOWN IN THE CODE IT GUARDS. `app/__init__.py`'s own
+comment above `IPS_BASE_URL` records #827: the client read `os.environ`,
+`create_app` loaded nothing, and `ips_client.is_configured()` — which asks
+the CONFIG — answered "not configured" with the variable plainly set. One
+resolution path for the client, a different one for the question "can we ask
+at all?". Any client whose key is loaded nowhere has that waiting.
+
+### The positive control earned its place immediately
+
+The first collector watched only `os.environ` reads and silently missed
+`CDR1_BASE_URL`, because `cdr1_client` resolves from `current_app.config`
+with NO environment fallback. Four of five keys collected; both assertions
+passed; the repo looked clean. `test_the_keys_we_expect_are_actually_FOUND`
+is what reported `4 != 5`.
+
+The lesson is the framing, not the fix: the question is not "where does a
+client read from" but "what does it depend on". A key read from config is
+exactly as missing from `create_app` as one read from the environment — more
+so, because no fallback saves it.
+
+### Asserted on the parse tree, for the usual reason
+
+The comment explaining this guard names the very keys it checks, and
+`.env.example` names `IPS_BASE_URL` in prose. A substring sweep would read
+both as configuration — §7's shape, which this platform has now hit ten
+times, twice inside instruments built to detect it. The collector also
+resolves a module-level constant, because `icd11_client` holds its key as
+`ENV_BASE_URL = "ICD11_BASE_URL"` and a literal-only matcher would miss it
+and pass.
+
+Mutations: removing PLAN from `create_app` fails the loaded test; removing
+ICD11 from `.env.example` fails the offered test. Both restored.
+
+### The operator half, done the same day
+
+`/usr/local/www/dashboard.pdhc/shared/.env` gained the three absent keys.
+Verified afterwards: all five present EXACTLY ONCE (IPS was already there —
+appending the four as first written would have duplicated it), all five on
+the public subdomain per #830, mode still 600, `current/.env` still a symlink
+to `shared/.env`, and the original 22 keys intact.
+
+Note for the deploy: the container must be RECREATED, not restarted —
+`docker restart` keeps create-time env. Proven again the same day when
+termbank's SECRET_KEY rotation left the running container reporting the old
+value until `up -d`.
+
+568 tests pass, was 562.
