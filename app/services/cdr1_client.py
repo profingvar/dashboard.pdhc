@@ -257,11 +257,30 @@ class Cdr1Client:
             "undated_count": body.get("undated_count", 0),
         }
 
+    def observation_detail(
+        self, observation_guid: str, org_guids: list[str], *,
+        is_admin: bool = False, reason: str | None = None,
+    ) -> dict | None:
+        """One observation and its provenance, or None if not in scope.
+
+        None means cdr1 ANSWERED "no such observation in your scope" — which
+        it says identically for "does not exist" and "another organisation's",
+        so probing learns nothing. Every other failure raises by name.
+        """
+        if not self.base_url:
+            raise Cdr1NotConfigured(
+                "CDR1_BASE_URL is not set, so the observation cannot be read")
+        if not is_admin and not org_guids:
+            return None
+        return self._get_json_strict(
+            f"/api/v1/clinical/observation/{observation_guid}",
+            org_guids, is_admin, reason=reason, allow_not_found=True)
+
     def _get_json_strict(
         self, path: str, org_guids: list[str], is_admin: bool, *,
         params: list[tuple[str, str]] | None = None,
-        reason: str | None = None,
-    ) -> dict:
+        reason: str | None = None, allow_not_found: bool = False,
+    ) -> dict | None:
         """Like `_get_json`, but every failure is a NAMED exception.
 
         `_get_json` collapses network errors, every 4xx, every 5xx and a
@@ -285,6 +304,22 @@ class Cdr1Client:
             if err in ("invalid_cursor", "invalid_order"):
                 raise Cdr1BadCursor(f"cdr1 refused the request: {err}")
             raise Cdr1Unreachable("cdr1 answered 400", status_code=400)
+        if r.status_code == 404 and allow_not_found:
+            # Two different 404s, and they must not be confused. cdr1's OWN
+            # "no such observation in your scope" is JSON with
+            # error=not_found — an answer. A route that does not exist yet is
+            # Flask's default HTML 404 — which is what a cdr1 that predates
+            # #983 returns for the detail route. Reading the second as the
+            # first would make every detail view say "not found" until the
+            # deploy, silently.
+            try:
+                err = (r.json() or {}).get("error")
+            except ValueError:
+                err = None
+            if err == "not_found":
+                return None
+            raise Cdr1ProjectionTooOld(
+                "cdr1 has no such route — it predates #983; deploy cdr.pdhc")
         if r.status_code >= 400:
             raise Cdr1Unreachable(f"cdr1 answered {r.status_code}",
                                   status_code=r.status_code)

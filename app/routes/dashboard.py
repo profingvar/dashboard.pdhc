@@ -1,26 +1,18 @@
 """The patient dashboard's read-only BFF (the operator's plan, step 5).
 
-TWO OF THE PLAN'S FOUR ENDPOINTS ARE BUILT AND TWO ARE BLOCKED, by a measured
-upstream gap rather than by effort:
+ALL FOUR of the plan's endpoints are built:
 
-    GET /dashboard/patients/<guid>                      built
-    GET /dashboard/patients/<guid>/series/<code>        built
-    GET /dashboard/patients/<guid>/events               built (#983 unblocked it)
-    GET /dashboard/events/<observation_guid>            501, see #983
+    GET /dashboard/patients/<guid>                      card + plans
+    GET /dashboard/patients/<guid>/series/<code>        grouped series
+    GET /dashboard/patients/<guid>/events               the event list
+    GET /dashboard/events/<observation_guid>            one event's provenance
 
-CDR1's `/api/v1/clinical/patient/<guid>/series` projects exactly six columns
--- code, at, value, unit, value_string, org_guid -- and omits the
-observation's own guid, `transaction_guid` and `ingest_raw_guid`. The columns
-EXIST in the database and are populated (`transaction_guid` on 1 949 of
-1 949 rows), so this is a projection gap, not a data gap. Without a row
-identity there is no cursor tiebreak, no selection, and nothing to look a
-detail up by; without the transaction keys there is no path to
-`clinical_context`, which is the whole content of the plan's step 18.
-
-The two blocked routes therefore answer 501 with a NAMED reason. A half-built
-event list that looks like it works until someone clicks a row is worse than
-an honest refusal, and the plan's own principle -- show what is missing rather
-than omit it -- applies to the API as much as to the UI.
+The last two were blocked for a day by #983: CDR1's clinical series did not
+project the observation's own guid or its provenance keys, although the
+columns existed and were populated. #983 added them to cdr.pdhc. UNTIL THAT IS
+DEPLOYED, production cdr1 runs the older projection, and these two routes say
+so by name — `503 upstream_projection_too_old`, citing #983 — rather than
+building rows with an empty identity or reporting every detail "not found".
 
 AUTHORISATION is `app/dashboard/access.py`, which composes the existing
 pieces and records which basis applied. `app/auth.py` admits both bases at
@@ -34,6 +26,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from app.dashboard import units
+from app.services.audit import audit_read
 from app.dashboard.access import (
     UNKNOWN_ORGS,
     PatientAccessRefused,
@@ -233,21 +226,8 @@ def patient_series(guid: str, code_canonical: str):
 
 
 # ---------------------------------------------------------------------------
-# blocked on #983 — answered by name, not half-built
+# the event list and its detail (#983)
 # ---------------------------------------------------------------------------
-
-_BLOCKED = {
-    "error": "upstream_projection_incomplete",
-    "ticket": "#983",
-    "message": (
-        "CDR1's clinical series projects six columns and omits the "
-        "observation's own guid, transaction_guid and ingest_raw_guid. The "
-        "columns exist and are populated, so this is a projection gap. "
-        "Without a row identity there is no cursor, no selection and nothing "
-        "to look a detail up by."
-    ),
-}
-
 
 #: The page size a caller may ask for. cdr1 caps its own limit too; this cap
 #: keeps one dashboard request from asking cdr1 for its maximum.
@@ -387,9 +367,164 @@ def patient_events(guid: str):
     })
 
 
+_NOT_FOUND = {"error": "not_found",
+              "message": "no such observation in your scope"}
+
+
+def _first(seq):
+    return seq[0] if isinstance(seq, list) and seq else None
+
+
+def _concept_text(cc):
+    """A FHIR CodeableConcept to one string, or None."""
+    if not isinstance(cc, dict):
+        return None
+    coding = _first(cc.get("coding")) or {}
+    return cc.get("text") or coding.get("display") or coding.get("code")
+
+
+def _raw_extras(raw: dict) -> dict:
+    """Fields the detail panel shows that live only in the FHIR resource."""
+    rr = _first(raw.get("referenceRange")) or {}
+    low = (rr.get("low") or {}).get("value")
+    high = (rr.get("high") or {}).get("value")
+    device = raw.get("device") or {}
+    return {
+        "reference_low": float(low) if isinstance(low, (int, float)) else None,
+        "reference_high": float(high) if isinstance(high, (int, float)) else None,
+        "interpretation": _concept_text(_first(raw.get("interpretation"))),
+        "method": _concept_text(raw.get("method")),
+        "device": device.get("display") or device.get("reference"),
+    }
+
+
 @bp.get("/events/<observation_guid>")
+@audit_read
 def event_detail(observation_guid: str):
-    # No patient guid on this route, so the per-patient gate cannot apply; it
-    # is blocked anyway. When #983 lands this must be re-gated on the
-    # observation's OWN patient, not on the caller's word for it.
-    return jsonify(_BLOCKED), 501
+    """One event's full provenance — the plan's step 18.
+
+    THE ROUTE CARRIES NO PATIENT GUID, so the order of operations IS the
+    security design:
+
+      1. does the caller hold a basis at all?   — refused before cdr1 is
+                                                   asked anything
+      2. fetch, scoped to the caller's orgs      — cdr1 answers a flat 404
+                                                   outside them
+      3. gate on the observation's OWN patient   — never on anything the
+                                                   caller asserted
+      4. spärr                                   — a blocked point gets the
+                                                   SAME 404 as a missing one
+
+    Every provenance field is returned, null when absent, so the panel can
+    render "not recorded". `care_plan_guid` is populated on 0 of 1 949 cdr1
+    rows and `service_request_guid` on 7 — this panel is where that shows.
+    """
+    from flask import g as _g
+    from app.auth import scope_org_guids
+    from app.dashboard.access import (
+        PatientAccessRefused, assert_patient_open, record_basis, resolve_basis)
+    from app.dashboard.dto import EventDetail, EventRow
+    from app.services.cdr1_client import (
+        Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+    from app.services.role_guards import _is_admin
+
+    blob = getattr(_g, "access_blob", None)
+    if resolve_basis(blob) is None:
+        exc = PatientAccessRefused(
+            "no_basis", "this service needs either a care relationship or "
+                        "the secondary-use phase; the account holds neither")
+        _g._audit_payload_snapshot = {"refused": exc.code}
+        return refusal_response(exc)
+
+    orgs = list(scope_org_guids(blob) or ()) if isinstance(blob, dict) else []
+    admin = _is_admin()
+    try:
+        d = cdr1_client.build_client().observation_detail(
+            observation_guid, orgs, is_admin=admin)
+    except Cdr1ProjectionTooOld as exc:
+        return jsonify(error="upstream_projection_too_old", ticket="#983",
+                       message=str(exc)), 503
+    except Cdr1NotConfigured as exc:
+        return jsonify(error="cdr1_not_configured", message=str(exc)), 503
+    except Cdr1Unreachable as exc:
+        return jsonify(error="cdr1_unreachable", message=str(exc)), 503
+    if d is None:
+        return jsonify(_NOT_FOUND), 404
+
+    patient = d.get("patient_guid")
+    _g._audit_patient_guid = patient          # #213: not on the URL
+    try:
+        decision = assert_patient_open(patient, _org_lookup(patient))
+    except PatientAccessRefused as exc:
+        _g._audit_payload_snapshot = {"refused": exc.code}
+        return refusal_response(exc)
+    record_basis(decision)
+
+    point = {"code": d.get("code"), "at": d.get("at"), "org_guid": d.get("org_guid"),
+             "observation_guid": d.get("observation_guid")}
+    sparr = sparr_state(patient)
+    if sparr.blocks:
+        kept, exposures = ips_client.filter_blocked_points([point], sparr.blocks)
+        if not kept:
+            # Hidden by spärr: the SAME answer as "does not exist", so the
+            # existence of a blocked datapoint is not disclosed.
+            return jsonify(_NOT_FOUND), 404
+        if exposures:
+            from app.routes.charts import _lift_exposure_audit
+            snap = dict(getattr(_g, "_audit_payload_snapshot", None) or {})
+            snap["sparr_lift"] = _lift_exposure_audit(exposures)
+            _g._audit_payload_snapshot = snap
+
+    ctx = d.get("context") or {}
+    raw = d.get("raw_fhir") or {}
+    extras = _raw_extras(raw) if isinstance(raw, dict) else _raw_extras({})
+
+    unavailable: list[str] = []
+    pd_name = pd_version = None
+    if ctx.get("plan_definition_guid"):
+        try:
+            from app.services import plan_client
+            ref = plan_client.build_client().get_plan_definition(
+                ctx["plan_definition_guid"])
+            if ref is not None:
+                pd_name, pd_version = ref.name, ref.version
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"plan:{type(exc).__name__}")
+
+    code = d.get("code") or ""
+    row = EventRow(
+        observation_guid=d["observation_guid"], code_canonical=code,
+        display_name=code, value=d.get("value") if d.get("value") is not None
+        else d.get("value_string"), unit=d.get("unit"),
+        effective_at=d.get("at"), source_cdr="cdr1",
+        concept_guid=ips_client.concept_guid_from_canonical(code),
+        transaction_guid=ctx.get("transaction_guid"),
+        care_plan_guid=ctx.get("care_plan_guid"),
+        service_request_guid=ctx.get("service_request_guid"),
+        plan_activity_guid=ctx.get("plan_activity_guid"),
+        ingest_raw_guid=d.get("ingest_raw_guid"),
+        provider_org=ctx.get("provider_org_guid"))
+    detail = EventDetail(
+        row=row,
+        # The patient's organisation is not established per datapoint (#774);
+        # left None rather than filled from the provider, which is a
+        # different organisation with a different meaning.
+        patient_org_guid=None,
+        provider_org_guid=ctx.get("provider_org_guid"),
+        contract_guid=ctx.get("contract_guid"),
+        plan_definition_name=pd_name, plan_definition_version=pd_version,
+        ingested_at=d.get("received_at"), raw_fhir_observation=raw or None,
+        **extras)
+
+    _g._audit_n_rows = 1
+    return jsonify({
+        "detail": _wire(detail),
+        # Every cdr1 context field verbatim, including those the DTO has no
+        # slot for (requesting / author org, plan activity, requester user).
+        "context": ctx,
+        "contextFound": d.get("context_found"),
+        "contextFilledFromRaw": d.get("context_filled_from_raw") or [],
+        "unavailable": unavailable,
+        "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
+        "sparrChecked": sparr.checked,
+    })

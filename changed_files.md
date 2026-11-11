@@ -694,3 +694,46 @@ test is narrowed to the detail route, which is still blocked. Six mutations,
 each failing on assertions: pre-#983 projection accepted, unreachable as an
 empty page, an N+1 name lookup, a page-local badge, exposures discarded, a
 bad cursor as an empty page. 594 tests pass, was 568.
+
+## The event detail is built — all four BFF endpoints exist (2026-11-11)
+
+### app/routes/dashboard.py — GET /dashboard/events/<observation_guid>
+
+The route carries no patient guid, so the order of operations IS the
+security design, each step pinned by a mutation:
+
+1. the caller's BASIS is checked before cdr1 is asked anything (a test counts
+   the cdr1 calls — zero expected);
+2. the observation is fetched scoped to the caller's organisations, and cdr1
+   answers a flat 404 outside them;
+3. the gate runs on the OBSERVATION'S OWN patient, never on anything the
+   caller asserted — `g._audit_patient_guid` (#213) records it;
+4. spärr: a blocked point gets the SAME 404 body as a missing one, so its
+   existence is not disclosed.
+
+Every cdr1 context field is returned verbatim, nulls included, beside the
+DTO — the DTO has no slot for requesting/author org, plan activity or
+requester user, and the panel's job is to show what was not recorded.
+`patient_org_guid` is deliberately None, NOT filled from the provider: they
+are different organisations with different meanings (#774).
+
+The dead `_BLOCKED` 501 body and its test are removed; the module header now
+says all four endpoints are built.
+
+### app/services/cdr1_client.py — observation_detail, and two kinds of 404
+
+cdr1's OWN "no such observation in your scope" is JSON `error: not_found`, an
+answer. A route that does not exist is Flask's default HTML 404 — which is
+what a cdr1 predating #983 returns for the detail route. Reading the second as
+the first would make every detail view say "not found" until the deploy,
+silently. It raises `Cdr1ProjectionTooOld` instead, and the route answers
+`503 upstream_projection_too_old` citing #983.
+
+### tests
+
+`test_dashboard_detail.py` (10). Five mutations, each failing on assertions;
+for M1 (cdr1 asked before the basis) the INTENDED test was confirmed among
+the failures, since two others also fell as side effects. 603 tests pass.
+
+NOT deployed — and in production the event list and the detail answer 503 by
+name until cdr.pdhc is deployed.

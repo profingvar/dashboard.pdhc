@@ -194,21 +194,6 @@ def test_a_spaerr_LIFT_exposure_is_AUDITED_not_discarded(monkeypatch):
 # the two that are blocked
 # ---------------------------------------------------------------------------
 
-def test_the_DETAIL_route_still_refuses_BY_NAME_and_cites_the_ticket():
-    """The event LIST is built now (#983 unblocked it). The DETAIL panel is
-    not: it needs a per-observation lookup and its own re-gating on the
-    observation's own patient. Until then it refuses by name."""
-    app = _app()
-    with app.test_client() as c:
-        for path in ("/dashboard/events/obs-1",):
-            r = c.get(path)
-            assert r.status_code == 501, path
-            body = r.get_json()
-            assert body["error"] == "upstream_projection_incomplete"
-            assert body["ticket"] == "#983"
-            assert "observation" in body["message"]
-
-
 # ---------------------------------------------------------------------------
 # the gate, driven WITHOUT the disabled path
 # ---------------------------------------------------------------------------
