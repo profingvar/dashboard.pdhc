@@ -279,3 +279,85 @@ def test_record_basis_preserves_what_a_route_already_set(ctx):
     g._audit_payload_snapshot = {"filters": {"q": "x"}}
     record_basis(AccessDecision("care", "p1", ("org-A",), False))
     assert g._audit_payload_snapshot["filters"] == {"q": "x"}
+
+
+# --------------------------------------------------------------------------
+# the third state, found by USING the module (see _Unknown's docstring)
+# --------------------------------------------------------------------------
+
+def test_unknown_orgs_is_UNDETERMINED_not_unassigned(ctx):
+    """"We could not ask" and "the patient has no assignment" are different
+    refusals: one is a fact about our reach, the other about the patient.
+    Conflating them reports every patient as unassigned during an outage."""
+    from app.dashboard.access import UNKNOWN_ORGS
+    _set(_blob())
+    with pytest.raises(PatientAccessRefused) as e:
+        assert_patient_open("p1", UNKNOWN_ORGS)
+    assert e.value.code == "undetermined"
+    assert e.value.status == 503
+
+    # control: None still means "asked, none" and keeps its own code
+    with pytest.raises(PatientAccessRefused) as e2:
+        assert_patient_open("p1", None)
+    assert e2.value.code == "unassigned_patient"
+    assert e2.value.status == 403
+
+
+# --------------------------------------------------------------------------
+# the gate widening — and the control that NOTHING ELSE moved
+# --------------------------------------------------------------------------
+
+def _care_only_blob():
+    """Care-delivery, no analysis phase — a treating clinician."""
+    return {"user_guid": "u1", "user_type": "professional",
+            "affiliations": [{"affiliation_guid": "a1", "role": "physician",
+                              "care_unit_guid": "org-A"}]}
+
+
+def _analysis_only_blob():
+    """The analysis phase, no care relationship — a secondary-use reader."""
+    return {"user_guid": "u2", "user_type": "professional",
+            "affiliations": [], "session_phases": ["analysis"],
+            "effective_phases": ["analysis"]}
+
+
+def test_a_dashboard_path_admits_BOTH_bases():
+    from app.auth import _dashboard_access_allowed
+    assert _dashboard_access_allowed("/dashboard/patients/p1",
+                                     _care_only_blob()) is True
+    assert _dashboard_access_allowed("/dashboard/patients/p1",
+                                     _analysis_only_blob()) is True
+
+
+def test_a_dashboard_path_still_refuses_someone_with_NEITHER():
+    from app.auth import _dashboard_access_allowed
+    assert _dashboard_access_allowed(
+        "/dashboard/patients/p1",
+        {"user_guid": "u3", "user_type": "patient"}) is False
+
+
+def test_NO_OTHER_PATH_CHANGED_by_the_widening():
+    """The control for a security-gate edit.
+
+    Widening one branch is only safe if it is one branch. Every other
+    clinical path must still be care-delivery ONLY — an analysis-phase reader
+    with no care relationship must still be refused there — and the analyse
+    engine's paths must still require the analysis phase.
+    """
+    from app.auth import _dashboard_access_allowed
+    analysis_only = _analysis_only_blob()
+    care_only = _care_only_blob()
+
+    for clinical in ("/", "/select", "/patient/p1/charts",
+                     "/api/v1/patient/p1/series", "/api/v1/designs",
+                     "/api/nurse/patient/p1", "/workspace", "/nurse"):
+        assert _dashboard_access_allowed(clinical, care_only) is True, clinical
+        assert _dashboard_access_allowed(clinical, analysis_only) is False, (
+            f"{clinical} started admitting an analysis-only reader"
+        )
+
+    for analyse in ("/api/cohort", "/api/aggregate"):
+        assert _dashboard_access_allowed(analyse, analysis_only) is True, analyse
+        assert _dashboard_access_allowed(analyse, care_only) is False, (
+            f"{analyse} started admitting a care-only reader"
+        )

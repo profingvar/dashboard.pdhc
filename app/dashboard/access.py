@@ -78,6 +78,31 @@ CARE_ROLES = frozenset({"physician", "nurse", "doctor", "lakare", "läkare",
                         "sjukskoterska", "sjuksköterska"})
 
 
+class _Unknown:
+    """Sentinel: the patient's organisations COULD NOT BE ESTABLISHED.
+
+    Distinct from `None`, which means "we asked and the patient has no clinic
+    assignment". The two look identical to a caller holding an empty answer
+    and they are not the same refusal: one is a fact about the patient, the
+    other is a fact about our own reach.
+
+    Found by trying to USE this module rather than by a test — the route had
+    no org lookup yet and `None` was the only way to say so, which would have
+    reported every patient as unassigned. That is #827's shape a third time
+    (`has_blocked_sources` was False both when there was no block and when ips
+    was never asked), and it is worth writing down that the shape reappears
+    inside code written by someone who had just fixed it elsewhere.
+    """
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNKNOWN_ORGS"
+
+
+#: Pass this when the patient's organisations could not be looked up at all.
+UNKNOWN_ORGS = _Unknown()
+
+
 class PatientAccessRefused(Exception):
     """Refusal with a machine code, so the UI can say which kind it was.
 
@@ -89,7 +114,9 @@ class PatientAccessRefused(Exception):
       unassigned_patient  the patient has no clinic assignment at all, so the
                           care check CANNOT pass — 28 of 150 patients today.
                           Reachable under secondary use only.
-      undetermined        the authority could not be reached. NOT a denial.
+      undetermined        an authority could not be reached — spärr, or the
+                          patient's organisations. NOT a denial, and not
+                          the same as `unassigned_patient`.
     """
 
     def __init__(self, code: str, reason: str, status: int = 403):
@@ -193,9 +220,13 @@ def assert_patient_open(patient_guid: str, patient_org_guids=None) -> AccessDeci
 
     `patient_org_guids` is injected rather than fetched, so the organisation
     comparison is testable and so this module does not grow a second patient
-    directory. Pass the patient's organisations (from ips's clinic
-    assignment); pass None to mean "could not be established", which refuses
-    with `unassigned_patient` under the care basis.
+    directory. THREE values are meaningful and they are not interchangeable:
+
+        a sequence    the patient's organisations, as established
+        None          asked, and the patient has NO clinic assignment —
+                      28 of 150 patients today, reachable under SU only
+        UNKNOWN_ORGS  could not ask at all; refused as `undetermined` (503),
+                      because an outage is not a policy denial
     """
     blob = getattr(g, "access_blob", None)
     basis = resolve_basis(blob)
@@ -247,6 +278,15 @@ def assert_patient_open(patient_guid: str, patient_org_guids=None) -> AccessDeci
             "no_care_unit",
             "a care-basis read is scoped to your own organisation and this "
             "account has no active care-unit affiliation",
+        )
+
+    if isinstance(patient_org_guids, _Unknown):
+        raise PatientAccessRefused(
+            "undetermined",
+            "this patient's organisations could not be established, so a care "
+            "relationship could neither be confirmed nor ruled out; the read "
+            "was refused rather than served unchecked",
+            status=503,
         )
 
     if patient_org_guids is None:

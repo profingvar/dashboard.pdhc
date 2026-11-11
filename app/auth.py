@@ -137,6 +137,24 @@ def _is_clinical_path(path: str) -> bool:
     )
 
 
+def _is_patient_dashboard_path(path: str) -> bool:
+    """The patient dashboard's own routes, which admit BOTH bases.
+
+    Every other clinical path here is care-delivery ONLY. These are not: the
+    operator's plan allows exactly two cases — a treating physician or nurse
+    in the patient's organisation (care), and secondary use — and both see
+    full identity.
+
+    So the door is the UNION, and the narrowing happens one layer in:
+    `app/dashboard/access.py` determines WHICH basis applied, refuses by a
+    named code when neither does, and records the basis on the PDL audit row.
+    Widening here without that layer would be a real loosening; with it, this
+    is the gate deciding "may you knock" and access.py deciding "may you
+    enter", which is the split the rest of the platform already uses.
+    """
+    return path.startswith("/dashboard/") or path == "/dashboard"
+
+
 def has_care_delivery_access(blob: Optional[dict]) -> bool:
     """Care-delivery baseline for the clinical dashboard (#463/D1).
 
@@ -160,6 +178,9 @@ def _dashboard_access_allowed(path: str, blob: Optional[dict]) -> bool:
     """Route-aware gate (#463/D1): clinical routes need care-delivery
     access; the analyse engine's routes keep the analysis-phase gate until
     they relocate to analyse.pdhc."""
+    if _is_patient_dashboard_path(path):
+        # Both bases; see _is_patient_dashboard_path. access.py narrows.
+        return has_care_delivery_access(blob) or has_analysis_access(blob)
     if _is_clinical_path(path):
         return has_care_delivery_access(blob)
     return has_analysis_access(blob)

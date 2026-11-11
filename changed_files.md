@@ -477,3 +477,125 @@ modules. **No existing file was edited** — `app/auth.py` and
 `app/services/audit.py` are byte-identical to HEAD.
 
 460 tests pass, was 196.
+
+## The dashboard BFF: two endpoints built, two blocked by measurement (2026-11-11)
+
+### WHAT WAS BUILT
+
+    GET /dashboard/patients/<guid>                   card + plans
+    GET /dashboard/patients/<guid>/series/<code>      grouped, spärr-filtered
+    GET /dashboard/patients/<guid>/events            501, named, #983
+    GET /dashboard/events/<observation_guid>         501, named, #983
+
+The last two are blocked by an UPSTREAM PROJECTION GAP, not by effort. CDR1's
+clinical series selects six columns — code, at, value, unit, value_string,
+org_guid — and omits the observation's own guid, `transaction_guid` and
+`ingest_raw_guid`. The columns EXIST and are populated (`transaction_guid` on
+1 949 of 1 949 rows measured on cdr1). Without a row identity there is no
+cursor tiebreak, no selection and nothing to look a detail up by; without the
+transaction keys there is no path to `clinical_context`, which is the whole
+content of the plan's step 18. Filed as #983.
+
+They answer 501 WITH A NAMED REASON rather than an empty list. A half-built
+event list that looks like it works until somebody clicks a row is worse than
+an honest refusal, and the plan's own principle — show what is missing rather
+than omit it — applies to the API as much as to the UI. A mutation that makes
+them return `200 {"rows": []}` fails a test.
+
+### THE GATE WAS WIDENED, AND THAT IS A SECURITY EDIT
+
+`app/auth.py` gained `_is_patient_dashboard_path`, and `/dashboard/` now
+admits care-delivery OR the analysis phase. Every other clinical path is
+care-delivery ONLY; these are not, because the plan allows exactly two bases
+and a secondary-use caller would otherwise be refused at the door before
+`access.py` ever ran.
+
+The split is: the gate decides "may you knock", `app/dashboard/access.py`
+decides "may you enter", refuses by a named code, and records which basis
+applied on the PDL row. Widening the door without that layer would be a real
+loosening.
+
+**THE CONTROL IS THE POINT.** `test_NO_OTHER_PATH_CHANGED_by_the_widening`
+walks eight existing clinical paths and two analyse paths and asserts each
+still admits exactly who it admitted before. Mutating the new predicate to
+`return True` fails it. A one-branch widening is only safe if it is one
+branch, and that is checkable rather than arguable.
+
+### THREE DEFECTS FOUND BY USING AND VERIFYING, NOT BY TESTS
+
+1. **`access.py` could not say "could not ask".** `patient_org_guids=None`
+   meant "asked, no assignment"; there was no way to express "the lookup
+   failed", so an outage would have reported every patient as unassigned.
+   `UNKNOWN_ORGS` now refuses with 503 `undetermined` instead of 403
+   `other_organisation`. **This is #827's shape a THIRD time, in code written
+   by someone who had just fixed it twice elsewhere** — which is the most
+   useful thing to record about it.
+
+2. **The route discarded a required audit detail.** `filter_blocked_points`
+   returns `(kept, exposures)` and the second half carries #472's obligation:
+   an indispensable-care LIFT that exposed a blocked point must be audited,
+   as `charts.py` does under `sparr_lift`. My first version took `[0]` and
+   dropped it. Silently losing an obligatory audit detail makes the trail
+   UNTRUE, not merely thin.
+
+3. **The wrong client signature.** The route called
+   `icd11_client.diagnoses_for(guid)`, which does not exist; the real API is
+   `build_client().problem_list(guid).patient_card_fields()`. Caught by
+   reading the delivered module rather than by a test, because the route's
+   own `except Exception` would have swallowed the AttributeError into
+   "icd11 unavailable" and the card would have shown no chips, plausibly,
+   forever.
+
+### THE DIAGNOSIS DISTINCTION IS THREE-WAY AND THE BFF IS WHERE IT DIES
+
+An empty chip list means one of three things: the patient has no diagnoses;
+none that this reader is scoped to see; or icd11 could not be reached.
+icd11 tells the first two apart with a `urn:pdhc:scope` tag and a
+`scopeNote`, which exist because they were once indistinguishable and sent a
+clinician hunting a bug that was not there (2026-10-23).
+
+The route carries the note verbatim and a `diagnosesDefinitivelyEmpty` that
+is **null** when icd11 failed. "Unknown" and "none" are different statements
+about a patient, and a card that silently shows nothing because a service was
+down asserts the second. Both mutations — dropping the note, and claiming
+emptiness after a failure — fail a test.
+
+### WHAT THE icd11 CLIENT MEASURED, that changed the route
+
+- An "empty" bundle is **not an empty `entry` array**: icd11 emits one
+  sentinel Condition (`absent-unknown-uv-ips#no-problem-info`, "Inga kända
+  diagnoser") because IPS requires absence to be STATED. Two wrong ways to
+  handle it — parse it as a diagnosis, or write it off as malformed — and
+  both are tested against.
+- `recordedDate`, `abatementDateTime`, `encounter_ref` and `foundation_uri`
+  are NOT on this endpoint's projection. Not dropped by the client; never
+  sent. `encounter_ref` is deliberate — icd11 keeps huvud/bidiagnos on the
+  ENCOUNTER, since the same condition can be primary at one visit and
+  secondary at another.
+- The ICD-11 release travels with every coding (Rule 28 forbids a code
+  without one) and `dto.Diagnosis` has no field for it. Parked on
+  `ProblemList.releases` rather than dropped at the parser.
+- **Three neighbours, three different doors**: icd11 takes
+  `Authorization: Bearer` and has no machine door at all; request.pdhc takes
+  `X-API-Key` and IGNORES `Authorization`; ips takes `Authorization` and
+  ignores `X-API-Key` (#783). Nothing about this is guessable.
+
+### CONFIG: a THIRD key is missing (#982)
+
+`ICD11_BASE_URL` appears **nowhere** in this repo — not in `create_app`, not
+in `.env.example` (control: `IPS_BASE_URL` appears twice in `create_app`).
+With #982's `PLAN_BASE_URL` and `REQUEST_BASE_URL` that is three clients
+whose only production path is the environment leg. Until an operator sets
+them the clients refuse BY NAME, which is correct — but the card has no chips
+and the plan panel is empty, and nobody is told why unless they read a log.
+
+### TESTS
+
+562 pass, was 460. New: `test_dashboard_routes.py` (13) and
+`test_icd11_client.py` (85), plus 3 gate tests in `test_dashboard_access.py`.
+Seven route-level mutations, each restored byte-identical; every one failed
+the right test on exit code 1 — and two earlier mutation runs were THROWN
+AWAY because they reported exit 4 (a pytest usage error from zsh not
+word-splitting an unquoted variable) and exit 2 (a collection error from an
+`except` block left without a body). **Exit 1 is an assertion that failed;
+2 and 4 are the instrument not running.**

@@ -141,6 +141,7 @@ def create_app(config=None):
     from app.routes.picker import bp as picker_bp
     # #464 D2 + #466 D4 — per-patient CDR1 charts view + JSON proxies.
     from app.routes.charts import bp as charts_bp
+    from app.routes.dashboard import bp as dashboard_bp
     # #543 — the group/population "analyse-engine" half (researcher +
     # /api/cohort, plus the analyse-layer observations_search / stats /
     # canonical / openehr blueprints) was extracted into the separate
@@ -154,6 +155,7 @@ def create_app(config=None):
     app.register_blueprint(designs_bp)
     app.register_blueprint(picker_bp)
     app.register_blueprint(charts_bp)
+    app.register_blueprint(dashboard_bp)
     register_metadata(app)
 
     # Audit view (#215). (The cache-scrub route + cache-sweep CLI were
