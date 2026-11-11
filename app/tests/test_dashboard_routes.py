@@ -194,13 +194,13 @@ def test_a_spaerr_LIFT_exposure_is_AUDITED_not_discarded(monkeypatch):
 # the two that are blocked
 # ---------------------------------------------------------------------------
 
-def test_events_and_detail_refuse_BY_NAME_and_cite_the_ticket():
-    """A half-built event list that looks like it works until someone clicks
-    a row is worse than an honest refusal."""
+def test_the_DETAIL_route_still_refuses_BY_NAME_and_cites_the_ticket():
+    """The event LIST is built now (#983 unblocked it). The DETAIL panel is
+    not: it needs a per-observation lookup and its own re-gating on the
+    observation's own patient. Until then it refuses by name."""
     app = _app()
     with app.test_client() as c:
-        for path in ("/dashboard/patients/p1/events",
-                     "/dashboard/events/obs-1"):
+        for path in ("/dashboard/events/obs-1",):
             r = c.get(path)
             assert r.status_code == 501, path
             body = r.get_json()

@@ -653,3 +653,44 @@ termbank's SECRET_KEY rotation left the running container reporting the old
 value until `up -d`.
 
 568 tests pass, was 562.
+
+## The event list is built — #983 unblocked it (2026-11-11)
+
+### app/services/cdr1_client.py — a STRICT events read, beside the old one
+
+`patient_events()` reads cdr1's series newest-first with a cursor and RAISES
+named errors instead of returning []: `Cdr1NotConfigured`, `Cdr1Unreachable`
+(with status), `Cdr1BadCursor`, `Cdr1ProjectionTooOld`. "No events" and
+"cdr1 did not answer" are different statements about a patient.
+
+The existing `_get_json` collapses network errors, every 4xx, every 5xx and
+non-JSON into `None`, and `charts.py` depends on `patient_series` returning
+[] on failure. Both are left untouched — `_get_json_strict` sits beside them,
+and a test pins that the old read still returns [] on a 500.
+
+`Cdr1ProjectionTooOld` exists because #983 is committed in cdr.pdhc and NOT
+deployed: production cdr1 still returns points with no `observation_guid`.
+Rows built from that would render and could not be selected or looked up, so
+the client refuses by name and the route answers `503
+upstream_projection_too_old` citing #983. That is what the list will show
+until cdr.pdhc is deployed — on purpose.
+
+### app/routes/dashboard.py — GET /dashboard/patients/<guid>/events
+
+Every failure answered by name; none becomes an empty page. Spärr exposures
+AUDITED (#472). Display names in ONE batched call per page. The series badge
+counts the patient's WHOLE history via cdr1's summary, not the page — a
+page-local count would put "x2" on a concept with 300 points — and an empty
+summary beside real points marks the badge unknown rather than zero. T+ is
+computed only where a care plan is linked: 0 of 1 949 cdr1 rows today, so no
+call is made, and a test proves request.pdhc is not touched. Limit capped at
+500. cdr1's cursor passed through untouched, so the two ends never disagree
+about its encoding.
+
+### tests
+
+`test_cdr1_events.py` (14) and `test_dashboard_events.py` (12). The old 501
+test is narrowed to the detail route, which is still blocked. Six mutations,
+each failing on assertions: pre-#983 projection accepted, unreachable as an
+empty page, an N+1 name lookup, a page-local badge, exposures discarded, a
+bad cursor as an empty page. 594 tests pass, was 568.

@@ -37,6 +37,49 @@ DEFAULT_TIMEOUT = 8.0
 CARE_DELIVERY_PURPOSE = "care-delivery"
 
 
+class Cdr1EventsError(Exception):
+    """Base for the strict events read. The older methods in this module
+    return [] on any failure, which `charts.py` depends on and which is left
+    alone. The events read RAISES instead, because "this patient has no
+    events" and "cdr1 did not answer" are different statements and the
+    patient dashboard must be able to tell them apart (plan step 24)."""
+
+
+class Cdr1NotConfigured(Cdr1EventsError):
+    """CDR1_BASE_URL is unset. Refused by name; nothing is fabricated."""
+
+
+class Cdr1Unreachable(Cdr1EventsError):
+    """Asked, and no usable answer: network, 5xx, 401/403, non-JSON."""
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class Cdr1BadCursor(Cdr1EventsError):
+    """cdr1 refused the cursor (400 invalid_cursor). A CLIENT error: retrying
+    it will fail the same way, and treating it as "no more rows" would end a
+    walk early while claiming it was complete."""
+
+
+class Cdr1ProjectionTooOld(Cdr1EventsError):
+    """cdr1 answered, but without the fields #983 added.
+
+    #983 is committed in cdr.pdhc and, until it is DEPLOYED, production cdr1
+    returns points with no `observation_guid` and no paging fields. Building
+    event rows from that would produce rows with an empty identity — rows
+    that render, and that nothing can select or look up. Refused by name so
+    the dashboard says "cdr1 needs #983 deployed" instead.
+    """
+
+
+#: The fields #983 added. Their absence means the deployed cdr1 predates it.
+EVENTS_REQUIRED_POINT_FIELDS = ("observation_guid", "transaction_guid",
+                                "ingest_raw_guid", "care_plan_guid")
+EVENTS_REQUIRED_BODY_FIELDS = ("truncated", "next_cursor")
+
+
 class Cdr1Client:
     def __init__(
         self,
@@ -156,6 +199,102 @@ class Cdr1Client:
             return []
         pts = body.get("points")
         return pts if isinstance(pts, list) else []
+
+    # -- events (strict) ----------------------------------------------------
+    def patient_events(
+        self, patient_guid: str, org_guids: list[str], *,
+        is_admin: bool = False, cursor: str | None = None, limit: int = 100,
+        codes: list[str] | None = None, reason: str | None = None,
+    ) -> dict:
+        """One page of a patient's observations, NEWEST FIRST (#983).
+
+        Returns ``{points, next_cursor, truncated, limit, undated_count}``.
+        `next_cursor` is cdr1's own opaque cursor, passed through untouched —
+        the dashboard never constructs one, so the two ends cannot disagree
+        about its encoding.
+
+        RAISES rather than returning an empty page on failure; see
+        `Cdr1EventsError`. An empty `points` list is an ANSWER.
+        """
+        if not self.base_url:
+            raise Cdr1NotConfigured(
+                "CDR1_BASE_URL is not set, so the event list cannot be read; "
+                "the patient's events are UNKNOWN, which is not the same as "
+                "absent")
+        if not is_admin and not org_guids:
+            # Rule 24: a non-admin with no affiliation sees nobody. The access
+            # gate refuses such a caller before this point; this is the floor.
+            return {"points": [], "next_cursor": None, "truncated": False,
+                    "limit": limit, "undated_count": 0}
+
+        params: list[tuple[str, str]] = [("order", "desc"),
+                                         ("limit", str(int(limit)))]
+        if cursor:
+            params.append(("cursor", cursor))
+        for c in (codes or []):
+            params.append(("code", c))
+
+        body = self._get_json_strict(
+            f"/api/v1/clinical/patient/{patient_guid}/series",
+            org_guids, is_admin, params=params, reason=reason)
+
+        missing_body = [k for k in EVENTS_REQUIRED_BODY_FIELDS if k not in body]
+        points = body.get("points")
+        if not isinstance(points, list):
+            raise Cdr1Unreachable("cdr1 events response carried no points list")
+        missing_pt = sorted({k for p in points for k in EVENTS_REQUIRED_POINT_FIELDS
+                             if k not in p})
+        if missing_body or missing_pt:
+            raise Cdr1ProjectionTooOld(
+                "cdr1 answered without the fields #983 added "
+                f"(body: {missing_body or 'ok'}; points: {missing_pt or 'ok'}); "
+                "deploy #983 to cdr.pdhc")
+        return {
+            "points": points,
+            "next_cursor": body.get("next_cursor"),
+            "truncated": bool(body.get("truncated")),
+            "limit": body.get("limit", limit),
+            "undated_count": body.get("undated_count", 0),
+        }
+
+    def _get_json_strict(
+        self, path: str, org_guids: list[str], is_admin: bool, *,
+        params: list[tuple[str, str]] | None = None,
+        reason: str | None = None,
+    ) -> dict:
+        """Like `_get_json`, but every failure is a NAMED exception.
+
+        `_get_json` collapses network errors, every 4xx, every 5xx and a
+        non-JSON body into `None`, and its callers depend on that. Here cdr1's
+        `400 invalid_cursor` would become "no data" and end a walk early, so
+        this path keeps the distinctions.
+        """
+        url = f"{self.base_url}{path}"
+        try:
+            r = requests.get(
+                url, headers=self._headers(org_guids, is_admin, reason),
+                params=params or None, timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise Cdr1Unreachable(f"cdr1 network error: {type(exc).__name__}") from exc
+        if r.status_code == 400:
+            try:
+                err = (r.json() or {}).get("error")
+            except ValueError:
+                err = None
+            if err in ("invalid_cursor", "invalid_order"):
+                raise Cdr1BadCursor(f"cdr1 refused the request: {err}")
+            raise Cdr1Unreachable("cdr1 answered 400", status_code=400)
+        if r.status_code >= 400:
+            raise Cdr1Unreachable(f"cdr1 answered {r.status_code}",
+                                  status_code=r.status_code)
+        try:
+            body = r.json()
+        except ValueError as exc:
+            raise Cdr1Unreachable("cdr1 answered with a non-JSON body") from exc
+        if not isinstance(body, dict):
+            raise Cdr1Unreachable("cdr1 answered with a non-object body")
+        return body
 
     # -- transport ------------------------------------------------------
     def _get_json(

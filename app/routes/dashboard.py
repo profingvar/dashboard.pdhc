@@ -5,7 +5,7 @@ upstream gap rather than by effort:
 
     GET /dashboard/patients/<guid>                      built
     GET /dashboard/patients/<guid>/series/<code>        built
-    GET /dashboard/patients/<guid>/events               501, see #983
+    GET /dashboard/patients/<guid>/events               built (#983 unblocked it)
     GET /dashboard/events/<observation_guid>            501, see #983
 
 CDR1's `/api/v1/clinical/patient/<guid>/series` projects exactly six columns
@@ -249,10 +249,142 @@ _BLOCKED = {
 }
 
 
+#: The page size a caller may ask for. cdr1 caps its own limit too; this cap
+#: keeps one dashboard request from asking cdr1 for its maximum.
+_EVENTS_MAX_LIMIT = 500
+
+
 @bp.get("/patients/<guid>/events")
 @dashboard_patient_read(org_lookup=_org_lookup)
 def patient_events(guid: str):
-    return jsonify(_BLOCKED), 501
+    """One page of the event list, newest first (#983 unblocked this).
+
+    Every failure is answered BY NAME, never as an empty page: "this patient
+    has no events" and "cdr1 did not answer" are different statements, and
+    the plan's step 24 requires one failing source to degrade its own panel
+    and say so.
+    """
+    from flask import g as _g
+    from app.services.cdr1_client import (
+        Cdr1BadCursor, Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+
+    decision = _g.access_decision
+    try:
+        limit = max(1, min(_EVENTS_MAX_LIMIT, int(request.args.get("limit", 100))))
+    except ValueError:
+        return jsonify(error="invalid_limit",
+                       message="limit must be an integer"), 400
+
+    client = cdr1_client.build_client()
+    try:
+        page = client.patient_events(
+            guid, list(decision.caller_org_guids), is_admin=decision.unrestricted,
+            cursor=request.args.get("cursor"), limit=limit,
+            codes=[c for c in request.args.getlist("code") if c])
+    except Cdr1BadCursor as exc:
+        return jsonify(error="invalid_cursor", message=str(exc)), 400
+    except Cdr1ProjectionTooOld as exc:
+        # The code is committed in cdr.pdhc; production runs the older
+        # projection until it is deployed. Say exactly that.
+        return jsonify(error="upstream_projection_too_old", ticket="#983",
+                       message=str(exc)), 503
+    except Cdr1NotConfigured as exc:
+        return jsonify(error="cdr1_not_configured", message=str(exc)), 503
+    except Cdr1Unreachable as exc:
+        return jsonify(error="cdr1_unreachable", message=str(exc)), 503
+
+    unavailable: list[str] = []
+    points = page["points"]
+
+    # Spärr. The exposures carry #472's audit obligation and are RECORDED —
+    # the series route's first version discarded them, which is the defect
+    # this mirrors the fix for.
+    sparr = sparr_state(guid)
+    exposures: list = []
+    if sparr.blocks:
+        points, exposures = ips_client.filter_blocked_points(points, sparr.blocks)
+
+    # Display names: ONE batched call for the whole page, never one per row.
+    from app.services import plan_client
+    concept_of = {p.get("code"): ips_client.concept_guid_from_canonical(p.get("code"))
+                  for p in points}
+    names: dict = {}
+    try:
+        names = plan_client.concept_display_names(
+            sorted({c for c in concept_of.values() if c}))
+    except Exception as exc:  # noqa: BLE001 - names are a panel concern
+        unavailable.append(f"plan:{type(exc).__name__}")
+
+    # Series counts are PER CONCEPT over the patient's whole history, not over
+    # this page — a page-local count would put "x2" on a concept with 300
+    # points. cdr1's summary already carries the per-concept total.
+    summary = client.patient_summary(guid, list(decision.caller_org_guids),
+                                     is_admin=decision.unrestricted)
+    totals = {s.get("code"): s.get("count") or 0 for s in summary}
+    if not summary and points:
+        # patient_summary returns [] on failure; with points in hand an empty
+        # summary cannot be a true answer. The badge is unknown, not zero.
+        unavailable.append("cdr1:summary")
+
+    # T+ from the CarePlan's period.start — only where a care plan is linked.
+    # 0 of 1 949 cdr1 rows carry care_plan_guid today, so this usually makes
+    # no call at all; it lights up when the datapoint-context work lands.
+    from app.dashboard.timing import t_from_start_seconds
+    starts: dict = {}
+    plan_guids = sorted({p.get("care_plan_guid") for p in points
+                         if p.get("care_plan_guid")})
+    if plan_guids:
+        try:
+            from app.services import request_client
+            rc = request_client.build_client()
+            for cp in plan_guids:
+                plan = rc.fetch_care_plan(cp)
+                starts[cp] = (plan or {}).get("period_start")
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"request:{type(exc).__name__}")
+
+    from app.dashboard.dto import EventRow
+    rows = []
+    for p in points:
+        code = p.get("code") or ""
+        concept = concept_of.get(code)
+        count = totals.get(code)
+        cp = p.get("care_plan_guid")
+        rows.append(EventRow(
+            observation_guid=p["observation_guid"],
+            code_canonical=code,
+            display_name=names.get(concept) or code,
+            value=p.get("value") if p.get("value") is not None else p.get("value_string"),
+            unit=p.get("unit"),
+            effective_at=p.get("at"),
+            source_cdr="cdr1",
+            t_from_start_seconds=(t_from_start_seconds(p.get("at"), starts.get(cp))
+                                  if cp else None),
+            concept_guid=concept,
+            transaction_guid=p.get("transaction_guid"),
+            care_plan_guid=cp,
+            ingest_raw_guid=p.get("ingest_raw_guid"),
+            provider_org=p.get("org_guid"),
+            has_series=bool(count and count >= 2),
+            series_count=count or 0,
+        ))
+
+    _g._audit_n_rows = len(rows)
+    if exposures:
+        from app.routes.charts import _lift_exposure_audit
+        snap = dict(getattr(_g, "_audit_payload_snapshot", None) or {})
+        snap["sparr_lift"] = _lift_exposure_audit(exposures)
+        _g._audit_payload_snapshot = snap
+
+    return jsonify({
+        "rows": _wire(rows),
+        "nextCursor": page["next_cursor"],
+        "truncated": page["truncated"],
+        "undatedCount": page["undated_count"],
+        "unavailable": unavailable,
+        "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
+        "sparrChecked": sparr.checked,
+    })
 
 
 @bp.get("/events/<observation_guid>")
