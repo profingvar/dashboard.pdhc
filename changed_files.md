@@ -325,3 +325,155 @@ needed). Verified `https://dashboard.pdhc.se/healthz` 200.
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_sparr_banner_distinguishes.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md
 /Users/martiningvar/T7_sidewinder/dashboard.pdhc/.env.example  (#830: CDR_ENDPOINTS + SPARR_LIFT_ENABLED were DEPLOYED-ONLY)
+
+## Patient dashboard — Gate 0 and Phase 1 foundations (2026-11-11)
+
+Against the operator's plan at `pdhc/docs/PDHC_Patient_Dashboard_Coding_Plan.md`.
+Gate 0 report: `plans/dashboard_sources.md`. Tickets #979 (rollup) and the
+per-phase set; #981, #982 filed from findings below.
+
+### THE ANSWER TO "should we rebuild?" — NO, EXTEND
+
+The plan's hardest step is already built here: care/SU basis, roles, spärr and
+the PDL log, with nine test modules. The plan's own wording assumes it
+("goes through the existing SSO access-blob check"). A rebuild would discard
+it and then recreate it from a document that assumes it exists.
+
+### THE INTERACTION MODEL CHANGED: selection, not hover
+
+Hover is wrong as the MECHANISM for a UI that must serve an iPad. iPadOS
+synthesises a hover on first tap (two-tap reveal-then-activate) and a
+trackpad on the SAME device restores real hover, so the capability is not a
+property of the device and changes at runtime. The plan admits the problem
+twice without naming it: "hovering away keeps the last series shown", and the
+whole PIN feature exists only to work around hover's transience.
+
+Measured: this module already chose click — 11 `click`, 1 `mouseenter`,
+**0 `mouseover`**. So the plan's hover-first design was a departure from what
+exists. Selection makes the detail persistent, makes keyboard parity free, and
+DELETES the pin.
+
+### THE JOIN: the plan's premise was wrong in the dangerous direction
+
+The plan says `observation` -> `clinical_context` "joins 0 rows". Measured on
+cdr1: it joins **446 439** from 1 949 observations.
+
+    transaction_guid              min 32, max 251, avg 229.1 context rows each
+    transaction_guid + patient    avg 76.0
+    ingest_raw_guid               min 1, max 1, avg 1.0
+
+A transaction is a BATCH — 10 of them carry 1 949 observations. The key
+everyone reaches for would silently multiply the event list. **Join on
+`ingest_raw_guid`.**
+
+Coverage: `care_plan_guid` 0/1949 on BOTH tables (so T+ has no origin for any
+row today), `plan_activity_guid` 1942/1949, `service_request_guid` 7/1949.
+Consequence the plan missed: step 15 says to match a plan item to its
+observations by `transaction_guid`, which would highlight ~195 rows per item.
+
+### WHAT WAS ALREADY BUILT, that the plan thought might not be
+
+euIPS in ips.pdhc (#793/#795) — but `required_sections_for()` takes an `rng`
+and is called only from `mock_generator.py`: it GENERATES for synthetic
+patients. The read path is the frozen snapshot. The operator chose live
+composition, so that is new work in ips.pdhc (#980).
+
+The ICD-11 register in icd11.pdhc is richer than the plan's DTO, and
+`GET /patients/<guid>/diagnosis-summary` already returns a FHIR Problem List
+bundle with `as_of` time travel and a `urn:pdhc:scope` tag distinguishing "no
+diagnoses" from "none you may see". **termbank's ICD-11 load (#965) is OFF the
+critical path**: `DiagnosisCode.label` carries the text.
+
+### FOUR DEFECTS IN MY OWN WORK, each caught by verifying an assumption
+
+1. `audit_read` does NOT read `g._audit_detail`. The real hook is
+   `g._audit_payload_snapshot`. The access basis would have been written
+   nowhere, and every test would still have passed.
+2. `g.user` does not exist; the accessor is `g.current_user`, and the
+   canonical org source is `scope_org_guids(blob)`.
+3. **`access_basis` IS A CLOSED ENUM** (`plans/pdhc_data_shapes.md` §5), four
+   services populate it, and a route's values WIN over the X1 defaults.
+   Writing the plan's words — "care" / "secondary-use" — would have corrupted
+   it. They are MAPPED instead.
+4. **One of my own tests was a dud.** The mutation it claimed to guard changed
+   nothing, because its blob already had a care unit. Tracing why showed the
+   "hole" was not one: `has_care_delivery_access` already requires a non-empty
+   org scope for a non-admin, so the care basis IMPLIES orgs. The guard moved
+   from a dead branch to the COUPLING, which does bite.
+
+And a real defect found in the audit: **X1's `purpose` is ROUTE-classed**, so
+a secondary-use caller reading this dashboard would be logged as a care read.
+§5's own derivation maps SU to `administration`; that is now set.
+
+### HbA1c: ONE CHART, via a NAMED AFFINE FUNCTION (operator, 2026-11-11)
+
+`%` and `mmol/mol` are numerically a pure ratio, 1 mmol/mol = 0.1 %. For
+HbA1c that ratio is clinically wrong by ~32 % across the whole range:
+
+      5.0 %  ratio 50  truth 31        8.0 %  ratio 80  truth 64
+      7.0 %  ratio 70  truth 53        9.0 %  ratio 90  truth 75
+
+`app/dashboard/hba1c.py` holds the NGSP master equation
+`NGSP% = 0.09148*IFCC + 2.152`, defined ONCE with the inverse derived, so the
+two directions cannot drift — the commonly quoted rounded form (2.15/10.929)
+disagrees with itself in the third significant figure.
+
+**`convert()` still refuses the pair and must.** The bridge is a separate
+named path that only `group_series` takes. The distinction is not pedantry:
+"are these units interconvertible?" is still NO; "for this substance is there
+a named function?" is the narrower question. THE LESSON THAT GENERALISES:
+knowing the substance is not sufficient — the relation must ALSO be
+multiplicative. The molar-mass bridge qualifies; this one does not.
+
+Below 2.152 % is refused BY NAME, not clamped — a clamp turns an impossible
+reading into a plausible one. There is deliberately NO upper bound: a chart
+that quietly omits the worst point is worse than one that shows it.
+
+### hammer.js WAS NEEDED, AND ITS ABSENCE WOULD HAVE BEEN SILENT
+
+`chartjs-plugin-zoom` reads `Hammer` from the global at script-load time and
+calls gesture setup as `n && $(t, a)`. With no global, setup is SKIPPED —
+nothing throws, nothing logs. Pinch-to-zoom and touch panning would never
+work on an iPad while wheel-zoom and drag-zoom kept working on a desktop.
+**A desktop test pass would have reported everything fine.** Load order
+matters: hammer before the plugin.
+
+### FINDINGS FILED ELSEWHERE
+
+**#981 (request.pdhc)** — `list_care_plans` filters on `patient_guid` and
+`status` only: no organisation scope, no spärr, while the ServiceRequest
+routes in the SAME service do both. Verified from source with a control
+before filing, because a wrong security finding is worse than none (#844/#845).
+
+**#982** — `create_app` loads four `*_BASE_URL` keys and neither
+`PLAN_BASE_URL` nor `REQUEST_BASE_URL`. Found twice, independently.
+
+Also measured: **`ServiceRequest.care_plan_guid` never reaches the wire** (the
+column exists since #310; `to_dict()` omits it and nothing writes it), so
+there is no API-visible edge from a ServiceRequest to a CarePlan. There is no
+`completed` SR status either — `archived` IS the done signal.
+
+### INSTRUMENT FAILURES, because there were many and they are the lesson
+
+| what lied | why |
+|---|---|
+| `for f in $FILES` deployed nothing | zsh does not word-split an unquoted variable |
+| `tar extract exit 0` | it packed an EMPTY directory; real success, no meaning |
+| a mutation harness reporting 5/5 "correct" | `pytest "a.py b.py"` → **exit 4**, a usage error. The tests never ran. The BASELINE caught it |
+| one mutation reporting a failure | **exit 2**, a collection error — my edit left an `except` with no body |
+| `shasum` inside the container | not installed; everything reported ABSENT, including `Dockerfile` |
+| a VERSIONS.md hash check reporting MISMATCH | my regex paired names and hashes across a 12-line window; per-row parsing gives 4/4 MATCH |
+
+**Exit 1 is an assertion that failed. Exit 2 and 4 are the instrument not
+running.** Only the first is evidence.
+
+### FILES
+
+New: `app/dashboard/{__init__,dto,access,timing,units,hba1c}.py`,
+`app/services/{plan_client,request_client}.py`,
+`app/static/vendor/{chartjs-plugin-zoom.umd.min.js,hammer.min.js,VERSIONS.md}`,
+`app/static/js/capability.js`, `plans/dashboard_sources.md`, and six test
+modules. **No existing file was edited** — `app/auth.py` and
+`app/services/audit.py` are byte-identical to HEAD.
+
+460 tests pass, was 196.
