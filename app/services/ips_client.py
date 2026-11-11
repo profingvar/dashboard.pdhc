@@ -218,6 +218,43 @@ class IpsClient:
 # ---------------------------------------------------------------------------
 
 
+    def euips_summary(self, patient_guid: str) -> dict | None:
+        """The patient's LIVE euIPS summary from ips.pdhc (#980).
+
+        `GET /api/v1/patients/<guid>/euips-summary`: every section's status
+        AND its entries, computed from the patient's stored resources on each
+        call — not the frozen snapshot, which the operator declined.
+
+        None means ips ANSWERED 404: the patient is unknown to ips, or outside
+        this reader's scope — ips gives both the same body, deliberately, so
+        the guid's existence is not confirmed. Every other failure raises
+        `IpsUnreachable`, including ips's own 503 `scope_undetermined`: "could
+        not check" must not reach the card as "nothing to show".
+        """
+        if not self.base_url:
+            raise IpsUnreachable(
+                "IPS_BASE_URL not configured — the summary is UNKNOWN, which "
+                "is not the same as empty")
+        try:
+            r = requests.get(
+                f"{self.base_url}/api/v1/patients/{patient_guid}/euips-summary",
+                headers=self._headers(), timeout=self.timeout,
+            )
+        except requests.RequestException as e:
+            raise IpsUnreachable(f"euips-summary network error: {e}") from e
+        if r.status_code == 404:
+            return None
+        if r.status_code != 200:
+            raise IpsUnreachable(f"euips-summary returned {r.status_code}")
+        try:
+            body = r.json()
+        except ValueError as e:
+            raise IpsUnreachable("euips-summary returned non-JSON") from e
+        if not isinstance(body, dict) or not isinstance(body.get("sections"), list):
+            raise IpsUnreachable("euips-summary returned no sections list")
+        return body
+
+
 class _BlockCache:
     """Per-process TTL cache of {patient_guid: (expires_at, [Block])}.
 

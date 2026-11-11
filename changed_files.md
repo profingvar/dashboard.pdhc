@@ -737,3 +737,37 @@ the failures, since two others also fell as side effects. 603 tests pass.
 
 NOT deployed — and in production the event list and the detail answer 503 by
 name until cdr.pdhc is deployed.
+
+## The card shows the live EPS (#980) and both diagnosis registers, labelled (#984) — 2026-11-11
+
+### app/services/ips_client.py — IpsClient.euips_summary
+
+Reads ips's new `GET /api/v1/patients/<guid>/euips-summary`. Follows the
+module's own convention (`IpsUnreachable`, the operator's bearer — ips reads
+only `Authorization`, #783). A 404 is an answer (unknown or out of scope, the
+same body by ips's design); ips's `503 scope_undetermined` RAISES, so "could
+not check" never reaches the card as "nothing to show". A test proves the
+method landed ON `IpsClient` — it was inserted by indentation before the next
+class.
+
+### app/routes/dashboard.py — the card
+
+The `eps:live-composition-pending-980` marker is gone; the card carries the
+live euIPS sections. EXPLICITLY_ABSENT keeps its assertion text ("no known
+allergies") and flag; MISSING has neither — a clinical statement and the
+absence of one are different on the card too.
+
+TWO REGISTERS, SIDE BY SIDE, NEVER MERGED (operator decision 2026-11-11). The
+chips are icd11's ICD-11 register; the EPS problems section is ips's SNOMED
+CT Conditions. Different code systems, populated independently, and where
+both exist they disagree for 3 of 4 patients measured (#984). `diagnosisSources`
+lists both with label, system, availability and count, and
+`diagnosisSourcesReconciled: false` says plainly that nobody has reconciled
+them. Each source degrades only itself.
+
+### tests
+
+`test_dashboard_card.py` (12). Six mutations, each failing on assertions:
+merge the registers, claim them reconciled, silence an unreachable ips, read
+503 as not-found, drop source/system, treat absent as missing. 615 pass.
+NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).

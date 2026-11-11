@@ -102,6 +102,32 @@ def _org_lookup(patient_guid: str):
 # built
 # ---------------------------------------------------------------------------
 
+def _eps_section(s: dict):
+    """One ips summary section -> `dto.EpsSection`.
+
+    Entries keep their `source` ("ips") and code `system`, because the card
+    shows two diagnosis registers in two code systems and the reader must be
+    able to tell which said what. An EXPLICITLY_ABSENT section carries its
+    absent assertion's text ("no known allergies") as the narrative; a MISSING
+    one has no entries and no assertion, which is a different statement.
+    """
+    from app.dashboard.dto import EpsEntry, EpsSection
+    entries = tuple(
+        EpsEntry(display=e.get("display") or e.get("narrative_text") or "",
+                 source=e.get("source") or "ips", code=e.get("code"),
+                 system=e.get("system"), date=e.get("date"),
+                 status=e.get("status"))
+        for e in (s.get("entries") or []))
+    absent = s.get("absent")
+    return EpsSection(
+        section_code=s.get("loinc") or s.get("key"),
+        title=s.get("title") or s.get("key"),
+        entries=entries,
+        narrative=(absent or {}).get("narrative_text"),
+        absent_assertion=s.get("status") == "EXPLICITLY_ABSENT",
+    )
+
+
 @bp.get("/patients/<guid>")
 @dashboard_patient_read(org_lookup=_org_lookup)
 def patient_dashboard(guid: str):
@@ -138,14 +164,28 @@ def patient_dashboard(guid: str):
     except Exception as exc:  # noqa: BLE001
         unavailable.append(f"request:{type(exc).__name__}")
 
-    # The EPS sections need a LIVE composer in ips.pdhc (#980); the only read
-    # path today is a frozen snapshot, which the operator declined. Reported
-    # by name rather than returned as an empty list, because an empty section
-    # list and an uncomposed one are not the same statement about a patient.
-    unavailable.append("eps:live-composition-pending-980")
+    # The LIVE euIPS summary (#980), read from ips.pdhc on every call — not
+    # the frozen snapshot, which the operator declined. A failure is reported
+    # by name and degrades THIS panel only: the ICD-11 chips above stand on
+    # their own source.
+    eps_sections: tuple = ()
+    ips_problem_count = None
+    try:
+        summary = ips_client._default_client().euips_summary(guid)
+    except ips_client.IpsUnreachable as exc:
+        unavailable.append(f"eps:unreachable:{exc}")
+    else:
+        if summary is None:
+            unavailable.append("eps:patient-not-in-ips-scope")
+        else:
+            eps_sections = tuple(_eps_section(s) for s in summary["sections"])
+            problems = next((s for s in summary["sections"]
+                             if s.get("key") == "problems"), None)
+            ips_problem_count = len((problems or {}).get("entries") or [])
 
     card = PatientCard(patient_guid=guid, diagnoses=tuple(diagnoses),
-                       diagnosis_scope_note=scope_note)
+                       diagnosis_scope_note=scope_note,
+                       eps_sections=eps_sections)
     sparr = sparr_state(guid)
     return jsonify({
         "patientCard": _wire(card),
@@ -153,6 +193,25 @@ def patient_dashboard(guid: str):
         "eventsPage": {"rows": [], "nextCursor": None,
                        "unavailable": ["cdr1:no-row-identity-983"]},
         "diagnosesDefinitivelyEmpty": definitively_empty,
+        # TWO REGISTERS, SHOWN SIDE BY SIDE AND NEVER MERGED (operator,
+        # 2026-11-11; #984). The chips are icd11's ICD-11 register; the EPS
+        # problems section is ips's SNOMED CT `Condition`s. They are coded in
+        # different systems, populated independently, and where both exist
+        # they disagree for 3 of 4 patients measured. Merging would combine two
+        # code systems as if one; choosing would hide the other. So both are
+        # listed with their source, and `reconciled` says plainly that nobody
+        # has reconciled them.
+        "diagnosisSources": [
+            {"source": "icd11", "label": "ICD-11-register",
+             "system": "http://id.who.int/icd/release/11/mms",
+             "available": definitively_empty is not None,
+             "count": len(diagnoses)},
+            {"source": "ips", "label": "Patientsammanfattning (SNOMED CT)",
+             "system": "http://snomed.info/sct",
+             "available": ips_problem_count is not None,
+             "count": ips_problem_count},
+        ],
+        "diagnosisSourcesReconciled": False,
         "unavailable": unavailable,
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,
