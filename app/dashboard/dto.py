@@ -190,6 +190,9 @@ class EventRow:
     provider_org: str | None = None
     has_series: bool = False
     series_count: int = 0
+    #: The verdict of `app.dashboard.limits` on this value, as wired by
+    #: `limits.wire`. None only where limits were not evaluated at all.
+    limit: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +245,8 @@ class SeriesPoint:
     reference_low: float | None = None
     reference_high: float | None = None
     transaction_guid: str | None = None
+    #: The `limits` verdict status for this point ("above", "no_limit", ...).
+    limit_status: str | None = None
 
 
 @dataclass(frozen=True)

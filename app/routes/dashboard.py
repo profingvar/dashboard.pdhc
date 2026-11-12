@@ -565,15 +565,33 @@ def patient_series(guid: str, code_canonical: str):
         except Exception as exc:  # noqa: BLE001 - a name, not the series
             unavailable.append(f"plan:{type(exc).__name__}")
 
+    from app.dashboard import limits as _limits
+    patient_limits = _patient_limits(guid, unavailable)
+
     series = []
+    bands = []
     for grp in groups:
         s_ = grp.to_series(display_name=display)
+        # Every point judged in the SERIES unit (group_series may have
+        # converted it); limits.evaluate converts to the limit's unit or
+        # refuses. The page draws these verdicts and never recomputes them.
+        verdicts = [_limits.evaluate(p.value, s_.unit, p.transaction_guid,
+                                     patient_limits, code_canonical=code_canonical)
+                    for p in s_.points]
+        s_ = dataclasses.replace(s_, points=tuple(
+            dataclasses.replace(p, limit_status=v.status)
+            for p, v in zip(s_.points, verdicts)))
+        bands.append(_band(verdicts, s_.unit))
         pts = list(s_.points)
         if len(pts) > _SERIES_TARGET:
             xs = [_epoch(p.effective_at) or 0.0 for p in pts]
             ys = [float(p.value) for p in pts]
-            keep = lttb_indices(xs, ys, _SERIES_TARGET)
-            s_ = dataclasses.replace(s_, points=tuple(pts[i] for i in keep),
+            keep = set(lttb_indices(xs, ys, _SERIES_TARGET))
+            # MDR IIa: downsampling must NEVER hide a value outside its limit.
+            # LTTB keeps extremes by shape, not by clinical meaning, so every
+            # outside point is kept explicitly on top of its selection.
+            keep |= {i for i, p in enumerate(pts) if p.limit_status in _limits.OUTSIDE}
+            s_ = dataclasses.replace(s_, points=tuple(pts[i] for i in sorted(keep)),
                                      downsampled_from=len(pts))
         series.append(s_)
 
@@ -592,6 +610,9 @@ def patient_series(guid: str, code_canonical: str):
         "displayName": display,
         "complete": complete,
         "window": {"from": frm, "to": to},
+        # Per series, the limit band IN THE SERIES UNIT when exactly one
+        # limit applies to every judged point; otherwise None and the reason.
+        "limitBands": bands,
         "nonNumericCount": non_numeric,
         "unavailable": unavailable,
         # THE #827 PAIR, and both halves are required. `hasBlockedSources` is
@@ -602,6 +623,38 @@ def patient_series(guid: str, code_canonical: str):
         "sparrChecked": sparr.checked,
         "provenanceAvailable": True,      # #983 deployed: points carry identity
     })
+
+
+def _band(verdicts, series_unit):
+    """The band to shade behind a series, or a reason there is none.
+
+    Drawn only when ONE limit, from one order, governs every point that was
+    judged, and its bounds convert to the series unit. Two orders with
+    different limits, or a limit in an unconvertible unit, get no band — a
+    shaded area must never suggest a single limit that is not there.
+    """
+    from app.dashboard import units as _u
+    judged = [v for v in verdicts if v.limit is not None and not v.limit.invalid
+              and v.status in ("inside", "below", "above")]
+    if not judged:
+        statuses = sorted({v.status for v in verdicts})
+        return {"band": None, "reason": "no judged point", "statuses": statuses}
+    keys = {(v.limit.low, v.limit.high, v.limit.unit, v.limit.order_guid) for v in judged}
+    if len({k[:3] for k in keys}) > 1:
+        return {"band": None, "reason": "more than one limit applies"}
+    lim = judged[0].limit
+    try:
+        low = (_u.convert(lim.low, lim.unit, series_unit) if lim.low is not None
+               and lim.unit != series_unit else lim.low)
+        high = (_u.convert(lim.high, lim.unit, series_unit) if lim.high is not None
+                and lim.unit != series_unit else lim.high)
+    except (_u.UnitConversionRefused, TypeError, KeyError):
+        return {"band": None, "reason": f"limit in {lim.unit!r} does not convert to {series_unit!r}"}
+    return {"band": {"low": low, "high": high, "unit": series_unit,
+                     "orderGuid": lim.order_guid,
+                     "planDefinitionName": lim.plan_definition_name,
+                     "planDefinitionVersion": lim.plan_definition_version},
+            "reason": None}
 
 
 def _series_csv(code_canonical: str, series, complete: bool):
@@ -624,11 +677,12 @@ def _series_csv(code_canonical: str, series, complete: bool):
         buf.write("# incomplete: the scan stopped at its bound; older points "
                   "are missing\n")
     w.writerow(["code_canonical", "unit", "effective_at", "value",
-                "observation_guid", "transaction_guid"])
+                "observation_guid", "transaction_guid", "limit_status"])
     for s_ in series:
         for p in s_.points:
             w.writerow([s_.code_canonical, s_.unit or "", p.effective_at,
-                        p.value, p.observation_guid, p.transaction_guid or ""])
+                        p.value, p.observation_guid, p.transaction_guid or "",
+                        p.limit_status or ""])
     safe = "".join(ch if ch.isalnum() else "_" for ch in code_canonical)[-60:]
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition":
@@ -638,6 +692,24 @@ def _series_csv(code_canonical: str, series, complete: bool):
 # ---------------------------------------------------------------------------
 # the event list and its detail (#983)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# limits (MDR class IIa, operator 2026-11-12) — judged ONLY in app/dashboard/limits.py
+# ---------------------------------------------------------------------------
+
+def _patient_limits(guid: str, unavailable: list[str]):
+    """This patient's limits by transaction, or None when the orders could
+    not be read — which `limits.evaluate` turns into `unknown`, never into
+    `no_limit`. One request.pdhc read per call."""
+    from app.dashboard import limits
+    try:
+        from app.services import request_client
+        orders = request_client.build_client().fetch_service_requests(patient_guid=guid)
+    except Exception as exc:  # noqa: BLE001 - a judgement, not the page
+        unavailable.append(f"limits:{type(exc).__name__}")
+        return None
+    return limits.limits_from_orders(orders, guid)
+
 
 # ---------------------------------------------------------------------------
 # filters (#977 part B) — held in the page URL, validated HERE
@@ -726,13 +798,58 @@ def patient_events(guid: str):
         codes, frm, to, transactions = _filters()
     except InvalidFilter as exc:
         return jsonify(error="invalid_filter", message=str(exc)), 400
+    unavailable: list[str] = []
+    from app.dashboard import limits as _limits
+    patient_limits = _patient_limits(guid, unavailable)
+
+    # "Utanför gräns" (MDR IIa). Only a transaction with a usable limit can
+    # hold an outside value, so cdr1 is asked for exactly those (the echoed
+    # transaction filter) and every page is scanned, bounded. Orders that
+    # could not be read are a 503, never an empty "nothing is outside".
+    outside_only = request.args.get("outside") == "1"
+    if outside_only:
+        if patient_limits is None:
+            return jsonify(error="limits_unknown",
+                           message="the patient's orders could not be read, so "
+                                   "no value can be judged against a limit"), 503
+        ranged = sorted(tx for tx, ls in patient_limits.items()
+                        if any(not lim.invalid for lim in ls))
+        if transactions:
+            ranged = [t for t in ranged if t in transactions]
+        if not ranged:
+            sparr0 = sparr_state(guid)
+            return jsonify(rows=[], nextCursor=None, truncated=False,
+                           undatedCount=0, unavailable=unavailable, noLimits=True,
+                           outsideScanComplete=True,
+                           hasBlockedSources=ips_client.has_any_active_block(sparr0.blocks),
+                           sparrChecked=sparr0.checked)
+        transactions = ranged
 
     client = cdr1_client.build_client()
     try:
-        page = client.patient_events(
-            guid, list(decision.caller_org_guids), is_admin=decision.unrestricted,
-            cursor=request.args.get("cursor"), limit=limit,
-            codes=codes, frm=frm, to=to, transactions=transactions)
+        if outside_only:
+            collected: list = []
+            cur = None
+            scan_complete = True
+            for _ in range(_SERIES_SCAN_MAX_PAGES):
+                pg = client.patient_events(
+                    guid, list(decision.caller_org_guids),
+                    is_admin=decision.unrestricted, cursor=cur,
+                    limit=_SERIES_SCAN_PAGE, codes=codes, frm=frm, to=to,
+                    transactions=transactions)
+                collected.extend(pg["points"])
+                cur = pg["next_cursor"]
+                if not cur:
+                    break
+            else:
+                scan_complete = cur is None
+            page = {"points": collected, "next_cursor": None,
+                    "truncated": not scan_complete, "undated_count": 0}
+        else:
+            page = client.patient_events(
+                guid, list(decision.caller_org_guids), is_admin=decision.unrestricted,
+                cursor=request.args.get("cursor"), limit=limit,
+                codes=codes, frm=frm, to=to, transactions=transactions)
     except Cdr1BadCursor as exc:
         return jsonify(error="invalid_cursor", message=str(exc)), 400
     except Cdr1ProjectionTooOld as exc:
@@ -748,7 +865,6 @@ def patient_events(guid: str):
     except Cdr1Unreachable as exc:
         return jsonify(error="cdr1_unreachable", message=str(exc)), 503
 
-    unavailable: list[str] = []
     points = page["points"]
 
     # Spärr. The exposures carry #472's audit obligation and are RECORDED —
@@ -758,6 +874,11 @@ def patient_events(guid: str):
     exposures: list = []
     if sparr.blocks:
         points, exposures = ips_client.filter_blocked_points(points, sparr.blocks)
+    if outside_only:
+        # Judged AFTER spärr, so a blocked value is neither shown nor counted.
+        points = [p for p in points if _limits.evaluate(
+            p.get("value"), p.get("unit"), p.get("transaction_guid"),
+            patient_limits, code_canonical=p.get("code")).outside]
 
     # Display names: ONE batched call for the whole page, never one per row.
     from app.services import plan_client
@@ -822,6 +943,9 @@ def patient_events(guid: str):
             provider_org=p.get("org_guid"),
             has_series=bool(count and count >= 2),
             series_count=count or 0,
+            limit=_limits.wire(_limits.evaluate(
+                p.get("value"), p.get("unit"), p.get("transaction_guid"),
+                patient_limits, code_canonical=code)),
         ))
 
     _g._audit_n_rows = len(rows)
@@ -839,6 +963,10 @@ def patient_events(guid: str):
         "unavailable": unavailable,
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,
+        "outsideOnly": outside_only,
+        # Only meaningful with outsideOnly: False = the scan stopped at its
+        # bound, so older outside values may be missing.
+        "outsideScanComplete": (not page["truncated"]) if outside_only else None,
     })
 
 
@@ -992,8 +1120,13 @@ def event_detail(observation_guid: str):
         **extras)
 
     _g._audit_n_rows = 1
+    from app.dashboard import limits as _limits
+    verdict = _limits.evaluate(
+        d.get("value"), d.get("unit"), ctx.get("transaction_guid"),
+        _patient_limits(patient, unavailable), code_canonical=code)
     return jsonify({
         "detail": _wire(detail),
+        "limit": _limits.wire(verdict),
         # Every cdr1 context field verbatim, including those the DTO has no
         # slot for (requesting / author org, plan activity, requester user).
         "context": ctx,

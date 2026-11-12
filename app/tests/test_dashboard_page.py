@@ -394,3 +394,46 @@ def test_the_no_match_note_is_not_overwritten_afterwards():
     apply_ = _fn(_js(), "apply")
     assert ": '';" not in apply_
     assert "if (hits.length) { note = 'Söker i '" in apply_
+
+
+# --------------------------------------------------------------------------
+# limits on the page (MDR class IIa) — rendered, never computed
+# --------------------------------------------------------------------------
+
+def test_the_page_NEVER_compares_a_value_to_a_limit():
+    js = _js()
+    oor = _fn(js, "outOfRange")
+    assert "pt.ls === 'above' || pt.ls === 'below'" in oor
+    assert "<" not in oor.replace("pt.ls", "") and ">" not in oor
+    assert "referenceLow" not in _fn(js, "draw")
+
+
+def test_an_outside_row_is_marked_by_SYMBOL_and_WORD_not_colour_alone():
+    row = _fn(_js(), "rowNode")
+    assert "LIMIT_SYMBOL[lim.status]" in row
+    assert "'över' : 'under'" in row
+
+
+def test_the_detail_shows_the_limit_FIRST_with_its_order():
+    js = _js()
+    detail = _fn(js, "renderDetail")
+    assert detail.index("renderLimit(") < detail.index("block('Värde'")
+    lim = _fn(js, "renderLimit")
+    assert "'Gränsen kommer från patientens beställning ' + l.orderGuid" in lim
+    # the observation's own order is labelled as such, so the two cannot be confused
+    assert "'Beställning registrerad på mätvärdet'" in _fn(js, 'renderDetail')
+    assert "l.reason && !judged" in lim
+
+
+def test_every_not_judged_state_has_words():
+    js = _js()
+    for st in ("no_limit", "unit_mismatch", "conflict", "invalid_limit", "not_numeric", "unknown"):
+        assert re.search(rf"\b{st}: 'ej bedömd|\b{st}: 'ingen gräns'", js), st
+
+
+def test_the_outside_filter_is_in_the_bar_and_the_URL():
+    html = _page().get_data(as_text=True)
+    assert 'name="outside"' in html
+    js = _js()
+    assert "if (form.elements.outside.checked) { q.set('outside', '1'); }" in _fn(js, "writeUrl")
+    assert "parts.push('outside=1')" in _fn(js, "apply")

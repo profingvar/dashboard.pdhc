@@ -153,7 +153,7 @@ main { max-width: 1600px; }
 .ev-link { color: var(--primary); }
 .ev-head, .ev-row {
   display: grid; align-items: center; column-gap: 0.75rem;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 0.7fr) 2.5rem;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.6fr) minmax(0, 1.3fr) minmax(0, 0.6fr) 2.5rem;
   padding: 0 0.5rem;
 }
 .ev-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding-bottom: 0.25rem; }
@@ -221,3 +221,16 @@ main { max-width: 1600px; }
 .ev-filters input[type="search"] { width: 12rem; }
 .ev-filters select { max-width: 14rem; }
 .ev-filters .ev-load { margin-left: 0; }
+
+/* ---- limits (MDR class IIa) ---------------------------------------------
+ * An outside value is marked by SYMBOL and WORD as well as colour: ▲ över /
+ * ▼ under. Colour is never the only signal.
+ */
+.ev-check { flex-direction: row !important; align-items: center; gap: 0.4rem !important; min-height: 44px; }
+.ev-check input { min-height: 0; width: 1.25rem; height: 1.25rem; }
+.lim-flag { display: inline-block; margin-right: 0.3rem; font-weight: 700; color: var(--danger); }
+.ev-row[aria-selected="true"] .lim-flag { color: inherit; }
+.lim-block { border-left: 4px solid var(--border); padding-left: 0.6rem; margin-bottom: 0.5rem; }
+.lim-block.is-outside { border-left-color: var(--danger); }
+.lim-block.is-unjudged { border-left-color: var(--warning); }
+.lim-status { font-weight: 700; }

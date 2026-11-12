@@ -27,6 +27,23 @@
 
   var DASH = '—';
 
+  /* Limit verdicts come from the SERVER (app/dashboard/limits.py, MDR class
+   * IIa). The page renders them and never compares a value to a limit. */
+  var LIMIT_TEXT = {
+    inside: 'inom gräns', below: 'under gräns', above: 'över gräns',
+    no_limit: 'ingen gräns', unit_mismatch: 'ej bedömd — enheten skiljer',
+    conflict: 'ej bedömd — beställningarna har olika gränser',
+    invalid_limit: 'ej bedömd — gränsen är ogiltig', not_numeric: 'ej bedömd — textvärde',
+    unknown: 'ej bedömd — beställningarna kunde inte läsas'
+  };
+  var LIMIT_SYMBOL = { above: '▲', below: '▼' };
+  function limitRange(l) {
+    if (!l) { return null; }
+    var lo = l.low === null || l.low === undefined ? '…' : String(l.low).replace('.', ',');
+    var hi = l.high === null || l.high === undefined ? '…' : String(l.high).replace('.', ',');
+    return lo + '–' + hi + (l.unit ? ' ' + l.unit : '');
+  }
+
   // What one panel learned that another draws: the card's diagnoses (ICD-11
   // onset/abatement markers) and the plan data (T0, done markers).
   var shared = { diagnoses: [], planData: null };
@@ -543,7 +560,7 @@
   var events = (function () {
     var p, list, spacer, detail, countEl, linkEl;
     var rows = [], nextCursor = null, loading = false, done = false, failed = null;
-    var filterQS = '', gen = 0, filtered = false;
+    var filterQS = '', gen = 0, filtered = false, outsideInfo = null;
     var selected = -1, linked = null, hoverTimer = null, previewing = false;
     var controller = null, cache = Object.create(null), selectListeners = [];
     var OVERSCAN = 8, PAGE = 200, PREFETCH_ROWS = 40;
@@ -602,7 +619,16 @@
       n.style.top = (i * h) + 'px';
       if (linked && r.transactionGuid === linked.tx) { n.classList.add('is-linked'); }
       n.appendChild(el('span', null, r.displayName || r.codeCanonical || DASH));
-      n.appendChild(el('span', null, valueText(r) || DASH));
+      var valCell = el('span');
+      var lim = r.limit || {};
+      if (lim.outside) {
+        var flag = el('span', 'lim-flag', LIMIT_SYMBOL[lim.status] + ' ' + (lim.status === 'above' ? 'över' : 'under'));
+        valCell.appendChild(flag);
+        n.classList.add('is-outside');
+        n.title = LIMIT_TEXT[lim.status] + ' ' + limitRange(lim);
+      }
+      valCell.appendChild(document.createTextNode(valueText(r) || DASH));
+      n.appendChild(valCell);
       n.appendChild(el('span', 'ev-muted', when(r.effectiveAt) || 'odaterad'));
       n.appendChild(el('span', 'ev-muted', tPlus(r.tFromStartSeconds) || DASH));
       var badge = el('span');
@@ -621,6 +647,13 @@
     }
 
     function updateCount() {
+      if (outsideInfo) {
+        countEl.textContent = outsideInfo.noLimits
+          ? 'Patientens beställningar sätter inga gränser — inget kan vara utanför.'
+          : rows.length + ' värden utanför gräns' +
+            (outsideInfo.outsideScanComplete === false ? ' (genomsökningen nådde sin gräns — äldre kan saknas)' : '');
+        return;
+      }
       var t = rows.length + (done ? ' händelser' : '+ händelser laddade');
       countEl.textContent = t + (filtered ? ' (filtrerat)' : '');
     }
@@ -637,6 +670,7 @@
         nextCursor = data.nextCursor || null;
         done = !nextCursor;
         renderEventBanners(data);
+        outsideInfo = data.outsideOnly ? data : null;
         loading = false;
         updateCount();
         if (linked) { describeLink(); }
@@ -663,7 +697,8 @@
       }
       (data.unavailable || []).forEach(function (u) {
         banner(host, u.indexOf('plan:') === 0 ? 'Namn kunde inte hämtas — koder visas i stället.'
-               : u === 'cdr1:summary' ? 'Antal per serie är okänt.' : 'Källa saknas: ' + u);
+               : u.indexOf('limits:') === 0 ? 'Beställningarna kunde inte läsas — inga värden är bedömda mot gräns.'
+               : u === 'cdr1:summary' ? 'Antal per serie är okänt.' : 'Källa saknas: ' + u, u.indexOf('limits:') === 0);
       });
     }
 
@@ -740,6 +775,30 @@
 
     var MISSING = 'ej registrerat';
 
+    /* The limit, FIRST in the detail: status in words, the range, and the
+     * order and PlanDefinition it came from. A value that was not judged
+     * says why. */
+    function renderLimit(l) {
+      if (!l) { return; }
+      var judged = ['inside', 'below', 'above'].indexOf(l.status) !== -1;
+      var box = el('div', 'lim-block' + (l.outside ? ' is-outside' : (judged || l.status === 'no_limit' ? '' : ' is-unjudged')));
+      box.appendChild(el('div', 'lim-status',
+        (LIMIT_SYMBOL[l.status] ? LIMIT_SYMBOL[l.status] + ' ' : '') + 'Gräns: ' + (LIMIT_TEXT[l.status] || l.status)));
+      if (l.low !== null || l.high !== null) {
+        box.appendChild(el('div', null, 'Gräns ' + limitRange(l) +
+          (l.comparedValue !== null && l.comparedValue !== undefined ? ' · jämfört värde ' + String(l.comparedValue).replace('.', ',') : '')));
+      }
+      if (l.orderGuid) {
+        box.appendChild(el('div', 'plan-meta', 'Gränsen kommer från patientens beställning ' + l.orderGuid +
+          (l.planDefinitionName ? ' · ' + l.planDefinitionName + (l.planDefinitionVersion ? ' v' + l.planDefinitionVersion : '') : '')));
+      }
+      (l.candidates || []).forEach(function (c) {
+        box.appendChild(el('div', 'plan-meta', 'Beställning ' + c.orderGuid + ': ' + limitRange(c)));
+      });
+      if (l.reason && !judged) { box.appendChild(el('div', 'plan-meta', l.reason)); }
+      detail.appendChild(box);
+    }
+
     /* STEP 18: every field is listed, and an absent one says so BY NAME.
      * This panel is the platform's instrument for how much provenance is
      * actually captured; dropping an empty field would hide the gap. */
@@ -767,11 +826,12 @@
         ? (d.referenceLow !== null && d.referenceLow !== undefined ? d.referenceLow : '…') + ' – ' +
           (d.referenceHigh !== null && d.referenceHigh !== undefined ? d.referenceHigh : '…')
         : null;
+      renderLimit(body.limit || row.limit);
       block('Värde', [
         ['Värde', valueText(row)],
         ['Tid', when(row.effectiveAt)],
         ['T+', tPlus(row.tFromStartSeconds)],
-        ['Referensintervall', ref],
+        ['Referensintervall (labb)', ref],
         ['Tolkning', d.interpretation],
         ['Metod', d.method],
         ['Utrustning', d.device]
@@ -780,7 +840,9 @@
         ['PlanDefinition', d.planDefinitionName ? d.planDefinitionName +
           (d.planDefinitionVersion ? ' v' + d.planDefinitionVersion : '') : null],
         ['Vårdplan', row.carePlanGuid],
-        ['Beställning', row.serviceRequestGuid || ctx.service_request_guid],
+        // The order REGISTERED ON THIS VALUE (provenance). Not the same as the
+        // patient's order that supplies the limit, shown in the limit block.
+        ['Beställning registrerad på mätvärdet', row.serviceRequestGuid || ctx.service_request_guid],
         ['Besök (plan activity)', row.planActivityGuid || ctx.plan_activity_guid],
         ['Transaktion', row.transactionGuid],
         ['Kontrakt', d.contractGuid]
@@ -896,7 +958,7 @@
       filterQS = qs || '';
       filtered = !!isFiltered;
       rows = []; nextCursor = null; loading = false; done = false; failed = null;
-      selected = -1; previewing = false;
+      selected = -1; previewing = false; outsideInfo = null;
       list.removeAttribute('aria-activedescendant');
       list.scrollTop = 0;
       p.status.hidden = true;
@@ -913,7 +975,7 @@
       var mine = gen;
       loadMore().then(function () {
         if (mine !== gen) { return; }
-        if (!rows.length && done && !failed) {
+        if (!rows.length && done && !failed && !outsideInfo) {
           countEl.textContent = filtered ? 'Inga händelser matchar filtret.'
                                          : 'Inga händelser registrerade i CDR1.';
         }
@@ -947,6 +1009,7 @@
         // filtered — the very defect the server guards against. Record it.
         if (form.elements[k].value !== q.get(k)) { rejected.push(k + '=' + q.get(k)); }
       });
+      if (q.get('outside') === '1') { form.elements.outside.checked = true; }
       return q;
     }
 
@@ -956,6 +1019,7 @@
         var v = form.elements[k].value;
         if (v) { q.set(k, v); }
       });
+      if (form.elements.outside.checked) { q.set('outside', '1'); }
       var qs = q.toString();
       try {
         history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
@@ -1000,6 +1064,7 @@
           if (hits.length) { note = 'Söker i ' + hits.length + ' begrepp.'; }
         }
       }
+      if (el_.outside.checked) { parts.push('outside=1'); }
       if (el_.from.value) { parts.push('from=' + encodeURIComponent(el_.from.value)); }
       if (el_.to.value) { parts.push('to=' + encodeURIComponent(el_.to.value)); }
       if (el_.plan.value) {
@@ -1144,10 +1209,8 @@
       return out;
     }
 
-    function outOfRange(pt) {
-      return (pt.lo !== null && pt.lo !== undefined && pt.y < pt.lo) ||
-             (pt.hi !== null && pt.hi !== undefined && pt.y > pt.hi);
-    }
+    // The SERVER's verdict (limits.py); the page never compares.
+    function outOfRange(pt) { return pt.ls === 'above' || pt.ls === 'below'; }
 
     function markers() {
       var out = [];
@@ -1228,7 +1291,7 @@
       host.textContent = '';
       if (s && s.downsampledFrom) {
         banner(host, 'Visar ' + s.points.length + ' av ' + s.downsampledFrom +
-          ' punkter (LTTB, toppar och dalar bevaras).');
+          ' punkter (LTTB: toppar och dalar bevaras, och ALLA värden utanför gräns visas alltid).');
       }
       if (!data.complete) { banner(host, 'Ofullständig serie: äldre punkter saknas (genomsökningen nådde sin gräns).'); }
       if (data.nonNumericCount) { banner(host, data.nonNumericCount + ' mätvärden är inte numeriska och ritas inte.'); }
@@ -1236,6 +1299,13 @@
       else if (data.hasBlockedSources) { banner(host, 'Spärrade mätvärden visas inte.', true); }
       if (data.series.length > 1) {
         banner(host, 'Begreppet finns i ' + data.series.length + ' enheter som inte går att räkna om — en serie per enhet.');
+      }
+      var bi = (data.limitBands || [])[unitIdx];
+      if (bi && !bi.band && bi.reason === 'more than one limit applies') {
+        banner(host, 'Olika beställningar sätter olika gränser — inget gränsfält ritas.', true);
+      }
+      if ((data.unavailable || []).some(function (u) { return u.indexOf('limits:') === 0; })) {
+        banner(host, 'Beställningarna kunde inte läsas — inga punkter är bedömda mot gräns.', true);
       }
       if (t0() === null) { banner(host, 'Ingen planstart (T0) registrerad — ingen T+-axel.'); }
     }
@@ -1287,10 +1357,10 @@
       stats(s);
       var pts = s.points.map(function (q) {
         return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
-                 lo: q.referenceLow, hi: q.referenceHigh };
+                 ls: q.limitStatus };
       });
-      var los = pts.map(function (q) { return q.lo; }), his = pts.map(function (q) { return q.hi; });
-      var sameBand = los.every(function (v) { return v === los[0]; }) && his.every(function (v) { return v === his[0]; });
+      var bandInfo = (data.limitBands || [])[unitIdx] || {};
+      var band = bandInfo.band;
       var primary = token('--primary', '#2563eb'), danger = token('--danger', '#dc2626');
       var text = token('--text', '#1e293b'), muted = token('--text-muted', '#64748b');
       var dense = pts.length > 300;
@@ -1339,10 +1409,10 @@
             legend: { display: false },
             tooltip: { callbacks: { label: function (c) {
               var q = c.raw || {};
-              return num(q.y) + (s.unit ? ' ' + s.unit : '') + (outOfRange(q) ? ' (utanför referens)' : '') +
+              return num(q.y) + (s.unit ? ' ' + s.unit : '') + (q.ls ? ' — ' + (LIMIT_TEXT[q.ls] || q.ls) : '') +
                 (q.guid === selectedGuid ? ' (vald)' : '');
             } } },
-            pdhcMarkers: { lo: sameBand ? los[0] : null, hi: sameBand ? his[0] : null,
+            pdhcMarkers: { lo: band ? band.low : null, hi: band ? band.high : null,
               fill: 'rgba(22, 163, 74, 0.10)', line: muted, text: text, markers: markers() },
             zoom: {
               zoom: { wheel: { enabled: true, modifierKey: 'ctrl' }, pinch: { enabled: true }, mode: 'x' },
@@ -1368,7 +1438,9 @@
         ' punkter från ' + fmtDay(pts[0].x) + ' till ' + fmtDay(pts[pts.length - 1].x) +
         ', senaste ' + num(pts[pts.length - 1].y) + (s.unit ? ' ' + s.unit : '') + '.');
       p.body.querySelector('[data-role="ser-legend"]').textContent =
-        'Romb = vald mätning. Triangel = utanför referensintervall. Streckade linjer = plan- och diagnoshändelser. ' +
+        'Romb = vald mätning. Triangel = utanför beställningens gräns. Grönt fält = gränsen' +
+        (band ? ' ' + limitRange(band) + ' (beställning ' + band.orderGuid + ')' : ' (ingen entydig gräns)') + '. ' +
+        'Streckade linjer = plan- och diagnoshändelser. ' +
         'Zooma: nyp (touch) eller ctrl+hjul. Panorera: dra i sidled.';
       applyRange();
     }
@@ -1396,7 +1468,7 @@
           if (!w) { return; }
           chart.data.datasets[0].data = withGaps(w.points.map(function (q) {
             return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
-                     lo: q.referenceLow, hi: q.referenceHigh };
+                     ls: q.limitStatus };
           }));
           chart.update('none');
           refined = true;
