@@ -154,7 +154,7 @@ def patient_view(guid: str):
 @bp.get("/patients/<guid>")
 @dashboard_patient_read(org_lookup=_org_lookup)
 def patient_dashboard(guid: str):
-    """The card and the plans. One failing source degrades its own panel."""
+    """The patient card. One failing source degrades its own panel."""
     unavailable: list[str] = []
 
     diagnoses: tuple = ()
@@ -180,12 +180,9 @@ def patient_dashboard(guid: str):
         # where it gets dropped.
         definitively_empty = problems.is_definitively_empty
 
-    plans: tuple = ()
-    try:
-        from app.services import request_client  # noqa: PLC0415
-        plans = request_client.build_client().plan_summaries(guid)
-    except Exception as exc:  # noqa: BLE001
-        unavailable.append(f"request:{type(exc).__name__}")
+    # Plans are NOT read here: the plan panel has its own route
+    # (`/patients/<guid>/plan`), so the card no longer pays a request.pdhc
+    # round trip per page view for a list nothing displayed.
 
     # The LIVE euIPS summary (#980), read from ips.pdhc on every call — not
     # the frozen snapshot, which the operator declined. A failure is reported
@@ -220,7 +217,6 @@ def patient_dashboard(guid: str):
     sparr = sparr_state(guid)
     return jsonify({
         "patientCard": _wire(card),
-        "plans": _wire(list(plans)),
         "diagnosesDefinitivelyEmpty": definitively_empty,
         # TWO REGISTERS, SHOWN SIDE BY SIDE AND NEVER MERGED (operator,
         # 2026-11-11; #984). The chips are icd11's ICD-11 register; the EPS

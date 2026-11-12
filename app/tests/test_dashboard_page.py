@@ -119,10 +119,13 @@ def test_the_script_never_writes_server_text_as_html():
 
 
 def test_hover_only_OPENS_and_only_with_real_hover():
-    js = _js()
-    assert "mouseenter" in js
-    assert "mouseleave" not in js and "mouseout" not in js
-    assert re.search(r"mouseenter'[^}]*cap\.hasHover[^}]*setEps\(true", js, re.S)
+    """The EPS disclosure: hover opens, never closes. (The event list and the
+    plan link use mouseleave deliberately, to end a PREVIEW; scope this to
+    the disclosure.)"""
+    eps = _fn(_js(), "wireEps")
+    assert "mouseenter" in eps
+    assert "mouseleave" not in eps and "mouseout" not in eps
+    assert re.search(r"mouseenter'[^}]*cap\.hasHover[^}]*setEps\(true", eps, re.S)
 
 
 def test_escape_closes():
@@ -165,3 +168,114 @@ def test_the_stale_events_placeholder_is_gone(monkeypatch):
     app = _app()
     _wire(monkeypatch, _summary())
     assert "eventsPage" not in _card(app)
+
+
+def test_the_card_no_longer_reads_request(monkeypatch):
+    """The plan panel has its own route; the card must not pay for a list
+    nothing displays."""
+    app = _app()
+    _wire(monkeypatch, _summary())
+    import app.services.request_client as rc
+
+    def boom():
+        raise AssertionError("the card must not call request.pdhc")
+    monkeypatch.setattr(rc, "build_client", boom)
+    body = _card(app)
+    assert "plans" not in body
+    assert not any(u.startswith("request:") for u in body["unavailable"])
+
+
+# --------------------------------------------------------------------------
+# the event list (#977)
+# --------------------------------------------------------------------------
+
+def _fn(js: str, name: str) -> str:
+    """The body of `function name(...) { ... }`, brace-matched."""
+    start = js.index(f"function {name}(")
+    i = js.index("{", start)
+    depth = 0
+    for j in range(i, len(js)):
+        depth += {"{": 1, "}": -1}.get(js[j], 0)
+        if depth == 0:
+            return js[i:j + 1]
+    raise AssertionError(name)
+
+
+def test_the_list_is_a_listbox_with_a_persistent_detail_region():
+    html = _page().get_data(as_text=True)
+    assert re.search(r'data-role="ev-list"[^>]*role="listbox"[^>]*tabindex="0"', html, re.S)
+    assert re.search(r'data-role="ev-detail"[^>]*aria-live="polite"', html, re.S)
+
+
+def test_there_is_NO_pin():
+    js = _js().lower()
+    html = _page().get_data(as_text=True).lower()
+    assert "pin" not in re.sub(r"spinner|pinned_at", "", js)
+    assert "pin" not in re.sub(r"spinner", "", html)
+
+
+def test_arrow_keys_drive_the_SAME_path_as_a_click():
+    js = _js()
+    on_key = _fn(js, "onKey")
+    assert "ArrowDown" in on_key and "ArrowUp" in on_key
+    assert "select(i, true)" in on_key
+    row = _fn(js, "rowNode")
+    assert "select(i, true)" in row
+
+
+def test_hover_PREVIEWS_after_300ms_and_only_with_real_hover():
+    row = _fn(_js(), "rowNode")
+    assert re.search(r"if \(!cap\.hasHover\) \{ return; \}", row)
+    assert re.search(r"setTimeout\(function \(\) \{ preview\(i\); \}, 300\)", row)
+
+
+def test_a_newer_selection_CANCELS_the_detail_request_in_flight():
+    show = _fn(_js(), "showDetail")
+    assert "controller.abort()" in show
+    assert "signal:" in show
+    assert "AbortError" in show
+
+
+def test_absent_provenance_is_said_BY_NAME():
+    js = _js()
+    assert "var MISSING = 'ej registrerat';" in js
+    block = _fn(js, "block")
+    assert "empty ? MISSING : v" in block
+    # every DTO provenance field is listed, even when it is None
+    detail = _fn(js, "renderDetail")
+    for field in ("planActivityGuid", "serviceRequestGuid", "carePlanGuid",
+                  "contractGuid", "patientOrgGuid", "providerOrgGuid",
+                  "ingestedAt", "ingestRawGuid", "interpretation", "method", "device"):
+        assert field in detail, field
+
+
+def test_row_height_comes_from_capability_and_follows_changes():
+    js = _js()
+    assert "cap.rowHeight()" in _fn(js, "rowH")
+    assert "cap.subscribe(" in js
+    css = _css()
+    assert re.search(r"\.ev-row\s*\{[^}]*height:\s*var\(--ev-row-h", css, re.S)
+    assert re.search(r"\.ev-list\s*\{[^}]*overscroll-behavior:\s*contain", css, re.S)
+
+
+def test_only_the_visible_window_is_rendered():
+    render = _fn(_js(), "render")
+    assert "Math.floor(top / h) - OVERSCAN" in render
+    assert "for (var i = first; i <= last; i++)" in render
+
+
+def test_a_bounded_scan_never_says_NONE():
+    """Found by screenshot: a done item showed "≥0" and "no observations
+    exist" while the scan had stopped at its bound. Unknown is not zero."""
+    js = _js()
+    count = _fn(js, "countText")
+    assert "if (!data.observationCountsComplete)" in count
+    assert "'inga bland genomsökta'" in count
+    plan = _fn(js, "renderPlan")
+    assert re.search(r"data\.observationCountsComplete\s*\?\s*'Klar enligt beställningen, men inga mätvärden finns\.'", plan)
+
+
+def test_a_lower_bound_is_never_printed_as_a_total():
+    """Found by benchmark: "Markerar 2500 av 1250"."""
+    link = _fn(_js(), "describeLink")
+    assert "linked.complete ? ' av ' + total" in link

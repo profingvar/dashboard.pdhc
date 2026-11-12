@@ -61,7 +61,24 @@
 
   <section class="dash-panel dash-events" id="panel-events" aria-labelledby="events-heading">
     <h2 id="events-heading">Händelser</h2>
-    <div class="dash-status" data-role="status" role="status">Händelselistan byggs i nästa steg (#977).</div>
+    <div class="dash-status" data-role="status" role="status">Hämtar händelser…</div>
+    <div data-role="body" hidden>
+      <div class="ev-toolbar">
+        <span data-role="ev-count" class="ev-count"></span>
+        <span data-role="ev-link" class="ev-link" role="status"></span>
+      </div>
+      <div class="ev-head" aria-hidden="true">
+        <span>Mätning</span><span>Värde</span><span>Tid</span><span>T+</span><span></span>
+      </div>
+      <div class="ev-list" data-role="ev-list" role="listbox" tabindex="0"
+           aria-label="Händelser, nyaste först. Pil upp och ner byter markerad rad.">
+        <div class="ev-spacer" data-role="ev-spacer"></div>
+      </div>
+      <div data-role="ev-banners" class="dash-banners"></div>
+      <section class="ev-detail" data-role="ev-detail" aria-live="polite" aria-label="Vald händelse">
+        <p class="dash-status">Välj en rad för att se dess proveniens.</p>
+      </section>
+    </div>
   </section>
 
   <section class="dash-panel dash-series" id="panel-series" aria-labelledby="series-heading">

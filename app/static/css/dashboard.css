@@ -141,3 +141,51 @@ main { max-width: 1600px; }
 .plan-now::before, .plan-now::after { content: ""; flex: 1; border-top: 2px solid var(--primary); }
 .plan-unordered { margin-top: 1rem; padding-top: 0.6rem; border-top: 2px dashed var(--warning); }
 .plan-unordered p { font-size: 0.85rem; color: var(--text-muted); margin: 0.2rem 0 0.4rem; }
+
+/* ---- event list (#977) --------------------------------------------------
+ * Hand-rolled windowing: rows are absolutely positioned inside a spacer of
+ * rows x rowHeight. The row height is NOT set here — the script sets
+ * --ev-row-h from DashboardCapability (44px touch, 30px real pointer) and
+ * updates it when a trackpad is attached or removed.
+ */
+.dash-events { max-height: none; overflow: visible; }
+.ev-toolbar { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.ev-link { color: var(--primary); }
+.ev-head, .ev-row {
+  display: grid; align-items: center; column-gap: 0.75rem;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 0.7fr) 2.5rem;
+  padding: 0 0.5rem;
+}
+.ev-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding-bottom: 0.25rem; }
+.ev-list {
+  position: relative; height: 22rem; overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg);
+}
+.ev-list:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.ev-spacer { position: relative; width: 100%; }
+.ev-row {
+  position: absolute; left: 0; right: 0; height: var(--ev-row-h, 44px);
+  border-bottom: 1px solid var(--border); cursor: pointer; font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.ev-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev-row.is-linked { background: var(--code-bg); box-shadow: inset 4px 0 0 var(--warning); }
+.ev-row[aria-selected="true"] { background: var(--primary); color: #fff; }
+.ev-row[aria-selected="true"] .ev-muted { color: inherit; }
+.ev-muted { color: var(--text-muted); }
+.ev-badge { font-size: 0.75rem; border: 1px solid currentColor; border-radius: 999px; padding: 0 0.35rem; justify-self: end; }
+.ev-more { padding: 0.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem; }
+
+.ev-detail { margin-top: 0.75rem; padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); min-height: 6rem; }
+.ev-detail h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.ev-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.2rem 1rem; margin: 0; font-size: 0.88rem; }
+.ev-detail dt { color: var(--text-muted); }
+.ev-detail dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ev-detail .is-missing { color: var(--warning); font-style: italic; }
+.ev-detail h4 { margin: 0.8rem 0 0.3rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.ev-detail pre { max-height: 16rem; overflow: auto; font-size: 0.78rem; background: var(--card-bg); padding: 0.5rem; border-radius: 4px; }
+.ev-detail.is-preview { border-style: dashed; }
+.plan-item.is-link { cursor: pointer; }
+.plan-item.is-link:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
+.plan-item.is-active { background: var(--code-bg); box-shadow: inset 4px 0 0 var(--warning); }
+.ev-load { min-height: 44px; margin-left: 0.5rem; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text); cursor: pointer; padding: 0 0.7rem; }
