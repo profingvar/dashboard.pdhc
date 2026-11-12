@@ -826,3 +826,7 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_limits.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_limit_routes.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py
+
+## 2026-11-12 — limits: requirements, traceability and risk notes (MDR IIa)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/limits_requirements_and_risks.md
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_limits_traceability.py
