@@ -107,7 +107,8 @@ observations on them coexist.
   value should be reviewed before CarePlans are created from it.
 - **O2 — intended use (section 1)** must be confirmed by the operator and
   carried into labelling and the user manual.
-- **O3 — iPad verification** of the marking (ticket #986, item 1).
+- **O3 — iPad verification** of the marking (ticket #988, item 1 — refiled
+  from #986 to add the limit checks).
 - **O4 — SOUP list** for the IEC 62304 file: Chart.js 4.4.6,
   chartjs-adapter-date-fns 3.0.0 (date-fns version unestablished),
   chartjs-plugin-zoom 2.2.0, hammer.js 2.0.8 — see
