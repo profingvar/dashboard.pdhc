@@ -87,7 +87,8 @@ observations on them coexist.
 - **O1 — clinically suspicious limit in production.** `bp_diastolic` is
   80–120 mmHg in the live orders: 70 mmHg would read "under" and 115 mmHg
   "inside". Probably synthetic or a typo; must be reviewed by the responsible
-  clinician before the function is used on real patients.
+  clinician before the function is used on real patients. Filed as **#987**
+  (plan.pdhc), 2026-11-12.
 - **O2 — intended use (section 1)** must be confirmed by the operator and
   carried into labelling and the user manual.
 - **O3 — iPad verification** of the marking (ticket #986, item 1).
