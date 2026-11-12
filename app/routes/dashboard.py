@@ -576,7 +576,8 @@ def patient_series(guid: str, code_canonical: str):
         # converted it); limits.evaluate converts to the limit's unit or
         # refuses. The page draws these verdicts and never recomputes them.
         verdicts = [_limits.evaluate(p.value, s_.unit, p.transaction_guid,
-                                     patient_limits, code_canonical=code_canonical)
+                                     patient_limits, code_canonical=code_canonical,
+                                     concept_guid=concept)
                     for p in s_.points]
         s_ = dataclasses.replace(s_, points=tuple(
             dataclasses.replace(p, limit_status=v.status)
@@ -628,7 +629,7 @@ def patient_series(guid: str, code_canonical: str):
 def _band(verdicts, series_unit):
     """The band to shade behind a series, or a reason there is none.
 
-    Drawn only when ONE limit, from one order, governs every point that was
+    Drawn only when ONE limit, from one care plan, governs every point that was
     judged, and its bounds convert to the series unit. Two orders with
     different limits, or a limit in an unconvertible unit, get no band — a
     shaded area must never suggest a single limit that is not there.
@@ -639,8 +640,9 @@ def _band(verdicts, series_unit):
     if not judged:
         statuses = sorted({v.status for v in verdicts})
         return {"band": None, "reason": "no judged point", "statuses": statuses}
-    keys = {(v.limit.low, v.limit.high, v.limit.unit, v.limit.order_guid) for v in judged}
-    if len({k[:3] for k in keys}) > 1:
+    keys = {(v.limit.low, v.limit.high, v.limit.unit, v.limit.low_inclusive,
+             v.limit.high_inclusive) for v in judged}
+    if len(keys) > 1:
         return {"band": None, "reason": "more than one limit applies"}
     lim = judged[0].limit
     try:
@@ -651,7 +653,8 @@ def _band(verdicts, series_unit):
     except (_u.UnitConversionRefused, TypeError, KeyError):
         return {"band": None, "reason": f"limit in {lim.unit!r} does not convert to {series_unit!r}"}
     return {"band": {"low": low, "high": high, "unit": series_unit,
-                     "orderGuid": lim.order_guid,
+                     "sourceKind": lim.source_kind,
+                     "carePlanGuid": lim.care_plan_guid,
                      "planDefinitionName": lim.plan_definition_name,
                      "planDefinitionVersion": lim.plan_definition_version},
             "reason": None}
@@ -698,17 +701,18 @@ def _series_csv(code_canonical: str, series, complete: bool):
 # ---------------------------------------------------------------------------
 
 def _patient_limits(guid: str, unavailable: list[str]):
-    """This patient's limits by transaction, or None when the orders could
-    not be read — which `limits.evaluate` turns into `unknown`, never into
-    `no_limit`. One request.pdhc read per call."""
+    """This patient's limits from their CAREPLANS (operator 2026-11-12: the
+    CarePlan's goal, else its PlanDefinition range; orders are not used), or
+    None when the CarePlans could not be read — which `limits.evaluate` turns
+    into `unknown`, never into `no_limit`. One request.pdhc read per call."""
     from app.dashboard import limits
     try:
         from app.services import request_client
-        orders = request_client.build_client().fetch_service_requests(patient_guid=guid)
+        care_plans = request_client.build_client().fetch_care_plans(guid)
     except Exception as exc:  # noqa: BLE001 - a judgement, not the page
         unavailable.append(f"limits:{type(exc).__name__}")
         return None
-    return limits.limits_from_orders(orders, guid)
+    return limits.limits_from_care_plans(care_plans, guid)
 
 
 # ---------------------------------------------------------------------------
@@ -810,10 +814,9 @@ def patient_events(guid: str):
     if outside_only:
         if patient_limits is None:
             return jsonify(error="limits_unknown",
-                           message="the patient's orders could not be read, so "
+                           message="the patient's care plans could not be read, so "
                                    "no value can be judged against a limit"), 503
-        ranged = sorted(tx for tx, ls in patient_limits.items()
-                        if any(not lim.invalid for lim in ls))
+        ranged = sorted(patient_limits.limited_transactions())
         if transactions:
             ranged = [t for t in ranged if t in transactions]
         if not ranged:
@@ -878,7 +881,8 @@ def patient_events(guid: str):
         # Judged AFTER spärr, so a blocked value is neither shown nor counted.
         points = [p for p in points if _limits.evaluate(
             p.get("value"), p.get("unit"), p.get("transaction_guid"),
-            patient_limits, code_canonical=p.get("code")).outside]
+            patient_limits, code_canonical=p.get("code"),
+            concept_guid=ips_client.concept_guid_from_canonical(p.get("code"))).outside]
 
     # Display names: ONE batched call for the whole page, never one per row.
     from app.services import plan_client
@@ -945,7 +949,7 @@ def patient_events(guid: str):
             series_count=count or 0,
             limit=_limits.wire(_limits.evaluate(
                 p.get("value"), p.get("unit"), p.get("transaction_guid"),
-                patient_limits, code_canonical=code)),
+                patient_limits, code_canonical=code, concept_guid=concept)),
         ))
 
     _g._audit_n_rows = len(rows)
@@ -1123,7 +1127,8 @@ def event_detail(observation_guid: str):
     from app.dashboard import limits as _limits
     verdict = _limits.evaluate(
         d.get("value"), d.get("unit"), ctx.get("transaction_guid"),
-        _patient_limits(patient, unavailable), code_canonical=code)
+        _patient_limits(patient, unavailable), code_canonical=code,
+        concept_guid=ips_client.concept_guid_from_canonical(code))
     return jsonify({
         "detail": _wire(detail),
         "limit": _limits.wire(verdict),

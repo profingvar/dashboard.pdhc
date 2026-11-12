@@ -32,16 +32,31 @@
   var LIMIT_TEXT = {
     inside: 'inom gräns', below: 'under gräns', above: 'över gräns',
     no_limit: 'ingen gräns', unit_mismatch: 'ej bedömd — enheten skiljer',
-    conflict: 'ej bedömd — beställningarna har olika gränser',
+    conflict: 'ej bedömd — vårdplanerna har olika gränser',
     invalid_limit: 'ej bedömd — gränsen är ogiltig', not_numeric: 'ej bedömd — textvärde',
-    unknown: 'ej bedömd — beställningarna kunde inte läsas'
+    unknown: 'ej bedömd — vårdplanerna kunde inte läsas'
   };
   var LIMIT_SYMBOL = { above: '▲', below: '▼' };
   function limitRange(l) {
     if (!l) { return null; }
-    var lo = l.low === null || l.low === undefined ? '…' : String(l.low).replace('.', ',');
-    var hi = l.high === null || l.high === undefined ? '…' : String(l.high).replace('.', ',');
-    return lo + '–' + hi + (l.unit ? ' ' + l.unit : '');
+    var has = function (v) { return v !== null && v !== undefined; };
+    var f = function (v) { return String(v).replace('.', ','); };
+    var u = l.unit ? ' ' + l.unit : '';
+    var loInc = l.lowInclusive !== false, hiInc = l.highInclusive !== false;
+    if (has(l.low) && has(l.high) && loInc && hiInc) { return f(l.low) + '–' + f(l.high) + u; }
+    var parts = [];
+    if (has(l.low)) { parts.push((loInc ? '≥ ' : '> ') + f(l.low)); }
+    if (has(l.high)) { parts.push((hiInc ? '≤ ' : '< ') + f(l.high)); }
+    return parts.join(' och ') + u;
+  }
+  /* Where a limit comes from, in words (operator 2026-11-12: the CarePlan's
+   * goal first, else the range in the CarePlan's PlanDefinition). */
+  function limitSource(l) {
+    if (!l || !l.sourceKind) { return null; }
+    var pd = l.planDefinitionName ? l.planDefinitionName + (l.planDefinitionVersion ? ' v' + l.planDefinitionVersion : '') : 'PlanDefinition';
+    return l.sourceKind === 'care_plan_goal'
+      ? 'Mål i patientens vårdplan ' + l.carePlanGuid + (l.description ? ' (' + l.description + ')' : '')
+      : 'Intervall i vårdplanens ' + pd + ' — inget eget mål för patienten (vårdplan ' + l.carePlanGuid + ')';
   }
 
   // What one panel learned that another draws: the card's diagnoses (ICD-11
@@ -649,7 +664,7 @@
     function updateCount() {
       if (outsideInfo) {
         countEl.textContent = outsideInfo.noLimits
-          ? 'Patientens beställningar sätter inga gränser — inget kan vara utanför.'
+          ? 'Patientens vårdplaner sätter inga gränser — inget kan vara utanför.'
           : rows.length + ' värden utanför gräns' +
             (outsideInfo.outsideScanComplete === false ? ' (genomsökningen nådde sin gräns — äldre kan saknas)' : '');
         return;
@@ -697,7 +712,7 @@
       }
       (data.unavailable || []).forEach(function (u) {
         banner(host, u.indexOf('plan:') === 0 ? 'Namn kunde inte hämtas — koder visas i stället.'
-               : u.indexOf('limits:') === 0 ? 'Beställningarna kunde inte läsas — inga värden är bedömda mot gräns.'
+               : u.indexOf('limits:') === 0 ? 'Vårdplanerna kunde inte läsas — inga värden är bedömda mot gräns.'
                : u === 'cdr1:summary' ? 'Antal per serie är okänt.' : 'Källa saknas: ' + u, u.indexOf('limits:') === 0);
       });
     }
@@ -788,12 +803,11 @@
         box.appendChild(el('div', null, 'Gräns ' + limitRange(l) +
           (l.comparedValue !== null && l.comparedValue !== undefined ? ' · jämfört värde ' + String(l.comparedValue).replace('.', ',') : '')));
       }
-      if (l.orderGuid) {
-        box.appendChild(el('div', 'plan-meta', 'Gränsen kommer från patientens beställning ' + l.orderGuid +
-          (l.planDefinitionName ? ' · ' + l.planDefinitionName + (l.planDefinitionVersion ? ' v' + l.planDefinitionVersion : '') : '')));
+      if (l.sourceKind) {
+        box.appendChild(el('div', 'plan-meta', 'Gränsen kommer från: ' + limitSource(l)));
       }
       (l.candidates || []).forEach(function (c) {
-        box.appendChild(el('div', 'plan-meta', 'Beställning ' + c.orderGuid + ': ' + limitRange(c)));
+        box.appendChild(el('div', 'plan-meta', limitSource(c) + ': ' + limitRange(c)));
       });
       if (l.reason && !judged) { box.appendChild(el('div', 'plan-meta', l.reason)); }
       detail.appendChild(box);
@@ -840,8 +854,8 @@
         ['PlanDefinition', d.planDefinitionName ? d.planDefinitionName +
           (d.planDefinitionVersion ? ' v' + d.planDefinitionVersion : '') : null],
         ['Vårdplan', row.carePlanGuid],
-        // The order REGISTERED ON THIS VALUE (provenance). Not the same as the
-        // patient's order that supplies the limit, shown in the limit block.
+        // The order REGISTERED ON THIS VALUE (provenance). Limits come from the
+        // patient's CarePlan, shown in the limit block — not from this order.
         ['Beställning registrerad på mätvärdet', row.serviceRequestGuid || ctx.service_request_guid],
         ['Besök (plan activity)', row.planActivityGuid || ctx.plan_activity_guid],
         ['Transaktion', row.transactionGuid],
@@ -1241,8 +1255,13 @@
         if (!x || !area) { return; }
         var band = c.options.plugins.pdhcMarkers || {};
         ctx.save();
-        if (band.lo !== null && band.lo !== undefined && band.hi !== null && band.hi !== undefined) {
-          var y = c.scales.y, top = y.getPixelForValue(band.hi), bottom = y.getPixelForValue(band.lo);
+        var hasLo = band.lo !== null && band.lo !== undefined, hasHi = band.hi !== null && band.hi !== undefined;
+        if (hasLo || hasHi) {
+          // A ONE-SIDED limit (e.g. a goal "<= 8") shades to the chart's edge;
+          // the legend promises a band, so one must be drawn.
+          var y = c.scales.y;
+          var top = hasHi ? y.getPixelForValue(band.hi) : area.top;
+          var bottom = hasLo ? y.getPixelForValue(band.lo) : area.bottom;
           ctx.fillStyle = band.fill;
           ctx.fillRect(area.left, Math.max(area.top, top), area.right - area.left,
             Math.min(area.bottom, bottom) - Math.max(area.top, top));
@@ -1302,10 +1321,10 @@
       }
       var bi = (data.limitBands || [])[unitIdx];
       if (bi && !bi.band && bi.reason === 'more than one limit applies') {
-        banner(host, 'Olika beställningar sätter olika gränser — inget gränsfält ritas.', true);
+        banner(host, 'Olika vårdplaner sätter olika gränser — inget gränsfält ritas.', true);
       }
       if ((data.unavailable || []).some(function (u) { return u.indexOf('limits:') === 0; })) {
-        banner(host, 'Beställningarna kunde inte läsas — inga punkter är bedömda mot gräns.', true);
+        banner(host, 'Vårdplanerna kunde inte läsas — inga punkter är bedömda mot gräns.', true);
       }
       if (t0() === null) { banner(host, 'Ingen planstart (T0) registrerad — ingen T+-axel.'); }
     }
@@ -1438,8 +1457,8 @@
         ' punkter från ' + fmtDay(pts[0].x) + ' till ' + fmtDay(pts[pts.length - 1].x) +
         ', senaste ' + num(pts[pts.length - 1].y) + (s.unit ? ' ' + s.unit : '') + '.');
       p.body.querySelector('[data-role="ser-legend"]').textContent =
-        'Romb = vald mätning. Triangel = utanför beställningens gräns. Grönt fält = gränsen' +
-        (band ? ' ' + limitRange(band) + ' (beställning ' + band.orderGuid + ')' : ' (ingen entydig gräns)') + '. ' +
+        'Romb = vald mätning. Triangel = utanför vårdplanens gräns. Grönt fält = gränsen' +
+        (band ? ' ' + limitRange(band) + ' — ' + limitSource(band) : ' (ingen entydig gräns)') + '. ' +
         'Streckade linjer = plan- och diagnoshändelser. ' +
         'Zooma: nyp (touch) eller ctrl+hjul. Panorera: dra i sidled.';
       applyRange();

@@ -21,11 +21,14 @@ def _pt(i, value, at, tx=TX, unit="mmol/L"):
             "ingest_raw_guid": f"i-{i}", "care_plan_guid": None}
 
 
-def _order(lo="3.0", hi="10.0", guid="sr-1"):
-    return {"guid": guid, "status": "active", "patient_guid": "p1",
+def _order(lo="3.0", hi="10.0", guid="cp-1"):
+    """A CarePlan (the only limit source since 2026-11-12), with its
+    PlanDefinition range on TX and no goal."""
+    return {"care_plan_guid": guid, "status": "active", "patient_guid": "p1", "goals": [],
             "plan_definition_snapshot": {"title": "Diabetes", "version": "3", "activities": [
                 {"guid": "act", "transactions": [
-                    {"guid": TX, "range_min": lo, "range_max": hi, "concept_unit_name": "mmol/L"}]}]}}
+                    {"guid": TX, "concept_guid": "concept-glu", "range_min": lo, "range_max": hi,
+                     "concept_unit_name": "mmol/L"}]}]}}
 
 
 class _Cdr1:
@@ -49,10 +52,13 @@ class _Cdr1:
 
 def _orders(monkeypatch, orders=None, raises=None):
     class _R:
-        def fetch_service_requests(self, *, patient_guid=None, **kw):
+        def fetch_care_plans(self, patient_guid, **kw):
             if raises:
                 raise raises
             return orders or []
+
+        def fetch_service_requests(self, **kw):
+            raise AssertionError("orders are not a limit source")
     monkeypatch.setattr(rc, "build_client", lambda: _R())
 
 
@@ -71,7 +77,8 @@ def test_every_row_carries_its_verdict(monkeypatch):
     _, body = _get(app, "/dashboard/patients/p1/events")
     st = [r["limit"]["status"] for r in body["rows"]]
     assert st == ["above", "inside", "no_limit"]
-    assert body["rows"][0]["limit"]["orderGuid"] == "sr-1"
+    assert body["rows"][0]["limit"]["carePlanGuid"] == "cp-1"
+    assert body["rows"][0]["limit"]["sourceKind"] == "care_plan_range"
 
 
 def test_unreadable_orders_make_every_row_UNKNOWN_not_no_limit(monkeypatch):
@@ -125,13 +132,13 @@ def test_series_points_carry_verdicts_and_one_limit_gives_a_band(monkeypatch):
     assert {p["observationGuid"]: p["limitStatus"] for p in pts} == {
         "obs-00001": "above", "obs-00002": "inside"}
     band = body["limitBands"][0]["band"]
-    assert (band["low"], band["high"], band["unit"], band["orderGuid"]) == (3.0, 10.0, "mmol/L", "sr-1")
+    assert (band["low"], band["high"], band["unit"], band["carePlanGuid"]) == (3.0, 10.0, "mmol/L", "cp-1")
 
 
 def test_conflicting_limits_give_NO_band(monkeypatch):
     app = _app()
     _wire(monkeypatch, _Cdr1([[_pt(1, 9.0, "2026-11-02T00:00:00Z")]]))
-    _orders(monkeypatch, [_order(hi="10.0", guid="sr-1"), _order(hi="8.0", guid="sr-2")])
+    _orders(monkeypatch, [_order(hi="10.0", guid="cp-1"), _order(hi="8.0", guid="cp-2")])
     _, body = _get(app, f"/dashboard/patients/p1/series/{CODE}")
     assert body["series"][0]["points"][0]["limitStatus"] == "conflict"
     assert body["limitBands"][0]["band"] is None
@@ -164,7 +171,8 @@ def test_two_DIFFERENT_judged_limits_in_one_series_give_NO_band(monkeypatch):
     app = _app()
     order = _order()
     order["plan_definition_snapshot"]["activities"][0]["transactions"].append(
-        {"guid": "tx-other", "range_min": "4.0", "range_max": "8.0", "concept_unit_name": "mmol/L"})
+        {"guid": "tx-other", "concept_guid": "concept-other", "range_min": "4.0", "range_max": "8.0",
+         "concept_unit_name": "mmol/L"})
     _wire(monkeypatch, _Cdr1([[_pt(1, 6.0, "2026-11-02T00:00:00Z"),
                                _pt(2, 6.0, "2026-11-01T00:00:00Z", tx="tx-other")]]))
     _orders(monkeypatch, [order])
@@ -187,3 +195,40 @@ def test_detail_carries_the_verdict(monkeypatch):
     status, body = _get(app, "/dashboard/events/obs-1")
     assert status == 200
     assert body["limit"]["status"] == "above" and body["limit"]["high"] == 10.0
+
+
+
+def test_a_patients_GOAL_drives_the_row_verdict(monkeypatch):
+    """Operator 2026-11-12: the CarePlan goal first. Range says 10, goal 8."""
+    app = _app()
+    cp = _order()
+    cp["goals"] = [{"concept_guid": "concept-glu", "target_type": "quantity",
+                    "target_operator": "<=", "target_quantity": 8.0}]
+    _wire(monkeypatch, _Cdr1([[_pt(1, 9.0, "2026-11-02T00:00:00Z")]]))
+    _orders(monkeypatch, [cp])
+    _, body = _get(app, "/dashboard/patients/p1/events")
+    lim = body["rows"][0]["limit"]
+    assert lim["status"] == "above" and lim["sourceKind"] == "care_plan_goal" and lim["high"] == 8.0
+
+
+def test_ORDERS_are_not_a_source(monkeypatch):
+    """Operator 2026-11-12: CarePlans only. The pure function cannot tell an
+    order from a care plan by shape, so the guarantee is HERE: the routes read
+    `fetch_care_plans` and never `fetch_service_requests` (the fake raises)."""
+    app = _app()
+    _wire(monkeypatch, _Cdr1([[_pt(1, 12.0, "2026-11-02T00:00:00Z")]]))
+    calls = []
+
+    class _R:
+        def fetch_care_plans(self, patient_guid, **kw):
+            calls.append("care_plans")
+            return []
+
+        def fetch_service_requests(self, **kw):
+            calls.append("ORDERS")
+            return [_order()]
+    monkeypatch.setattr(rc, "build_client", lambda: _R())
+    for path in ("/dashboard/patients/p1/events", "/dashboard/patients/p1/events?outside=1",
+                 f"/dashboard/patients/p1/series/{CODE}"):
+        _get(app, path)
+    assert "ORDERS" not in calls and calls.count("care_plans") == 3

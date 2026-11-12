@@ -419,7 +419,9 @@ def test_the_detail_shows_the_limit_FIRST_with_its_order():
     detail = _fn(js, "renderDetail")
     assert detail.index("renderLimit(") < detail.index("block('Värde'")
     lim = _fn(js, "renderLimit")
-    assert "'Gränsen kommer från patientens beställning ' + l.orderGuid" in lim
+    assert "'Gränsen kommer från: ' + limitSource(l)" in lim
+    src = _fn(js, "limitSource")
+    assert "'Mål i patientens vårdplan '" in src and "'Intervall i vårdplanens '" in src
     # the observation's own order is labelled as such, so the two cannot be confused
     assert "'Beställning registrerad på mätvärdet'" in _fn(js, 'renderDetail')
     assert "l.reason && !judged" in lim
@@ -437,3 +439,14 @@ def test_the_outside_filter_is_in_the_bar_and_the_URL():
     js = _js()
     assert "if (form.elements.outside.checked) { q.set('outside', '1'); }" in _fn(js, "writeUrl")
     assert "parts.push('outside=1')" in _fn(js, "apply")
+
+
+def test_a_ONE_SIDED_limit_still_draws_its_band():
+    """Found in the browser: a goal "<= 8" drew no band while the legend
+    promised one."""
+    js = _js()
+    i = js.index("id: 'pdhcMarkers'")
+    plugin = js[i:i + 1500]
+    assert "if (hasLo || hasHi)" in plugin
+    assert "hasHi ? y.getPixelForValue(band.hi) : area.top" in plugin
+    assert "hasLo ? y.getPixelForValue(band.lo) : area.bottom" in plugin
