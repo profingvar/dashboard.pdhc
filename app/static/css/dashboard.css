@@ -1,0 +1,111 @@
+/* Patient dashboard layout (#976).
+ *
+ * BREAKPOINT: two columns from 1000px, one below. NOT the plan's 1024px:
+ * 1024 is exactly iPad 9.7" landscape AND iPad Pro 12.9" portrait, so a
+ * breakpoint there puts the commonest widths on the boundary. Gate 0 suggested
+ * 1100-1200, which would stack every iPad landscape (1080-1194) -- the posture
+ * the overview is used in. 1000 gives every iPad landscape two columns and
+ * every iPad portrait (744-834) one; the plan column is designed for 320px.
+ *
+ * Each panel scrolls on its own with overscroll-behavior: contain, or iOS
+ * Safari chains the scroll to the page. Touch targets are >= 44px.
+ */
+main { max-width: 1600px; }
+
+.dash-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "card" "plan" "events" "series";
+}
+.dash-card   { grid-area: card; }
+.dash-plan   { grid-area: plan; }
+.dash-events { grid-area: events; }
+.dash-series { grid-area: series; }
+
+@media (min-width: 1000px) {
+  .dash-grid {
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 2fr);
+    grid-template-areas: "card card" "plan events" "series series";
+  }
+  .dash-plan, .dash-events { max-height: 60vh; }
+}
+
+.dash-panel {
+  min-width: 0;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.dash-panel h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.dash-panel h3 { font-size: 0.95rem; margin: 0.9rem 0 0.4rem; }
+
+.dash-status { color: var(--text-muted); font-size: 0.92rem; }
+.dash-status.is-error { color: var(--danger); }
+
+.dash-demographics {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.75rem; margin: 0;
+}
+.dash-demographics dt {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.dash-demographics dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.dash-banners { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem; }
+.dash-banner {
+  padding: 0.45rem 0.7rem; border-radius: 5px; font-size: 0.9rem;
+  border: 1px solid var(--warning); color: var(--text); background: var(--code-bg);
+}
+.dash-banner.is-block { border-color: var(--danger); }
+
+.dash-source {
+  font-weight: 400; font-size: 0.78rem; color: var(--text-muted);
+  margin-left: 0.4rem;
+}
+.dash-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.dash-chip, .dash-toggle, .dash-close {
+  min-height: 44px; min-width: 44px;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--card-bg); color: var(--text);
+  font: inherit; cursor: pointer; text-align: left;
+}
+.dash-chip code { font-weight: 700; margin-right: 0.35rem; }
+.dash-chip.is-inactive { color: var(--text-muted); border-style: dashed; }
+.dash-chip[aria-expanded="true"], .dash-toggle[aria-expanded="true"] {
+  border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary);
+}
+.dash-chip:focus-visible, .dash-toggle:focus-visible, .dash-close:focus-visible {
+  outline: 3px solid var(--primary); outline-offset: 2px;
+}
+.dash-toggle { margin-top: 1rem; font-weight: 600; }
+
+.dash-note { color: var(--text-muted); font-size: 0.88rem; margin: 0.4rem 0 0; }
+
+.dash-disclosure {
+  margin-top: 0.6rem; padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+}
+.dash-disclosure-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  font-weight: 600; margin-bottom: 0.5rem;
+}
+.dash-disclosure dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.25rem 1rem; margin: 0; }
+.dash-disclosure dt { color: var(--text-muted); }
+.dash-disclosure dd { margin: 0; overflow-wrap: anywhere; }
+
+.eps-section { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.eps-section:first-child { border-top: 0; }
+.eps-section h4 { margin: 0 0 0.3rem; font-size: 0.92rem; }
+.eps-section.is-priority { border-left: 4px solid var(--danger); padding-left: 0.6rem; }
+.eps-section ul { margin: 0; padding-left: 1.1rem; }
+.eps-meta { color: var(--text-muted); font-size: 0.82rem; margin-left: 0.4rem; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}

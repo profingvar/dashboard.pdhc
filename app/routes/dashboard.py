@@ -7,12 +7,14 @@ ALL FOUR of the plan's endpoints are built:
     GET /dashboard/patients/<guid>/events               the event list
     GET /dashboard/events/<observation_guid>            one event's provenance
 
-The last two were blocked for a day by #983: CDR1's clinical series did not
-project the observation's own guid or its provenance keys, although the
-columns existed and were populated. #983 added them to cdr.pdhc. UNTIL THAT IS
-DEPLOYED, production cdr1 runs the older projection, and these two routes say
-so by name — `503 upstream_projection_too_old`, citing #983 — rather than
-building rows with an empty identity or reporting every detail "not found".
+The last two needed #983 (CDR1 projecting the observation's own guid and its
+provenance keys), deployed 2026-11-11. Against an older cdr they still say so
+by name — `503 upstream_projection_too_old` — rather than building rows with
+an empty identity or reporting every detail "not found".
+
+The PAGE that reads these is `GET /dashboard/view/<guid>` (#976). It carries
+no patient data itself; every datum arrives through the guarded, audited JSON
+routes above.
 
 AUTHORISATION is `app/dashboard/access.py`, which composes the existing
 pieces and records which basis applied. `app/auth.py` admits both bases at
@@ -23,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, render_template, request
 
 from app.dashboard import units
 from app.services.audit import audit_read
@@ -84,8 +86,14 @@ def _patient_orgs(patient_guid: str, caller_orgs: tuple[str, ...],
     rows = client.list_org_patients(list(caller_orgs), is_admin=is_admin)
     if not rows:
         return UNKNOWN_ORGS
-    hit = any(r.get("guid") == patient_guid for r in rows)
-    return caller_orgs if hit else ()
+    row = next((r for r in rows if r.get("guid") == patient_guid), None)
+    from flask import g, has_app_context
+    if row is not None and has_app_context():
+        # The same index answers the card's name and birth date, so keep the
+        # row rather than asking CDR1 a second time. Guarded: this function
+        # is also a plain question asked outside a request.
+        g._dashboard_patient_row = row
+    return caller_orgs if row is not None else ()
 
 
 def _org_lookup(patient_guid: str):
@@ -126,6 +134,20 @@ def _eps_section(s: dict):
         narrative=(absent or {}).get("narrative_text"),
         absent_assertion=s.get("status") == "EXPLICITLY_ABSENT",
     )
+
+
+@bp.get("/view/<guid>")
+def patient_view(guid: str):
+    """The page (#976). A SHELL: it holds the patient guid and nothing else.
+
+    Every datum -- card, plans, events, series -- arrives through the JSON
+    routes, each of which applies the care/SU basis, the organisation check,
+    spärr and the PDL audit. So this route needs no patient check of its own:
+    rendering it reveals nothing that the guid in the URL did not already say,
+    and duplicating the check here would audit a read that did not happen.
+    The door in `app/auth.py` still requires a care or analysis basis.
+    """
+    return render_template("dashboard.html", patient_guid=guid)
 
 
 @bp.get("/patients/<guid>")
@@ -183,15 +205,21 @@ def patient_dashboard(guid: str):
                              if s.get("key") == "problems"), None)
             ips_problem_count = len((problems or {}).get("entries") or [])
 
-    card = PatientCard(patient_guid=guid, diagnoses=tuple(diagnoses),
+    # Name and birth date come from CDR1's patient index, already read by the
+    # organisation check. Sex, personnummer and organisation have NO source the
+    # dashboard reads today; they stay None and the page shows "—", which is
+    # "not known here", never "none".
+    from flask import g
+    row = getattr(g, "_dashboard_patient_row", None) or {}
+    card = PatientCard(patient_guid=guid, name=row.get("name") or None,
+                       birth_date=row.get("birth_date"),
+                       diagnoses=tuple(diagnoses),
                        diagnosis_scope_note=scope_note,
                        eps_sections=eps_sections)
     sparr = sparr_state(guid)
     return jsonify({
         "patientCard": _wire(card),
         "plans": _wire(list(plans)),
-        "eventsPage": {"rows": [], "nextCursor": None,
-                       "unavailable": ["cdr1:no-row-identity-983"]},
         "diagnosesDefinitivelyEmpty": definitively_empty,
         # TWO REGISTERS, SHOWN SIDE BY SIDE AND NEVER MERGED (operator,
         # 2026-11-11; #984). The chips are icd11's ICD-11 register; the EPS

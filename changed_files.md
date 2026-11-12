@@ -771,3 +771,11 @@ them. Each source degrades only itself.
 merge the registers, claim them reconciled, silence an unreachable ips, read
 503 as not-found, drop source/system, treat absent as missing. 615 pass.
 NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
+
+## 2026-11-12 — #976 Phase 2 slice 1: page shell, grid, patient card
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py

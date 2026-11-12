@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{# The patient dashboard page (#976). A shell: data arrives per panel from the
+   /dashboard/... JSON routes, so one failing service degrades one panel and
+   never blanks the page. #}
+{% block title %}Patientöversikt{% endblock %}
+{% block h1 %}Patientöversikt{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="dash-grid" id="dashboard" data-patient-guid="{{ patient_guid }}">
+
+  <section class="dash-panel dash-card" id="panel-card" aria-labelledby="card-heading" aria-busy="true">
+    <h2 id="card-heading" class="visually-hidden">Patient</h2>
+    <div class="dash-status" data-role="status" role="status">Hämtar patientkort…</div>
+    <div data-role="body" hidden>
+      <dl class="dash-demographics">
+        <div><dt>Namn</dt><dd data-field="name">—</dd></div>
+        <div><dt>Ålder</dt><dd data-field="age">—</dd></div>
+        <div><dt>Kön</dt><dd data-field="sex">—</dd></div>
+        <div><dt>Personnummer</dt><dd data-field="personnummer">—</dd></div>
+        <div><dt>Organisation</dt><dd data-field="organisation">—</dd></div>
+      </dl>
+      <div class="dash-banners" data-role="banners"></div>
+
+      <div class="dash-diagnoses">
+        <h3>Diagnoser <span class="dash-source" data-role="dx-source">ICD-11-register</span></h3>
+        <div class="dash-chips" data-role="chips" role="list"></div>
+        <p class="dash-note" data-role="dx-note" hidden></p>
+        <div class="dash-disclosure" id="dx-detail" data-role="dx-detail" hidden></div>
+      </div>
+
+      <button type="button" class="dash-toggle" id="eps-toggle"
+              aria-expanded="false" aria-controls="eps-detail">
+        Patientsammanfattning (EPS)
+      </button>
+      <div class="dash-disclosure" id="eps-detail" role="region"
+           aria-labelledby="eps-toggle" hidden>
+        <div class="dash-disclosure-head">
+          <span>Patientsammanfattning — ips.pdhc</span>
+          <button type="button" class="dash-close" data-role="eps-close" aria-label="Stäng patientsammanfattningen">Stäng</button>
+        </div>
+        <div data-role="eps-sections"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dash-panel dash-plan" id="panel-plan" aria-labelledby="plan-heading">
+    <h2 id="plan-heading">Plan</h2>
+    <div class="dash-status" data-role="status" role="status">Planpanelen byggs i nästa steg (#971).</div>
+  </section>
+
+  <section class="dash-panel dash-events" id="panel-events" aria-labelledby="events-heading">
+    <h2 id="events-heading">Händelser</h2>
+    <div class="dash-status" data-role="status" role="status">Händelselistan byggs i nästa steg (#977).</div>
+  </section>
+
+  <section class="dash-panel dash-series" id="panel-series" aria-labelledby="series-heading">
+    <h2 id="series-heading">Tidsserie</h2>
+    <div class="dash-status" data-role="status" role="status">Välj en händelse för att visa dess tidsserie (#978).</div>
+  </section>
+
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/capability.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
