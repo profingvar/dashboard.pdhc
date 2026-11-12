@@ -855,12 +855,51 @@ class TestEmptyAndMissingShapes:
     def test_a_patient_with_no_care_plans_gives_an_empty_tuple(self):
         app = _app()
         with app.test_request_context():
+            # No CarePlans AND no ServiceRequests. Since 2026-11-12 an empty
+            # careplan list no longer ends the read: production has 0
+            # CarePlans and the orders carry the plans.
             with patch("app.services.request_client.requests.get",
-                       side_effect=_router({"/api/v1/careplans":
-                                            (200, {"total": 0,
-                                                   "careplans": []})})):
+                       side_effect=_router(_routes([], None, []))):
                 plans = rc.RequestClient(base_url=BASE).plan_summaries(PATIENT)
         assert plans == ()
+
+    def test_with_no_care_plans_EACH_ORDER_IS_A_PLAN(self):
+        """Production, 2026-11-12: 0 CarePlans, 28 ServiceRequests. Before
+        this, every patient's plan panel was empty."""
+        app = _app()
+        with app.test_request_context():
+            with patch("app.services.request_client.requests.get",
+                       side_effect=_router(_routes(
+                           [], None, [_service_request(status="archived",
+                                                       tx_guids=(TX_A, TX_B))]))):
+                plans = rc.RequestClient(base_url=BASE).plan_summaries(PATIENT)
+        assert len(plans) == 1
+        (p,) = plans
+        assert p.source == "service_request" and p.care_plan_guid is None
+        assert p.service_request_guid == SR
+        assert p.ordered_at == "2026-01-15T08:30:00+00:00"
+        assert [i.transaction_guid for i in p.items] == [TX_A, TX_B]
+        assert {i.state for i in p.items} == {"done"}
+        assert {i.plan_activity_guid for i in p.items} == {ACT}
+
+    def test_an_order_is_NOT_a_T_plus_origin(self):
+        """`ordered_at` is created_at. It must never become period_start."""
+        p = rc.build_order_summary(_service_request(period_start=None))
+        assert p.period_start is None
+        assert p.ordered_at is not None
+
+    def test_an_order_with_no_date_is_planned_however_old(self):
+        p = rc.build_order_summary(_service_request(period_start=None))
+        assert {i.state for i in p.items} == {"planned"}
+
+    def test_an_SR_a_care_plan_already_claims_is_not_listed_twice(self):
+        app = _app()
+        with app.test_request_context():
+            with patch("app.services.request_client.requests.get",
+                       side_effect=_router(_routes([_care_plan()], _context(),
+                                                   [_service_request()]))):
+                plans = rc.RequestClient(base_url=BASE).plan_summaries(PATIENT)
+        assert [p.source for p in plans] == ["care_plan"]
 
     def test_include_performed_False_skips_the_matches_calls(self):
         app = _app()

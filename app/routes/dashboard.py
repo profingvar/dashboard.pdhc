@@ -23,6 +23,7 @@ the door for these paths; access.py narrows and refuses by a named code.
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime, timezone
 from typing import Any
 
 from flask import Blueprint, jsonify, render_template, request
@@ -243,6 +244,144 @@ def patient_dashboard(guid: str):
         "unavailable": unavailable,
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,
+    })
+
+
+#: The plan panel walks the patient's event pages to count observations per
+#: transaction. Bounded: 10 pages x 500 = 5 000 observations, ~2.5x the
+#: largest patient on cdr1 (2026-11-12). Past the bound the panel is told the
+#: counts are INCOMPLETE rather than shown a smaller number as if whole.
+_PLAN_SCAN_PAGE = 500
+_PLAN_SCAN_MAX_PAGES = 10
+
+
+@bp.get("/patients/<guid>/plan")
+@dashboard_patient_read(org_lookup=_org_lookup)
+def patient_plan(guid: str):
+    """The plan panel (#971): plans, and the observations matched to them.
+
+    PLANS come from request.pdhc. On production those are ServiceRequests,
+    not CarePlans (0 CarePlans, 28 SRs; measured 2026-11-12) — see
+    `request_client.build_order_summary`.
+
+    STATE IS THE ORDER'S STATUS, never the presence of observations.
+
+    OBSERVATIONS are counted per `transaction_guid` from cdr1, matched on
+    patient + transaction (the transaction guid is a PlanDefinition-level id
+    shared by every patient on that plan, so patient is half of the key).
+
+    DISAGREEMENT IS SHOWN, NOT RECONCILED. Two kinds, both measured:
+      - an item whose order is done and that has no observation;
+      - observations whose transaction belongs to no order for this patient
+        (`unordered`). On 2026-11-12 three of the four patients with data on
+        cdr1 had ONLY these — measurements following a plan nobody ordered.
+    """
+    from flask import g as _g
+    from app.services.cdr1_client import (
+        Cdr1BadCursor, Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+
+    unavailable: list[str] = []
+    plans: tuple = ()
+    plans_known = True
+    try:
+        from app.services import request_client  # noqa: PLC0415
+        plans = request_client.build_client().plan_summaries(guid)
+    except Exception as exc:  # noqa: BLE001 - a panel, not the page
+        plans_known = False
+        unavailable.append(f"request:{type(exc).__name__}")
+
+    decision = _g.access_decision
+    client = cdr1_client.build_client()
+    points: list = []
+    complete = True
+    observations_known = True
+    cursor = None
+    try:
+        for _ in range(_PLAN_SCAN_MAX_PAGES):
+            page = client.patient_events(
+                guid, list(decision.caller_org_guids),
+                is_admin=decision.unrestricted, cursor=cursor,
+                limit=_PLAN_SCAN_PAGE)
+            points.extend(page["points"])
+            cursor = page["next_cursor"]
+            if not cursor:
+                break
+        else:
+            complete = cursor is None
+    except (Cdr1BadCursor, Cdr1ProjectionTooOld, Cdr1NotConfigured,
+            Cdr1Unreachable) as exc:
+        observations_known = False
+        points = []
+        unavailable.append(f"cdr1:{type(exc).__name__}")
+
+    # Spärr BEFORE counting: a count of blocked observations would disclose
+    # that they exist. Exposures are audited as on every other route.
+    sparr = sparr_state(guid)
+    exposures: list = []
+    if sparr.blocks and points:
+        points, exposures = ips_client.filter_blocked_points(points, sparr.blocks)
+    if exposures:
+        from app.routes.charts import _lift_exposure_audit
+        snap = dict(getattr(_g, "_audit_payload_snapshot", None) or {})
+        snap["sparr_lift"] = _lift_exposure_audit(exposures)
+        _g._audit_payload_snapshot = snap
+
+    by_tx: dict[str, dict] = {}
+    untagged = 0
+    for p in points:
+        tx = p.get("transaction_guid")
+        if not tx:
+            untagged += 1
+            continue
+        agg = by_tx.setdefault(str(tx), {"count": 0, "first": None, "last": None,
+                                         "code": p.get("code")})
+        agg["count"] += 1
+        at = p.get("at")
+        if at:
+            agg["first"] = at if agg["first"] is None or at < agg["first"] else agg["first"]
+            agg["last"] = at if agg["last"] is None or at > agg["last"] else agg["last"]
+
+    planned_tx = {i.transaction_guid for pl in plans for i in pl.items
+                  if i.transaction_guid}
+    unordered_tx = sorted(set(by_tx) - planned_tx)
+
+    names: dict = {}
+    if unordered_tx:
+        from app.services import plan_client
+        concepts = {tx: ips_client.concept_guid_from_canonical(by_tx[tx]["code"])
+                    for tx in unordered_tx}
+        try:
+            names = plan_client.concept_display_names(
+                sorted({c for c in concepts.values() if c}))
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"plan:{type(exc).__name__}")
+    else:
+        concepts = {}
+
+    _g._audit_n_rows = len(points)
+    return jsonify({
+        "plans": _wire(list(plans)),
+        "plansKnown": plans_known,
+        "observationsKnown": observations_known,
+        # False = the scan stopped at its bound; counts are LOWER BOUNDS.
+        "observationCountsComplete": complete,
+        "observationsByTransaction": {
+            tx: {"count": a["count"], "first": a["first"], "last": a["last"]}
+            for tx, a in by_tx.items()},
+        "unordered": [
+            {"transactionGuid": tx,
+             "display": names.get(concepts.get(tx)) or by_tx[tx]["code"] or tx,
+             "count": by_tx[tx]["count"], "first": by_tx[tx]["first"],
+             "last": by_tx[tx]["last"]}
+            for tx in unordered_tx],
+        "observationsWithoutTransaction": untagged,
+        "unavailable": unavailable,
+        "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
+        "sparrChecked": sparr.checked,
+        # The clock "overdue" is judged by. Comparison is in UTC (an instant
+        # is an instant); DISPLAY is Europe/Stockholm, which the page does.
+        "now": datetime.now(timezone.utc).isoformat(),
+        "displayTimeZone": "Europe/Stockholm",
     })
 
 

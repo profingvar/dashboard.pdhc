@@ -439,6 +439,68 @@ def build_plan_summary(
     )
 
 
+def build_order_summary(
+    service_request: Mapping,
+    *,
+    matches: Sequence[Mapping] | None = None,
+    now: datetime | None = None,
+) -> PlanSummary:
+    """One ServiceRequest as a `dto.PlanSummary` — the order IS the plan.
+
+    MEASURED 2026-11-12, production: `care_plans` holds 0 rows; 28
+    ServiceRequests (23 patients) each froze a PlanDefinition, and cdr1's
+    `observation.transaction_guid` matches those snapshots'
+    `activities[].transactions[].guid` for 1 949 of 1 949 rows. So a plan
+    panel built only from CarePlans is empty for every patient, while the
+    snapshot links cleanly. This reads the snapshot.
+
+    Every item takes the SR's status: request.pdhc tracks completion per
+    ServiceRequest (archive once every contract match is terminal), not per
+    transaction, so a per-item state would be invented. `period_start` is
+    None on all 28 measured SRs, so no item can be `overdue` today — which
+    is a true statement about the data, not a defect here.
+    """
+    snapshot = service_request.get("plan_definition_snapshot") or {}
+    if not isinstance(snapshot, Mapping):
+        snapshot = {}
+    sr_guid = service_request.get("guid")
+    status = service_request.get("status")
+    scheduled_at = service_request.get("period_start")
+    performed_at = _performed_at(matches)
+    items: list[PlanItem] = []
+    for activity in (snapshot.get("activities") or []):
+        if not isinstance(activity, Mapping):
+            continue
+        visit = activity.get("guid") or activity.get("activity_guid")
+        for tx in (activity.get("transactions") or []):
+            if not isinstance(tx, Mapping) or not tx.get("guid"):
+                continue
+            items.append(PlanItem(
+                transaction_guid=str(tx["guid"]),
+                title=(tx.get("concept_name") or tx.get("concept_guid") or "—"),
+                state=derive_item_state(status, scheduled_at, now=now),
+                concept_guid=tx.get("concept_guid"),
+                scheduled_at=scheduled_at,
+                performed_at=performed_at,
+                service_request_guid=str(sr_guid) if sr_guid else None,
+                plan_activity_guid=str(visit) if visit else None,
+            ))
+    pd_name, pd_version = _plan_definition_meta(service_request)
+    return PlanSummary(
+        care_plan_guid=None,
+        care_plan_title=snapshot.get("title") or None,
+        plan_definition_name=pd_name,
+        plan_definition_version=pd_version,
+        period_start=scheduled_at,
+        period_end=service_request.get("period_end"),
+        status=status,
+        items=tuple(items),
+        source="service_request",
+        service_request_guid=str(sr_guid) if sr_guid else None,
+        ordered_at=service_request.get("created_at"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -647,9 +709,9 @@ class RequestClient:
         would assert the patient has no care plan.
         """
         plans = self.fetch_care_plans(patient_guid)
-        if not plans:
-            return ()
         service_requests = self.fetch_service_requests(patient_guid=patient_guid)
+        if not plans and not service_requests:
+            return ()
 
         matches_by_sr: dict[str, Sequence[Mapping]] = {}
         if include_performed:
@@ -666,6 +728,15 @@ class RequestClient:
                 plan, context, service_requests,
                 matches_by_sr=matches_by_sr, now=now,
             ))
+        # An SR no CarePlan item claimed is a plan of its own. On production
+        # that is EVERY SR, because there are no CarePlans (2026-11-12).
+        claimed = {i.service_request_guid for p in out for i in p.items
+                   if i.service_request_guid}
+        for sr in service_requests:
+            guid = sr.get("guid")
+            if guid and str(guid) not in claimed:
+                out.append(build_order_summary(
+                    sr, matches=matches_by_sr.get(str(guid)), now=now))
         return tuple(out)
 
 

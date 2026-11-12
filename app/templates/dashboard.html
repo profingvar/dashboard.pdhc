@@ -47,7 +47,16 @@
 
   <section class="dash-panel dash-plan" id="panel-plan" aria-labelledby="plan-heading">
     <h2 id="plan-heading">Plan</h2>
-    <div class="dash-status" data-role="status" role="status">Planpanelen byggs i nästa steg (#971).</div>
+    <div class="dash-status" data-role="status" role="status">Hämtar planer…</div>
+    <div data-role="body" hidden>
+      <div class="plan-select" data-role="plan-select" hidden>
+        <label for="plan-picker">Plan</label>
+        <select id="plan-picker" data-role="plan-picker"></select>
+      </div>
+      <div data-role="plan-banners" class="dash-banners"></div>
+      <div data-role="plan-current"></div>
+      <div data-role="plan-unordered"></div>
+    </div>
   </section>
 
   <section class="dash-panel dash-events" id="panel-events" aria-labelledby="events-heading">

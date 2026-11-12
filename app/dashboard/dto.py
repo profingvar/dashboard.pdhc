@@ -141,7 +141,10 @@ class PlanItem:
 
 @dataclass(frozen=True)
 class PlanSummary:
-    care_plan_guid: str
+    #: None for a plan read from a ServiceRequest (`source="service_request"`).
+    #: Production held ZERO CarePlans on 2026-11-12 while 28 ServiceRequests
+    #: each carried a frozen PlanDefinition, so the order IS the plan there.
+    care_plan_guid: str | None
     care_plan_title: str | None = None
     plan_definition_name: str | None = None
     plan_definition_version: str | None = None
@@ -151,6 +154,13 @@ class PlanSummary:
     period_end: str | None = None
     status: str | None = None
     items: tuple[PlanItem, ...] = ()
+    #: "care_plan" or "service_request" — which request.pdhc object this is.
+    source: str = "care_plan"
+    service_request_guid: str | None = None
+    #: When the order was placed (`ServiceRequest.created_at`). Shown as a
+    #: fact about the order; NEVER a T+ origin — that is `period_start` only,
+    #: and it is None on every production ServiceRequest.
+    ordered_at: str | None = None
 
 
 # --------------------------------------------------------------------------

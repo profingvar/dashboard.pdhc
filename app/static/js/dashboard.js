@@ -312,5 +312,171 @@
     }).catch(function (err) { showError(p, err); });
   }
 
+  /* ---- plan panel (#971) -------------------------------------------------
+   * Plans come from request.pdhc ORDERS (production has no CarePlans). An
+   * item's state is the ORDER's status, never the presence of observations.
+   * Disagreement is SHOWN: a done item with no observation is flagged, and
+   * observations whose transaction no order covers get their own group.
+   * Items are not clickable yet: the link to the event list arrives with the
+   * list itself (#977), and an affordance that does nothing is worse than none.
+   */
+
+  var STOCKHOLM = (function () {
+    try {
+      return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Stockholm', dateStyle: 'short' });
+    } catch (e) { return null; }
+  })();
+
+  function day(iso) {
+    if (!iso) { return null; }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) { return null; }
+    return STOCKHOLM ? STOCKHOLM.format(d) : iso.slice(0, 10);
+  }
+
+  // Done, then NOW, then what is still ahead. Cancelled last.
+  var GROUPS = [
+    { state: 'done', label: 'Klara' },
+    { now: true },
+    { state: 'overdue', label: 'Försenade' },
+    { state: 'planned', label: 'Planerade' },
+    { state: 'cancelled', label: 'Avbrutna' }
+  ];
+
+  var SOURCE_LABEL = { service_request: 'Beställning', care_plan: 'Vårdplan' };
+
+  // request.pdhc's ServiceRequest statuses (draft -> active -> archived, or
+  // revoked). `archived` IS completion there. Unknown values pass through.
+  var STATUS_LABEL = { draft: 'utkast', active: 'aktiv', archived: 'klar',
+                       completed: 'klar', revoked: 'avbruten' };
+  function statusText(s) { return STATUS_LABEL[s] || s; }
+
+  function countText(data, tx) {
+    if (!data.observationsKnown) { return 'mätningar okända'; }
+    var agg = (data.observationsByTransaction || {})[tx];
+    var n = agg ? agg.count : 0;
+    var prefix = data.observationCountsComplete ? '' : '≥';
+    return prefix + n + (n === 1 ? ' mätning' : ' mätningar');
+  }
+
+  function renderPlan(host, plan, data) {
+    host.textContent = '';
+    var head = el('div', 'plan-head');
+    var name = plan.planDefinitionName || plan.carePlanTitle || 'Namnlös plan';
+    head.appendChild(el('strong', null, name + (plan.planDefinitionVersion ? ' v' + plan.planDefinitionVersion : '')));
+    var meta = [SOURCE_LABEL[plan.source] || plan.source];
+    if (plan.status) { meta.push(statusText(plan.status)); }
+    if (plan.orderedAt) { meta.push('beställd ' + day(plan.orderedAt)); }
+    meta.push(plan.periodStart ? 'start ' + day(plan.periodStart)
+                               : 'inget startdatum — ingen T+');
+    head.appendChild(el('div', 'plan-meta', meta.join(' · ')));
+    host.appendChild(head);
+
+    var items = plan.items || [];
+    if (!items.length) {
+      host.appendChild(el('p', 'dash-status', 'Planen har inga transaktioner.'));
+      return;
+    }
+    GROUPS.forEach(function (g) {
+      if (g.now) {
+        host.appendChild(el('div', 'plan-now', 'nu ' + (day(data.now) || '')));
+        return;
+      }
+      var mine = items.filter(function (i) { return i.state === g.state; });
+      if (!mine.length) { return; }
+      var group = el('section', 'plan-group is-' + g.state);
+      group.appendChild(el('h3', null, g.label + ' (' + mine.length + ')'));
+      var ul = el('ul');
+      mine.forEach(function (i) {
+        var li = el('li', 'plan-item');
+        var title = el('span', 'plan-item-title', i.title || DASH);
+        var agg = (data.observationsByTransaction || {})[i.transactionGuid];
+        if (i.state === 'done' && data.observationsKnown && !agg) {
+          title.appendChild(el('span', 'plan-flag', 'Klar enligt beställningen, men inga mätvärden finns.'));
+        }
+        if (i.performedAt) {
+          title.appendChild(el('span', 'plan-meta', ' utförd ' + day(i.performedAt)));
+        }
+        li.appendChild(title);
+        li.appendChild(el('span', 'plan-count', countText(data, i.transactionGuid)));
+        ul.appendChild(li);
+      });
+      group.appendChild(ul);
+      host.appendChild(group);
+    });
+  }
+
+  function renderUnordered(host, data) {
+    host.textContent = '';
+    var rows = data.unordered || [];
+    if (!rows.length) { return; }
+    var box = el('section', 'plan-unordered');
+    box.appendChild(el('h3', null, 'Mätningar utan beställning (' + rows.length + ')'));
+    box.appendChild(el('p', null,
+      'Mätvärdena följer en planerad transaktion, men ingen beställning för patienten täcker den. ' +
+      'Visas här i stället för att döljas.'));
+    var ul = el('ul');
+    rows.forEach(function (u) {
+      var li = el('li', 'plan-item');
+      var title = el('span', 'plan-item-title', u.display || u.transactionGuid);
+      var span = [day(u.first), day(u.last)].filter(Boolean);
+      if (span.length) { title.appendChild(el('span', 'plan-meta', ' ' + span.join(' – '))); }
+      li.appendChild(title);
+      li.appendChild(el('span', 'plan-count',
+        (data.observationCountsComplete ? '' : '≥') + u.count + (u.count === 1 ? ' mätning' : ' mätningar')));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    host.appendChild(box);
+  }
+
+  function loadPlan() {
+    var p = panel('panel-plan');
+    var picker = p.body.querySelector('[data-role="plan-picker"]');
+    var current = p.body.querySelector('[data-role="plan-current"]');
+    getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/plan').then(function (data) {
+      var banners = p.body.querySelector('[data-role="plan-banners"]');
+      banners.textContent = '';
+      if (!data.plansKnown) {
+        banner(banners, 'Beställningarna kunde inte läsas — planerna är okända, inte tomma.');
+      }
+      if (!data.observationsKnown) {
+        banner(banners, 'Mätvärdena kunde inte läsas — antal mätningar är okänt.');
+      } else if (!data.observationCountsComplete) {
+        banner(banners, 'Lång historik: antalen är minst-värden.');
+      }
+      if (data.sparrChecked === false) {
+        banner(banners, 'Spärr kunde inte kontrolleras.', true);
+      } else if (data.hasBlockedSources) {
+        banner(banners, 'Spärrade mätvärden räknas inte här.', true);
+      }
+
+      var plans = data.plans || [];
+      picker.textContent = '';
+      p.body.querySelector('[data-role="plan-select"]').hidden = plans.length < 2;
+      plans.forEach(function (pl, i) {
+        var label = (pl.planDefinitionName || 'Plan') +
+          (pl.orderedAt ? ' — ' + day(pl.orderedAt) : '') +
+          (pl.status ? ' (' + statusText(pl.status) + ')' : '');
+        var opt = el('option', null, label);
+        opt.value = String(i);
+        picker.appendChild(opt);
+      });
+      picker.onchange = function () { renderPlan(current, plans[Number(picker.value)], data); };
+
+      if (plans.length) {
+        renderPlan(current, plans[0], data);
+      } else if (data.plansKnown) {
+        current.textContent = '';
+        current.appendChild(el('p', 'dash-status', 'Inga beställningar för patienten i request.pdhc.'));
+      }
+      renderUnordered(p.body.querySelector('[data-role="plan-unordered"]'), data);
+      p.status.hidden = true;
+      p.body.hidden = false;
+      p.node.setAttribute('aria-busy', 'false');
+    }).catch(function (err) { showError(p, err); });
+  }
+
   loadCard();
+  loadPlan();
 })();
