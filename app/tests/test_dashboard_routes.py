@@ -53,7 +53,7 @@ class _FakeCdr1:
         return self._series
 
     def patient_events(self, guid, orgs, *, is_admin=False, cursor=None,
-                       limit=100, codes=None, reason=None):
+                       limit=100, codes=None, reason=None, **kw):
         # The series route reads the strict cursor endpoint since #978.
         pts = [dict(p, observation_guid=p.get("observation_guid") or f"o{i}")
                for i, p in enumerate(self._series)

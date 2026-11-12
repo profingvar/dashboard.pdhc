@@ -381,6 +381,48 @@ def patient_plan(guid: str):
     })
 
 
+@bp.get("/patients/<guid>/concepts")
+@dashboard_patient_read(org_lookup=_org_lookup)
+def patient_concepts(guid: str):
+    """The patient's concepts with names and counts — the filter bar's list.
+
+    Free text is matched against THESE names in the page and becomes a
+    concept filter sent to cdr1, so a text search is exact over the whole
+    history rather than over whatever pages happen to be loaded.
+    """
+    from flask import g as _g
+    from app.services.cdr1_client import (
+        Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+    decision = _g.access_decision
+    try:
+        params = cdr1_client.build_client().patient_concepts(
+            guid, list(decision.caller_org_guids), is_admin=decision.unrestricted)
+    except (Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable) as exc:
+        return jsonify(error="cdr1_unreachable", message=str(exc)), 503
+
+    unavailable: list[str] = []
+    concept_of = {p.get("code"): ips_client.concept_guid_from_canonical(p.get("code"))
+                  for p in params}
+    names: dict = {}
+    if any(concept_of.values()):
+        try:
+            from app.services import plan_client
+            names = plan_client.concept_display_names(
+                sorted({c for c in concept_of.values() if c}))
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"plan:{type(exc).__name__}")
+    _g._audit_n_rows = len(params)
+    return jsonify({
+        "concepts": [{"code": p.get("code"),
+                      "displayName": names.get(concept_of.get(p.get("code"))) or p.get("code"),
+                      "unit": p.get("unit"), "count": p.get("count"),
+                      "first": p.get("first_observed_at"),
+                      "last": p.get("last_observed_at")}
+                     for p in params if p.get("code")],
+        "unavailable": unavailable,
+    })
+
+
 #: The series panel's scan bound: 20 pages x 500 = 10 000 points, enough for
 #: 14 days of 5-minute CGM (4 032) twice over. Past it the panel is told the
 #: series is INCOMPLETE rather than shown a shorter one as if whole.
@@ -459,6 +501,12 @@ def patient_series(guid: str, code_canonical: str):
         Cdr1BadCursor, Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
     decision = g.access_decision
     client = cdr1_client.build_client()
+    # A zoomed chart asks for its visible window at full resolution.
+    try:
+        frm = _bound(request.args.get("from"), end=False)
+        to = _bound(request.args.get("to"), end=True)
+    except InvalidFilter as exc:
+        return jsonify(error="invalid_filter", message=str(exc)), 400
 
     points: list = []
     complete = True
@@ -468,7 +516,7 @@ def patient_series(guid: str, code_canonical: str):
             page = client.patient_events(
                 guid, list(decision.caller_org_guids),
                 is_admin=decision.unrestricted, cursor=cursor,
-                limit=_SERIES_SCAN_PAGE, codes=[code_canonical])
+                limit=_SERIES_SCAN_PAGE, codes=[code_canonical], frm=frm, to=to)
             points.extend(page["points"])
             cursor = page["next_cursor"]
             if not cursor:
@@ -543,6 +591,7 @@ def patient_series(guid: str, code_canonical: str):
         "series": _wire(series),
         "displayName": display,
         "complete": complete,
+        "window": {"from": frm, "to": to},
         "nonNumericCount": non_numeric,
         "unavailable": unavailable,
         # THE #827 PAIR, and both halves are required. `hasBlockedSources` is
@@ -590,6 +639,62 @@ def _series_csv(code_canonical: str, series, complete: bool):
 # the event list and its detail (#983)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# filters (#977 part B) — held in the page URL, validated HERE
+# ---------------------------------------------------------------------------
+
+class InvalidFilter(ValueError):
+    pass
+
+
+def _bound(raw: str | None, *, end: bool) -> str | None:
+    """A date or datetime filter bound -> an ISO-8601 UTC instant for cdr1.
+
+    WHY THIS IS STRICT. cdr1 parses `from`/`to` leniently and IGNORES what it
+    cannot parse, so a malformed bound would silently drop the filter and the
+    clinician would read the whole history as the filtered one. Here a bad
+    value is a 400 by name.
+
+    A bare date is a CALENDAR DAY IN STOCKHOLM: `from=2026-11-01` starts at
+    local midnight, `to=2026-11-01` ends at the next local midnight
+    (exclusive, sent as one microsecond before it, since cdr1 compares `<=`).
+    """
+    if raw is None or raw == "":
+        return None
+    from datetime import date, timedelta
+    from zoneinfo import ZoneInfo
+    stockholm = ZoneInfo("Europe/Stockholm")
+    try:
+        if len(raw) == 10:
+            d = date.fromisoformat(raw)
+            if end:
+                d = d + timedelta(days=1)
+            local = datetime(d.year, d.month, d.day, tzinfo=stockholm)
+            instant = local.astimezone(timezone.utc)
+            if end:
+                instant = instant - timedelta(microseconds=1)
+        else:
+            instant = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if instant.tzinfo is None:
+                raise InvalidFilter(f"{raw!r} has no time zone")
+            instant = instant.astimezone(timezone.utc)
+    except ValueError as exc:
+        raise InvalidFilter(f"{raw!r} is not a date (YYYY-MM-DD) or an "
+                            f"ISO-8601 instant") from exc
+    return instant.isoformat()
+
+
+def _filters():
+    """(codes, frm, to, transactions) from the query string, or InvalidFilter."""
+    frm = _bound(request.args.get("from"), end=False)
+    to = _bound(request.args.get("to"), end=True)
+    if frm and to and frm > to:
+        raise InvalidFilter("from is after to")
+    codes = [c for c in request.args.getlist("code") if c]
+    transactions = [t for t in request.args.getlist("transaction") if t]
+    return codes, frm, to, transactions
+
+
 #: The page size a caller may ask for. cdr1 caps its own limit too; this cap
 #: keeps one dashboard request from asking cdr1 for its maximum.
 _EVENTS_MAX_LIMIT = 500
@@ -607,7 +712,8 @@ def patient_events(guid: str):
     """
     from flask import g as _g
     from app.services.cdr1_client import (
-        Cdr1BadCursor, Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+        Cdr1BadCursor, Cdr1FilterUnsupported, Cdr1NotConfigured,
+        Cdr1ProjectionTooOld, Cdr1Unreachable)
 
     decision = _g.access_decision
     try:
@@ -616,18 +722,26 @@ def patient_events(guid: str):
         return jsonify(error="invalid_limit",
                        message="limit must be an integer"), 400
 
+    try:
+        codes, frm, to, transactions = _filters()
+    except InvalidFilter as exc:
+        return jsonify(error="invalid_filter", message=str(exc)), 400
+
     client = cdr1_client.build_client()
     try:
         page = client.patient_events(
             guid, list(decision.caller_org_guids), is_admin=decision.unrestricted,
             cursor=request.args.get("cursor"), limit=limit,
-            codes=[c for c in request.args.getlist("code") if c])
+            codes=codes, frm=frm, to=to, transactions=transactions)
     except Cdr1BadCursor as exc:
         return jsonify(error="invalid_cursor", message=str(exc)), 400
     except Cdr1ProjectionTooOld as exc:
-        # The code is committed in cdr.pdhc; production runs the older
-        # projection until it is deployed. Say exactly that.
+        # The code is committed in cdr.pdhc; an older cdr1 lacks it. Say so.
         return jsonify(error="upstream_projection_too_old", ticket="#983",
+                       message=str(exc)), 503
+    except Cdr1FilterUnsupported as exc:
+        # Never an unfiltered page dressed as a filtered one.
+        return jsonify(error="upstream_filter_unsupported",
                        message=str(exc)), 503
     except Cdr1NotConfigured as exc:
         return jsonify(error="cdr1_not_configured", message=str(exc)), 503

@@ -63,6 +63,22 @@
     <h2 id="events-heading">Händelser</h2>
     <div class="dash-status" data-role="status" role="status">Hämtar händelser…</div>
     <div data-role="body" hidden>
+      <form class="ev-filters" data-role="ev-filters" role="search" aria-label="Filtrera händelser">
+        <label>Sök begrepp
+          <input type="search" name="q" list="ev-concepts" autocomplete="off" placeholder="t.ex. glukos">
+        </label>
+        <datalist id="ev-concepts" data-role="ev-concepts"></datalist>
+        <label>Begrepp
+          <select name="code" data-role="ev-code"><option value="">Alla</option></select>
+        </label>
+        <label>Från <input type="date" name="from"></label>
+        <label>Till <input type="date" name="to"></label>
+        <label>Plan
+          <select name="plan" data-role="ev-plan"><option value="">Alla</option></select>
+        </label>
+        <button type="reset" class="ev-load">Rensa</button>
+      </form>
+      <div data-role="ev-filter-note" class="dash-note" role="status"></div>
       <div class="ev-toolbar">
         <span data-role="ev-count" class="ev-count"></span>
         <span data-role="ev-link" class="ev-link" role="status"></span>

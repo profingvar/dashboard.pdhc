@@ -335,3 +335,62 @@ def test_the_zoom_plugin_and_hammer_load_before_the_page_script():
 def test_a_tick_shows_the_time_when_not_at_midnight():
     tick = _fn(_js(), "fmtTick")
     assert "t === '00:00' ? day : day + ' ' + t" in tick
+
+
+# --------------------------------------------------------------------------
+# filters (#977 part B) and zoom refinement
+# --------------------------------------------------------------------------
+
+def test_the_filter_bar_has_every_filter():
+    html = _page().get_data(as_text=True)
+    for name in ("q", "code", "from", "to", "plan"):
+        assert f'name="{name}"' in html, name
+    assert 'role="search"' in html
+
+
+def test_filters_live_in_the_URL():
+    js = _js()
+    assert "history.replaceState(" in _fn(js, "writeUrl")
+    assert "new URLSearchParams(window.location.search)" in _fn(js, "readUrl")
+
+
+def test_text_that_matches_nothing_shows_NOTHING_not_everything():
+    apply_ = _fn(_js(), "apply")
+    assert re.search(r"if \(!hits\.length\) \{ noMatch = true; note = 'Inga av patientens begrepp matchar", apply_)
+
+
+def test_text_search_needs_the_concept_list_and_says_so():
+    apply_ = _fn(_js(), "apply")
+    assert "if (!conceptsKnown)" in apply_
+
+
+def test_a_stale_page_cannot_land_in_a_new_filter():
+    js = _js()
+    assert "if (mine !== gen) { return; }" in _fn(js, "loadMore")
+    assert "gen += 1;" in _fn(js, "reload")
+
+
+def test_zoom_refines_to_full_resolution_and_never_claims_all_when_downsampled():
+    refine = _fn(_js(), "refine")
+    assert "if (!chart || !s || !s.downsampledFrom) { return; }" in refine
+    assert "w.downsampledFrom" in refine
+    assert "refineCtl.abort()" in refine
+
+
+def test_an_invalid_URL_filter_is_REFUSED_not_silently_dropped():
+    """Found in the browser: ?from=2026-13-40 — the date input refused the
+    value silently, the URL was rewritten without it, and the whole history
+    was shown as if filtered."""
+    js = _js()
+    read = _fn(js, "readUrl")
+    assert "if (form.elements[k].value !== q.get(k)) { rejected.push(" in read
+    apply_ = _fn(js, "apply")
+    assert apply_.index("if (rejected.length)") < apply_.index("writeUrl();")
+    assert "events.reload('', true, true);" in apply_
+
+
+def test_the_no_match_note_is_not_overwritten_afterwards():
+    """Found in the browser: a later line reset the note to '' on no hits."""
+    apply_ = _fn(_js(), "apply")
+    assert ": '';" not in apply_
+    assert "if (hits.length) { note = 'Söker i '" in apply_

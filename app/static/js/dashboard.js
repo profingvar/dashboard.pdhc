@@ -30,6 +30,8 @@
   // What one panel learned that another draws: the card's diagnoses (ICD-11
   // onset/abatement markers) and the plan data (T0, done markers).
   var shared = { diagnoses: [], planData: null };
+  var planResolve;
+  var planReady = new Promise(function (r) { planResolve = r; });
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -448,6 +450,7 @@
     var current = p.body.querySelector('[data-role="plan-current"]');
     getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/plan').then(function (data) {
       shared.planData = data;
+      planResolve(data);
       var banners = p.body.querySelector('[data-role="plan-banners"]');
       banners.textContent = '';
       if (!data.plansKnown) {
@@ -487,7 +490,7 @@
       p.status.hidden = true;
       p.body.hidden = false;
       p.node.setAttribute('aria-busy', 'false');
-    }).catch(function (err) { showError(p, err); });
+    }).catch(function (err) { planResolve(null); showError(p, err); });
   }
 
   /* ---- plan item -> event list link ---------------------------------------
@@ -540,6 +543,7 @@
   var events = (function () {
     var p, list, spacer, detail, countEl, linkEl;
     var rows = [], nextCursor = null, loading = false, done = false, failed = null;
+    var filterQS = '', gen = 0, filtered = false;
     var selected = -1, linked = null, hoverTimer = null, previewing = false;
     var controller = null, cache = Object.create(null), selectListeners = [];
     var OVERSCAN = 8, PAGE = 200, PREFETCH_ROWS = 40;
@@ -618,15 +622,17 @@
 
     function updateCount() {
       var t = rows.length + (done ? ' händelser' : '+ händelser laddade');
-      countEl.textContent = t;
+      countEl.textContent = t + (filtered ? ' (filtrerat)' : '');
     }
 
     function loadMore() {
       if (loading || done) { return Promise.resolve(); }
       loading = true;
+      var mine = gen;
       var url = '/dashboard/patients/' + encodeURIComponent(guid) + '/events?limit=' + PAGE +
-        (nextCursor ? '&cursor=' + encodeURIComponent(nextCursor) : '');
+        filterQS + (nextCursor ? '&cursor=' + encodeURIComponent(nextCursor) : '');
       return getJson(url).then(function (data) {
+        if (mine !== gen) { return; }   // a filter change superseded this page
         rows = rows.concat(data.rows || []);
         nextCursor = data.nextCursor || null;
         done = !nextCursor;
@@ -636,6 +642,7 @@
         if (linked) { describeLink(); }
         render();
       }).catch(function (err) {
+        if (mine !== gen) { return; }
         loading = false;
         failed = err;
         if (!rows.length) { showError(p, err); return; }
@@ -879,26 +886,190 @@
           if (keep >= 0) { scrollToRow(keep); }
         });
       }
-      getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/events?limit=' + PAGE)
-        .then(function (data) {
-          rows = data.rows || [];
-          nextCursor = data.nextCursor || null;
-          done = !nextCursor;
-          renderEventBanners(data);
-          p.status.hidden = true;
-          p.body.hidden = false;
-          p.node.setAttribute('aria-busy', 'false');
-          if (!rows.length) {
-            countEl.textContent = 'Inga händelser registrerade i CDR1.';
-          } else {
-            updateCount();
-          }
-          render();
-        }).catch(function (err) { showError(p, err); });
     }
 
-    return { start: start, link: link, selectGuid: selectGuid,
+    /* (Re)load the list under a filter. Everything list-local resets; a
+     * page still in flight for the old filter is discarded by `gen`. An
+     * empty-result filter says so, never "no events registered". */
+    function reload(qs, isFiltered, noMatch) {
+      gen += 1;
+      filterQS = qs || '';
+      filtered = !!isFiltered;
+      rows = []; nextCursor = null; loading = false; done = false; failed = null;
+      selected = -1; previewing = false;
+      list.removeAttribute('aria-activedescendant');
+      list.scrollTop = 0;
+      p.status.hidden = true;
+      p.body.hidden = false;
+      p.node.setAttribute('aria-busy', 'false');
+      if (noMatch) {
+        done = true;
+        countEl.textContent = 'Inga händelser visas — se filtret ovan.';
+        render();
+        return;
+      }
+      countEl.textContent = 'Hämtar…';
+      render();
+      var mine = gen;
+      loadMore().then(function () {
+        if (mine !== gen) { return; }
+        if (!rows.length && done && !failed) {
+          countEl.textContent = filtered ? 'Inga händelser matchar filtret.'
+                                         : 'Inga händelser registrerade i CDR1.';
+        }
+      });
+    }
+
+    return { start: start, link: link, selectGuid: selectGuid, reload: reload,
              onSelect: function (fn) { selectListeners.push(fn); } };
+  })();
+
+  /* ---- filters (#977 part B) ----------------------------------------------
+   * Held in the page URL (replaceState), so a filtered view can be reloaded
+   * or shared. Every filter is applied BY CDR1 over the whole history, not
+   * over the loaded pages:
+   *   - free text matches the patient's concept NAMES and becomes a concept
+   *     filter; text that matches nothing shows nothing, never everything;
+   *   - a plan becomes its transactions (cdr1 must confirm that filter, or
+   *     the server refuses rather than return the unfiltered history);
+   *   - dates are Stockholm calendar days, validated by the server.
+   */
+  var filters = (function () {
+    var form, concepts = [], conceptsKnown = false, timer = null, rejected = [];
+
+    function readUrl() {
+      var q = new URLSearchParams(window.location.search);
+      ['q', 'code', 'from', 'to'].forEach(function (k) {
+        if (!q.get(k) || !form.elements[k]) { return; }
+        form.elements[k].value = q.get(k);
+        // A date input REFUSES an invalid value silently (it becomes ''),
+        // which would drop the filter and show the whole history as if
+        // filtered — the very defect the server guards against. Record it.
+        if (form.elements[k].value !== q.get(k)) { rejected.push(k + '=' + q.get(k)); }
+      });
+      return q;
+    }
+
+    function writeUrl() {
+      var q = new URLSearchParams();
+      ['q', 'code', 'from', 'to', 'plan'].forEach(function (k) {
+        var v = form.elements[k].value;
+        if (v) { q.set(k, v); }
+      });
+      var qs = q.toString();
+      try {
+        history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+      } catch (e) { /* a sandboxed frame may refuse; the filter still applies */ }
+    }
+
+    function planTransactions(planKey) {
+      var data = shared.planData || {};
+      if (planKey === 'unordered') {
+        return (data.unordered || []).map(function (u) { return u.transactionGuid; });
+      }
+      var plan = (data.plans || []).filter(function (pl) {
+        return (pl.serviceRequestGuid || pl.carePlanGuid) === planKey;
+      })[0];
+      return plan ? (plan.items || []).map(function (i) { return i.transactionGuid; }).filter(Boolean) : [];
+    }
+
+    function apply() {
+      if (rejected.length) {
+        // Leave the URL as typed so the reader can see what was refused.
+        form.parentNode.querySelector('[data-role="ev-filter-note"]').textContent =
+          'Ogiltigt filter i adressen (' + rejected.join(', ') + '). Rätta det eller tryck Rensa.';
+        events.reload('', true, true);
+        return;
+      }
+      writeUrl();
+      var el_ = form.elements, parts = [], note = '', noMatch = false;
+      var code = el_.code.value, text = el_.q.value.trim().toLowerCase();
+      if (code) {
+        parts.push('code=' + encodeURIComponent(code));
+      } else if (text) {
+        if (!conceptsKnown) {
+          note = 'Begreppslistan kunde inte läsas — fritextsökning är inte möjlig just nu.';
+          noMatch = true;
+        } else {
+          var hits = concepts.filter(function (c) {
+            return (c.displayName || '').toLowerCase().indexOf(text) !== -1 ||
+                   (c.code || '').toLowerCase().indexOf(text) !== -1;
+          });
+          if (!hits.length) { noMatch = true; note = 'Inga av patientens begrepp matchar ”' + el_.q.value.trim() + '”.'; }
+          hits.forEach(function (c) { parts.push('code=' + encodeURIComponent(c.code)); });
+          if (hits.length) { note = 'Söker i ' + hits.length + ' begrepp.'; }
+        }
+      }
+      if (el_.from.value) { parts.push('from=' + encodeURIComponent(el_.from.value)); }
+      if (el_.to.value) { parts.push('to=' + encodeURIComponent(el_.to.value)); }
+      if (el_.plan.value) {
+        var txs = planTransactions(el_.plan.value);
+        if (!txs.length) { noMatch = true; note = 'Planen har inga transaktioner att filtrera på.'; }
+        txs.forEach(function (t) { parts.push('transaction=' + encodeURIComponent(t)); });
+      }
+      form.parentNode.querySelector('[data-role="ev-filter-note"]').textContent = note;
+      events.reload(parts.length ? '&' + parts.join('&') : '', parts.length > 0 || noMatch, noMatch);
+    }
+
+    function fillConcepts() {
+      var dl = form.parentNode.querySelector('[data-role="ev-concepts"]');
+      var sel = form.querySelector('[data-role="ev-code"]');
+      var keep = sel.value;
+      concepts.forEach(function (c) {
+        dl.appendChild(el('option', null, c.displayName));
+        var o = el('option', null, c.displayName + ' (' + c.count + ')');
+        o.value = c.code;
+        sel.appendChild(o);
+      });
+      sel.value = keep;
+    }
+
+    function fillPlans(data) {
+      var sel = form.querySelector('[data-role="ev-plan"]');
+      var keep = sel.value;
+      ((data || {}).plans || []).forEach(function (pl) {
+        var key = pl.serviceRequestGuid || pl.carePlanGuid;
+        if (!key) { return; }
+        var o = el('option', null, (pl.planDefinitionName || 'Plan') +
+          (pl.orderedAt ? ' — ' + String(pl.orderedAt).slice(0, 10) : ''));
+        o.value = key;
+        sel.appendChild(o);
+      });
+      if (((data || {}).unordered || []).length) {
+        var u = el('option', null, 'Mätningar utan beställning');
+        u.value = 'unordered';
+        sel.appendChild(u);
+      }
+      sel.value = keep;
+    }
+
+    function start() {
+      form = document.querySelector('[data-role="ev-filters"]');
+      var url = readUrl();
+      var conceptsLoaded = getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/concepts')
+        .then(function (d) { concepts = d.concepts || []; conceptsKnown = true; fillConcepts(); })
+        .catch(function () { conceptsKnown = false; });
+      var plansLoaded = planReady.then(fillPlans);
+      // Apply the URL's filter only once what it refers to is known; a
+      // plain visit loads at once.
+      var waits = [];
+      if (url.get('q') || url.get('code')) { waits.push(conceptsLoaded); }
+      if (url.get('plan')) { waits.push(plansLoaded); }
+      Promise.all(waits).then(apply);
+
+      form.addEventListener('submit', function (ev) { ev.preventDefault(); apply(); });
+      form.addEventListener('change', function (ev) {
+        rejected = [];
+        if (ev.target.name !== 'q') { apply(); }
+      });
+      form.elements.q.addEventListener('input', function () {
+        clearTimeout(timer);
+        timer = setTimeout(apply, 350);
+      });
+      form.addEventListener('reset', function () { rejected = []; setTimeout(apply, 0); });
+    }
+
+    return { start: start };
   })();
 
   /* ---- series panel (#978) -------------------------------------------------
@@ -918,6 +1089,7 @@
   var series = (function () {
     var p, canvas, chart = null, current = null, selectedGuid = null;
     var unitIdx = 0, rangeDays = 'all', controller = null;
+    var refineTimer = null, refineCtl = null, refined = false;
     var DAY = 86400000;
 
     function token(name, fallback) {
@@ -1091,6 +1263,8 @@
       chart.options.scales.x.min = rangeDays === 'all' ? undefined : min;
       chart.options.scales.x.max = rangeDays === 'all' ? undefined : max;
       chart.update('none');
+      if (rangeDays === 'all' && refined) { refined = false; draw(); return; }
+      if (rangeDays !== 'all') { refine(); }
       Array.prototype.forEach.call(p.body.querySelectorAll('.ser-range .ser-btn'), function (b) {
         b.setAttribute('aria-pressed', b.getAttribute('data-days') === String(rangeDays) ? 'true' : 'false');
       });
@@ -1172,8 +1346,9 @@
               fill: 'rgba(22, 163, 74, 0.10)', line: muted, text: text, markers: markers() },
             zoom: {
               zoom: { wheel: { enabled: true, modifierKey: 'ctrl' }, pinch: { enabled: true }, mode: 'x' },
-              pan: { enabled: true, mode: 'x' },
-              limits: { x: { min: 'original', max: 'original' } }
+              pan: { enabled: true, mode: 'x', onPanComplete: function () { refine(); } },
+              limits: { x: { min: 'original', max: 'original' } },
+              onZoomComplete: function () { refine(); }
             }
           },
           onClick: function (evt, els) {
@@ -1196,6 +1371,43 @@
         'Romb = vald mätning. Triangel = utanför referensintervall. Streckade linjer = plan- och diagnoshändelser. ' +
         'Zooma: nyp (touch) eller ctrl+hjul. Panorera: dra i sidled.';
       applyRange();
+    }
+
+    /* FULL RESOLUTION WHEN ZOOMED IN (plan step 20). The overview is LTTB-
+     * downsampled server-side; once the visible window is narrower, ask for
+     * just that window. If it still exceeds the target it comes back
+     * downsampled too, and the note says so — never a claim of "all". */
+    function refine() {
+      var s = current && current.data.series[unitIdx];
+      if (!chart || !s || !s.downsampledFrom) { return; }
+      clearTimeout(refineTimer);
+      refineTimer = setTimeout(function () {
+        var x = chart.scales.x;
+        var frm = new Date(x.min).toISOString(), to = new Date(x.max).toISOString();
+        if (refineCtl) { refineCtl.abort(); }
+        refineCtl = typeof AbortController === 'function' ? new AbortController() : null;
+        fetch('/dashboard/patients/' + encodeURIComponent(guid) + '/series/' + codePath(current.code) +
+              '?from=' + encodeURIComponent(frm) + '&to=' + encodeURIComponent(to), {
+          credentials: 'same-origin', headers: { 'Accept': 'application/json' },
+          signal: refineCtl ? refineCtl.signal : undefined
+        }).then(function (res) { return res.ok ? res.json() : null; }).then(function (data) {
+          if (!data || !chart) { return; }
+          var w = (data.series || []).filter(function (q) { return q.unit === s.unit; })[0];
+          if (!w) { return; }
+          chart.data.datasets[0].data = withGaps(w.points.map(function (q) {
+            return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
+                     lo: q.referenceLow, hi: q.referenceHigh };
+          }));
+          chart.update('none');
+          refined = true;
+          var host = p.body.querySelector('[data-role="ser-notes"]');
+          var first = host.firstChild;
+          var text = w.downsampledFrom
+            ? 'Intervallet: visar ' + w.points.length + ' av ' + w.downsampledFrom + ' punkter (LTTB).'
+            : 'Intervallet: alla ' + w.points.length + ' punkter (full upplösning).';
+          if (first && /^Visar |^Intervallet: /.test(first.textContent)) { first.textContent = text; }
+        }).catch(function () { /* the overview stays; nothing is claimed */ });
+      }, 300);
     }
 
     function load(row) {
@@ -1254,4 +1466,5 @@
   loadPlan();
   events.start();
   series.start();
+  filters.start();
 })();

@@ -80,6 +80,12 @@ EVENTS_REQUIRED_POINT_FIELDS = ("observation_guid", "transaction_guid",
 EVENTS_REQUIRED_BODY_FIELDS = ("truncated", "next_cursor")
 
 
+
+class Cdr1FilterUnsupported(Cdr1EventsError):
+    """cdr1 did not confirm a filter it was asked to apply (the transaction
+    filter): an older cdr1 IGNORES the parameter and answers with the
+    unfiltered history, which must never be shown as the filtered one."""
+
 class Cdr1Client:
     def __init__(
         self,
@@ -169,6 +175,29 @@ class Cdr1Client:
         params = body.get("parameters")
         return params if isinstance(params, list) else []
 
+    def patient_concepts(
+        self, patient_guid: str, org_guids: list[str], *, is_admin: bool = False,
+        reason: str | None = None,
+    ) -> list[dict]:
+        """`patient_summary`, STRICT: raises by name instead of returning [].
+
+        The filter bar's concept list. An empty list from the lenient method
+        means "none" OR "cdr1 did not answer", and a filter offering no
+        concepts because of an outage would read as "this patient has no
+        data".
+        """
+        if not self.base_url:
+            raise Cdr1NotConfigured("CDR1_BASE_URL is not set")
+        if not is_admin and not org_guids:
+            return []
+        body = self._get_json_strict(
+            f"/api/v1/clinical/patient/{patient_guid}/summary",
+            org_guids, is_admin, reason=reason)
+        params = body.get("parameters")
+        if not isinstance(params, list):
+            raise Cdr1Unreachable("cdr1 summary carried no parameters list")
+        return params
+
     def patient_series(
         self, patient_guid: str, codes: list[str] | None,
         frm: str | None, to: str | None,
@@ -205,6 +234,8 @@ class Cdr1Client:
         self, patient_guid: str, org_guids: list[str], *,
         is_admin: bool = False, cursor: str | None = None, limit: int = 100,
         codes: list[str] | None = None, reason: str | None = None,
+        frm: str | None = None, to: str | None = None,
+        transactions: list[str] | None = None,
     ) -> dict:
         """One page of a patient's observations, NEWEST FIRST (#983).
 
@@ -233,10 +264,28 @@ class Cdr1Client:
             params.append(("cursor", cursor))
         for c in (codes or []):
             params.append(("code", c))
+        # `from`/`to` are VALIDATED by the caller: cdr1 parses them leniently
+        # and IGNORES a value it cannot parse, so a typo would silently drop
+        # the filter and return the unfiltered history as if filtered.
+        if frm:
+            params.append(("from", frm))
+        if to:
+            params.append(("to", to))
+        for t in (transactions or []):
+            params.append(("transaction", t))
 
         body = self._get_json_strict(
             f"/api/v1/clinical/patient/{patient_guid}/series",
             org_guids, is_admin, params=params, reason=reason)
+
+        # A cdr1 that predates the transaction filter IGNORES the parameter
+        # and answers with every observation. That must not reach a clinician
+        # as "this plan's observations", so the filter is only trusted when
+        # cdr1 says it applied it.
+        if transactions and body.get("transaction_filter") is not True:
+            raise Cdr1FilterUnsupported(
+                "cdr1 did not confirm the transaction filter; it predates it "
+                "and would return the unfiltered history")
 
         missing_body = [k for k in EVENTS_REQUIRED_BODY_FIELDS if k not in body]
         points = body.get("points")

@@ -805,3 +805,13 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_routes.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_series.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py
+
+## 2026-11-12 — #977 part B: filters in the URL, zoom refinement
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/cdr1_client.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_filters.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_routes.py
