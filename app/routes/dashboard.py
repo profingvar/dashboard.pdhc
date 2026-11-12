@@ -381,32 +381,107 @@ def patient_plan(guid: str):
     })
 
 
+#: The series panel's scan bound: 20 pages x 500 = 10 000 points, enough for
+#: 14 days of 5-minute CGM (4 032) twice over. Past it the panel is told the
+#: series is INCOMPLETE rather than shown a shorter one as if whole.
+_SERIES_SCAN_PAGE = 500
+_SERIES_SCAN_MAX_PAGES = 20
+#: Above this many points the series is LTTB-downsampled SERVER-SIDE and the
+#: response says "showing N of M" (plan step 20).
+_SERIES_TARGET = 2000
+
+
+def lttb_indices(xs: list[float], ys: list[float], target: int) -> list[int]:
+    """Largest-triangle-three-buckets, returning INDICES, not values.
+
+    `app.analyse.federation.lttb_downsample` returns (x, y) tuples, which
+    loses each point's identity: two points with the same time and value
+    cannot be told apart, so the selected observation could not be
+    highlighted after downsampling. Same algorithm, keyed on position.
+    First and last points are always kept.
+    """
+    n = len(xs)
+    if target >= n or target < 3:
+        return list(range(n))
+    out = [0]
+    every = (n - 2) / (target - 2)
+    a = 0
+    for i in range(target - 2):
+        lo = int((i + 1) * every) + 1
+        hi = min(int((i + 2) * every) + 1, n)
+        avg_x = sum(xs[lo:hi]) / max(1, hi - lo)
+        avg_y = sum(ys[lo:hi]) / max(1, hi - lo)
+        r_lo = int(i * every) + 1
+        r_hi = int((i + 1) * every) + 1
+        best, best_area = r_lo, -1.0
+        for j in range(r_lo, r_hi):
+            area = abs((xs[a] - avg_x) * (ys[j] - ys[a])
+                       - (xs[a] - xs[j]) * (avg_y - ys[a]))
+            if area > best_area:
+                best, best_area = j, area
+        out.append(best)
+        a = best
+    out.append(n - 1)
+    return out
+
+
+def _epoch(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 @bp.get("/patients/<guid>/series/<path:code_canonical>")
 @dashboard_patient_read(org_lookup=_org_lookup)
 def patient_series(guid: str, code_canonical: str):
-    """Points for one concept, grouped by convertible unit.
+    """Points for one concept, grouped by convertible unit (#978).
 
-    This endpoint works on what CDR1 gives today: `{code, at, value, unit}` is
-    enough to draw a chart. What it cannot carry is the per-point provenance,
-    because the identity fields are not projected (#983) -- so
-    `SeriesPoint.observation_guid` is empty here and the UI must not offer a
-    "open this datapoint" affordance from a series until that lands.
+    Read through the STRICT cursor endpoint (#983), not the legacy series
+    proxy, for two reasons: every point carries its own `observation_guid`
+    and `transaction_guid` (so the selected row can be highlighted and a
+    point can open its provenance), and a failure is named instead of
+    arriving as an empty list — "no points" and "cdr1 did not answer" are
+    different statements.
 
     A concept may come back as SEVERAL series: units that are not convertible
     SPLIT rather than being plotted on one axis. HbA1c in % and mmol/mol is
     the exception that joins, through a named affine function -- the ratio
     between those two units is real and clinically wrong by ~32 %.
-    """
-    client = cdr1_client.build_client()
-    from flask import g
-    decision = getattr(g, "access_decision", None)
-    orgs = list(decision.caller_org_guids) if decision else []
-    is_admin = bool(decision and decision.unrestricted)
 
-    points = client.patient_series(
-        guid, [code_canonical], request.args.get("from"),
-        request.args.get("to"), orgs, is_admin=is_admin,
-    )
+    `?format=csv` returns the same series as CSV. It is the same audited read
+    (the decorator logs it), not a side door.
+    """
+    from flask import g
+    from app.services.cdr1_client import (
+        Cdr1BadCursor, Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+    decision = g.access_decision
+    client = cdr1_client.build_client()
+
+    points: list = []
+    complete = True
+    cursor = None
+    try:
+        for _ in range(_SERIES_SCAN_MAX_PAGES):
+            page = client.patient_events(
+                guid, list(decision.caller_org_guids),
+                is_admin=decision.unrestricted, cursor=cursor,
+                limit=_SERIES_SCAN_PAGE, codes=[code_canonical])
+            points.extend(page["points"])
+            cursor = page["next_cursor"]
+            if not cursor:
+                break
+        else:
+            complete = cursor is None
+    except Cdr1ProjectionTooOld as exc:
+        return jsonify(error="upstream_projection_too_old", ticket="#983",
+                       message=str(exc)), 503
+    except Cdr1NotConfigured as exc:
+        return jsonify(error="cdr1_not_configured", message=str(exc)), 503
+    except (Cdr1Unreachable, Cdr1BadCursor) as exc:
+        return jsonify(error="cdr1_unreachable", message=str(exc)), 503
 
     sparr = sparr_state(guid)
     exposures: list = []
@@ -420,31 +495,95 @@ def patient_series(guid: str, code_canonical: str):
         points, exposures = ips_client.filter_blocked_points(
             points, sparr.blocks)
 
-    rows = [{"observation_guid": "", "code_canonical": p.get("code"),
+    # Numeric points only: a chart cannot place a value_string.
+    rows = [{"observation_guid": p.get("observation_guid") or "",
+             "code_canonical": p.get("code") or code_canonical,
              "unit": p.get("unit"), "value": p.get("value"),
-             "effective_at": p.get("at")} for p in points]
+             "effective_at": p.get("at"),
+             "transaction_guid": p.get("transaction_guid")}
+            for p in points
+            if isinstance(p.get("value"), (int, float)) and p.get("at")]
+    non_numeric = len(points) - len(rows)
     groups = units.group_series(rows)
 
-    series = [g_.to_series(display_name=code_canonical) for g_ in groups]
+    unavailable: list[str] = []
+    display = code_canonical
+    concept = ips_client.concept_guid_from_canonical(code_canonical)
+    if concept:
+        try:
+            from app.services import plan_client
+            display = plan_client.concept_display_names([concept]).get(
+                concept) or code_canonical
+        except Exception as exc:  # noqa: BLE001 - a name, not the series
+            unavailable.append(f"plan:{type(exc).__name__}")
 
-    from flask import g as _g
-    _g._audit_n_rows = sum(len(s.points) for s in series)
+    series = []
+    for grp in groups:
+        s_ = grp.to_series(display_name=display)
+        pts = list(s_.points)
+        if len(pts) > _SERIES_TARGET:
+            xs = [_epoch(p.effective_at) or 0.0 for p in pts]
+            ys = [float(p.value) for p in pts]
+            keep = lttb_indices(xs, ys, _SERIES_TARGET)
+            s_ = dataclasses.replace(s_, points=tuple(pts[i] for i in keep),
+                                     downsampled_from=len(pts))
+        series.append(s_)
+
+    g._audit_n_rows = sum(len(s.points) for s in series)
     if exposures:
         from app.routes.charts import _lift_exposure_audit
-        snap = dict(getattr(_g, "_audit_payload_snapshot", None) or {})
+        snap = dict(getattr(g, "_audit_payload_snapshot", None) or {})
         snap["sparr_lift"] = _lift_exposure_audit(exposures)
-        _g._audit_payload_snapshot = snap
+        g._audit_payload_snapshot = snap
+
+    if request.args.get("format") == "csv":
+        return _series_csv(code_canonical, series, complete)
 
     return jsonify({
         "series": _wire(series),
+        "displayName": display,
+        "complete": complete,
+        "nonNumericCount": non_numeric,
+        "unavailable": unavailable,
         # THE #827 PAIR, and both halves are required. `hasBlockedSources` is
         # False when there is no block AND when ips was never asked;
         # `sparrChecked` is the only thing that tells those apart. A response
         # carrying the first without the second reinstates the defect.
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,
-        "provenanceAvailable": False,     # #983
+        "provenanceAvailable": True,      # #983 deployed: points carry identity
     })
+
+
+def _series_csv(code_canonical: str, series, complete: bool):
+    """The series as CSV. Every point the JSON carries, one row each.
+
+    A downsampled series exports the DOWNSAMPLED points and says so in a
+    comment line, as an incomplete scan does: a file is read far from the
+    screen that explained it, so it must carry its own caveats.
+    """
+    import csv
+    import io
+    from flask import Response
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    for s_ in series:
+        if s_.downsampled_from:
+            buf.write(f"# {s_.unit or ''}: showing {len(s_.points)} of "
+                      f"{s_.downsampled_from} points (LTTB)\n")
+    if not complete:
+        buf.write("# incomplete: the scan stopped at its bound; older points "
+                  "are missing\n")
+    w.writerow(["code_canonical", "unit", "effective_at", "value",
+                "observation_guid", "transaction_guid"])
+    for s_ in series:
+        for p in s_.points:
+            w.writerow([s_.code_canonical, s_.unit or "", p.effective_at,
+                        p.value, p.observation_guid, p.transaction_guid or ""])
+    safe = "".join(ch if ch.isalnum() else "_" for ch in code_canonical)[-60:]
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="series_{safe}.csv"'})
 
 
 # ---------------------------------------------------------------------------

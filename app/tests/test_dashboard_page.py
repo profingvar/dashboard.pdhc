@@ -208,10 +208,13 @@ def test_the_list_is_a_listbox_with_a_persistent_detail_region():
 
 
 def test_there_is_NO_pin():
+    # As a WORD: "pinch" (zoom) and "spinner" are not a pin feature.
+    pin = re.compile(r"\bpin(?:s|ned|ning)?\b|\bunpin")
     js = _js().lower()
     html = _page().get_data(as_text=True).lower()
-    assert "pin" not in re.sub(r"spinner|pinned_at", "", js)
-    assert "pin" not in re.sub(r"spinner", "", html)
+    assert not pin.search(js)
+    assert not pin.search(html)
+    assert pin.search("const pinned = 1")      # the matcher can see one
 
 
 def test_arrow_keys_drive_the_SAME_path_as_a_click():
@@ -279,3 +282,56 @@ def test_a_lower_bound_is_never_printed_as_a_total():
     """Found by benchmark: "Markerar 2500 av 1250"."""
     link = _fn(_js(), "describeLink")
     assert "linked.complete ? ' av ' + total" in link
+
+
+# --------------------------------------------------------------------------
+# the series panel (#978)
+# --------------------------------------------------------------------------
+
+def test_the_chart_is_driven_by_SELECTION_not_hover():
+    js = _js()
+    assert "events.onSelect(show)" in js
+    show = _fn(js, "show")
+    assert "mouse" not in show
+
+
+def test_a_gap_over_3x_the_median_BREAKS_the_line():
+    gaps = _fn(_js(), "withGaps")
+    assert "3 * median" in gaps
+    assert "y: null" in gaps
+    assert "spanGaps: false" in _js()
+
+
+def test_a_vertical_drag_still_scrolls_the_page():
+    """A chart that swallows vertical scroll makes the page unusable on touch."""
+    js = _js()
+    assert "canvas.style.touchAction = 'pan-y'" in js
+    # set AFTER the chart (and hammer) attach, or hammer overrides it
+    draw = _fn(js, "draw")
+    assert draw.index("chart = new Chart(") < draw.index("canvas.style.touchAction = 'pan-y'")
+
+
+def test_the_mouse_wheel_does_not_hijack_page_scroll():
+    assert "wheel: { enabled: true, modifierKey: 'ctrl' }" in _js()
+
+
+def test_colour_is_never_the_only_signal():
+    draw = _fn(_js(), "draw")
+    assert "'rectRot'" in draw and "'triangle'" in draw   # selected / out of range
+    marks = _fn(_js(), "markers")
+    dashes = set(re.findall(r"dash: (\[[^\]]*\])", marks))
+    assert len(dashes) >= 3, dashes                         # each kind its own dash
+    assert "label:" in marks
+
+
+def test_the_zoom_plugin_and_hammer_load_before_the_page_script():
+    html = _page().get_data(as_text=True)
+    h, z, d = (html.index(x) for x in ("vendor/hammer.min.js",
+                                         "vendor/chartjs-plugin-zoom.umd.min.js",
+                                         "js/dashboard.js"))
+    assert h < z < d
+
+
+def test_a_tick_shows_the_time_when_not_at_midnight():
+    tick = _fn(_js(), "fmtTick")
+    assert "t === '00:00' ? day : day + ' ' + t" in tick

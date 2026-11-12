@@ -27,6 +27,10 @@
 
   var DASH = '—';
 
+  // What one panel learned that another draws: the card's diagnoses (ICD-11
+  // onset/abatement markers) and the plan data (T0, done markers).
+  var shared = { diagnoses: [], planData: null };
+
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) { n.className = cls; }
@@ -296,6 +300,7 @@
     wireEps(p.body);
     getJson('/dashboard/patients/' + encodeURIComponent(guid)).then(function (data) {
       var card = data.patientCard || {};
+      shared.diagnoses = card.diagnoses || [];
       setField(p.body, 'name', card.name);
       var age = ageFrom(card.birthDate);
       setField(p.body, 'age', age === null ? null : age + ' år');
@@ -442,6 +447,7 @@
     var picker = p.body.querySelector('[data-role="plan-picker"]');
     var current = p.body.querySelector('[data-role="plan-current"]');
     getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/plan').then(function (data) {
+      shared.planData = data;
       var banners = p.body.querySelector('[data-role="plan-banners"]');
       banners.textContent = '';
       if (!data.plansKnown) {
@@ -535,7 +541,7 @@
     var p, list, spacer, detail, countEl, linkEl;
     var rows = [], nextCursor = null, loading = false, done = false, failed = null;
     var selected = -1, linked = null, hoverTimer = null, previewing = false;
-    var controller = null, cache = Object.create(null);
+    var controller = null, cache = Object.create(null), selectListeners = [];
     var OVERSCAN = 8, PAGE = 200, PREFETCH_ROWS = 40;
 
     function rowH() { return cap.rowHeight ? cap.rowHeight() : 44; }
@@ -668,6 +674,16 @@
       scrollToRow(i);
       render();
       if (fetchNow) { showDetail(rows[i], false); }
+      selectListeners.forEach(function (fn) { fn(rows[i]); });
+    }
+
+    /* The chart selects a row by its observation guid. False when that row
+     * is not loaded yet (the list is paged). */
+    function selectGuid(g) {
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].observationGuid === g) { select(i, true); return true; }
+      }
+      return false;
     }
 
     function preview(i) {
@@ -881,10 +897,361 @@
         }).catch(function (err) { showError(p, err); });
     }
 
-    return { start: start, link: link };
+    return { start: start, link: link, selectGuid: selectGuid,
+             onSelect: function (fn) { selectListeners.push(fn); } };
+  })();
+
+  /* ---- series panel (#978) -------------------------------------------------
+   * Driven by the SELECTED row, never by hover: the chart has a stable subject
+   * and does not change under the pointer while it is being read.
+   *
+   *  - continuous time axis; a gap longer than 3x the median interval BREAKS
+   *    the line rather than being bridged;
+   *  - out-of-range values get a TRIANGLE, the selected point a DIAMOND —
+   *    shape and label, never colour alone;
+   *  - vertical markers: T0 (plan start), done plan items, ICD-11 onset and
+   *    abatement — each a different dash AND a text label;
+   *  - zoom/pan via chartjs-plugin-zoom (vendored, with hammer.js): pinch and
+   *    horizontal pan on touch, ctrl+wheel and drag with a mouse. The canvas
+   *    gets `touch-action: pan-y`, so a vertical drag still scrolls the page.
+   */
+  var series = (function () {
+    var p, canvas, chart = null, current = null, selectedGuid = null;
+    var unitIdx = 0, rangeDays = 'all', controller = null;
+    var DAY = 86400000;
+
+    function token(name, fallback) {
+      var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    }
+
+    function codePath(code) {
+      // Keep '/' literal: the route takes <path:...>, and an encoded %2F is
+      // something a reverse proxy may normalise or refuse.
+      return String(code).split('/').map(encodeURIComponent).join('/');
+    }
+
+    function fmtDay(ms) {
+      try {
+        return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Stockholm', dateStyle: 'short' })
+          .format(new Date(ms));
+      } catch (e) { return new Date(ms).toISOString().slice(0, 10); }
+    }
+
+    /* An axis tick: the day, plus the time when the tick is not at local
+     * midnight — otherwise two ticks on one day print the same label. */
+    var TICK_TIME = (function () {
+      try { return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit' }); }
+      catch (e) { return null; }
+    })();
+    function fmtTick(ms) {
+      var day = fmtDay(ms);
+      var t = TICK_TIME ? TICK_TIME.format(new Date(ms)) : '00:00';
+      return t === '00:00' ? day : day + ' ' + t;
+    }
+
+    function num(v) {
+      return Math.abs(v) >= 100 ? String(Math.round(v * 10) / 10) : String(Math.round(v * 100) / 100);
+    }
+
+    /* Insert a null between two points further apart than 3x the median
+     * interval, so the line breaks there instead of implying continuity. */
+    function withGaps(pts) {
+      if (pts.length < 3) { return pts.slice(); }
+      var gaps = [];
+      for (var i = 1; i < pts.length; i++) { gaps.push(pts[i].x - pts[i - 1].x); }
+      var sorted = gaps.slice().sort(function (a, b) { return a - b; });
+      var median = sorted[Math.floor(sorted.length / 2)];
+      var out = [pts[0]];
+      for (var j = 1; j < pts.length; j++) {
+        if (median > 0 && pts[j].x - pts[j - 1].x > 3 * median) {
+          out.push({ x: (pts[j].x + pts[j - 1].x) / 2, y: null, gap: true });
+        }
+        out.push(pts[j]);
+      }
+      return out;
+    }
+
+    function outOfRange(pt) {
+      return (pt.lo !== null && pt.lo !== undefined && pt.y < pt.lo) ||
+             (pt.hi !== null && pt.hi !== undefined && pt.y > pt.hi);
+    }
+
+    function markers() {
+      var out = [];
+      ((shared.planData || {}).plans || []).forEach(function (pl) {
+        if (pl.periodStart) { out.push({ x: Date.parse(pl.periodStart), label: 'T0 ' + (pl.planDefinitionName || ''), dash: [], kind: 't0' }); }
+        (pl.items || []).forEach(function (it) {
+          if (it.state === 'done' && it.performedAt) {
+            out.push({ x: Date.parse(it.performedAt), label: 'Klar: ' + it.title, dash: [2, 3], kind: 'done' });
+          }
+        });
+      });
+      (shared.diagnoses || []).forEach(function (d) {
+        if (d.onset) { out.push({ x: Date.parse(d.onset), label: d.code + ' debut', dash: [6, 4], kind: 'dx' }); }
+        if (d.abatement) { out.push({ x: Date.parse(d.abatement), label: d.code + ' avslutad', dash: [10, 3, 2, 3], kind: 'dx' }); }
+      });
+      return out.filter(function (m) { return !isNaN(m.x); });
+    }
+
+    function t0() {
+      var starts = ((shared.planData || {}).plans || []).map(function (pl) { return pl.periodStart; }).filter(Boolean);
+      return starts.length === 1 ? Date.parse(starts[0]) : null;
+    }
+
+    var markerPlugin = {
+      id: 'pdhcMarkers',
+      afterDatasetsDraw: function (c) {
+        var x = c.scales.x, area = c.chartArea, ctx = c.ctx;
+        if (!x || !area) { return; }
+        var band = c.options.plugins.pdhcMarkers || {};
+        ctx.save();
+        if (band.lo !== null && band.lo !== undefined && band.hi !== null && band.hi !== undefined) {
+          var y = c.scales.y, top = y.getPixelForValue(band.hi), bottom = y.getPixelForValue(band.lo);
+          ctx.fillStyle = band.fill;
+          ctx.fillRect(area.left, Math.max(area.top, top), area.right - area.left,
+            Math.min(area.bottom, bottom) - Math.max(area.top, top));
+        }
+        ctx.font = '11px system-ui, sans-serif';
+        ctx.fillStyle = band.text;
+        ctx.strokeStyle = band.line;
+        (band.markers || []).forEach(function (m, i) {
+          var px = x.getPixelForValue(m.x);
+          if (px < area.left || px > area.right) { return; }
+          ctx.setLineDash(m.dash);
+          ctx.beginPath(); ctx.moveTo(px, area.top); ctx.lineTo(px, area.bottom); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillText(m.label, Math.min(px + 3, area.right - ctx.measureText(m.label).width),
+            area.top + 12 + (i % 3) * 12);
+        });
+        ctx.restore();
+      }
+    };
+
+    function stats(s) {
+      var pts = s.points || [];
+      var host = p.body.querySelector('[data-role="ser-stats"]');
+      host.textContent = '';
+      if (!pts.length) { return; }
+      var vals = pts.map(function (q) { return q.value; });
+      var pairs = [
+        ['Punkter', s.downsampledFrom ? pts.length + ' av ' + s.downsampledFrom : String(pts.length)],
+        ['Första', fmtDay(Date.parse(pts[0].effectiveAt))],
+        ['Senaste', fmtDay(Date.parse(pts[pts.length - 1].effectiveAt))],
+        ['Min', num(Math.min.apply(null, vals))],
+        ['Max', num(Math.max.apply(null, vals))],
+        ['Senaste värde', num(vals[vals.length - 1]) + (s.unit ? ' ' + s.unit : '')]
+      ];
+      if (s.downsampledFrom) { pairs[3][0] = 'Min (visade)'; pairs[4][0] = 'Max (visade)'; }
+      pairs.forEach(function (pr) {
+        var d = el('div');
+        d.appendChild(el('dt', null, pr[0]));
+        d.appendChild(el('dd', null, pr[1]));
+        host.appendChild(d);
+      });
+    }
+
+    function notes(data, s) {
+      var host = p.body.querySelector('[data-role="ser-notes"]');
+      host.textContent = '';
+      if (s && s.downsampledFrom) {
+        banner(host, 'Visar ' + s.points.length + ' av ' + s.downsampledFrom +
+          ' punkter (LTTB, toppar och dalar bevaras).');
+      }
+      if (!data.complete) { banner(host, 'Ofullständig serie: äldre punkter saknas (genomsökningen nådde sin gräns).'); }
+      if (data.nonNumericCount) { banner(host, data.nonNumericCount + ' mätvärden är inte numeriska och ritas inte.'); }
+      if (data.sparrChecked === false) { banner(host, 'Spärr kunde inte kontrolleras.', true); }
+      else if (data.hasBlockedSources) { banner(host, 'Spärrade mätvärden visas inte.', true); }
+      if (data.series.length > 1) {
+        banner(host, 'Begreppet finns i ' + data.series.length + ' enheter som inte går att räkna om — en serie per enhet.');
+      }
+      if (t0() === null) { banner(host, 'Ingen planstart (T0) registrerad — ingen T+-axel.'); }
+    }
+
+    function units(data) {
+      var host = p.body.querySelector('[data-role="ser-units"]');
+      host.textContent = '';
+      if (data.series.length < 2) { return; }
+      data.series.forEach(function (s, i) {
+        var b = el('button', 'dash-toggle ser-btn', (s.unit || 'utan enhet') + ' (' + (s.downsampledFrom || s.points.length) + ')');
+        b.type = 'button';
+        b.setAttribute('aria-pressed', i === unitIdx ? 'true' : 'false');
+        b.addEventListener('click', function () { unitIdx = i; draw(); });
+        host.appendChild(b);
+      });
+    }
+
+    function applyRange() {
+      if (!chart) { return; }
+      var xs = chart.data.datasets[0].data.map(function (q) { return q.x; });
+      if (!xs.length) { return; }
+      var max = xs[xs.length - 1];
+      var min = rangeDays === 'all' ? xs[0] : max - Number(rangeDays) * DAY;
+      if (chart.resetZoom) { chart.resetZoom('none'); }
+      chart.options.scales.x.min = rangeDays === 'all' ? undefined : min;
+      chart.options.scales.x.max = rangeDays === 'all' ? undefined : max;
+      chart.update('none');
+      Array.prototype.forEach.call(p.body.querySelectorAll('.ser-range .ser-btn'), function (b) {
+        b.setAttribute('aria-pressed', b.getAttribute('data-days') === String(rangeDays) ? 'true' : 'false');
+      });
+    }
+
+    function draw() {
+      var data = current.data, s = data.series[unitIdx];
+      p.body.querySelector('[data-role="ser-name"]').textContent = data.displayName || current.code;
+      p.body.querySelector('[data-role="ser-code"]').textContent = current.code + (s && s.unit ? ' · ' + s.unit : '');
+      p.body.querySelector('[data-role="ser-csv"]').href =
+        '/dashboard/patients/' + encodeURIComponent(guid) + '/series/' + codePath(current.code) + '?format=csv';
+      units(data);
+      notes(data, s);
+      if (chart) { chart.destroy(); chart = null; }
+      if (!s || !s.points.length) {
+        p.body.querySelector('[data-role="ser-stats"]').textContent = '';
+        p.body.querySelector('[data-role="ser-legend"]').textContent = 'Inga numeriska punkter för begreppet.';
+        return;
+      }
+      stats(s);
+      var pts = s.points.map(function (q) {
+        return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
+                 lo: q.referenceLow, hi: q.referenceHigh };
+      });
+      var los = pts.map(function (q) { return q.lo; }), his = pts.map(function (q) { return q.hi; });
+      var sameBand = los.every(function (v) { return v === los[0]; }) && his.every(function (v) { return v === his[0]; });
+      var primary = token('--primary', '#2563eb'), danger = token('--danger', '#dc2626');
+      var text = token('--text', '#1e293b'), muted = token('--text-muted', '#64748b');
+      var dense = pts.length > 300;
+      var zero = t0();
+
+      chart = new Chart(canvas, {
+        type: 'line',
+        data: { datasets: [{
+          data: withGaps(pts), parsing: false, spanGaps: false,
+          borderColor: primary, borderWidth: 1.5, tension: 0,
+          pointStyle: function (c) {
+            var q = c.raw || {};
+            if (q.guid && q.guid === selectedGuid) { return 'rectRot'; }
+            return outOfRange(q) ? 'triangle' : 'circle';
+          },
+          pointRadius: function (c) {
+            var q = c.raw || {};
+            if (q.guid && q.guid === selectedGuid) { return 8; }
+            if (outOfRange(q)) { return 5; }
+            return dense ? 0 : 3;
+          },
+          pointHitRadius: 8,
+          pointBackgroundColor: function (c) {
+            var q = c.raw || {};
+            if (q.guid && q.guid === selectedGuid) { return text; }
+            return outOfRange(q) ? danger : primary;
+          }
+        }] },
+        options: {
+          animation: false, maintainAspectRatio: false, normalized: true,
+          interaction: { mode: 'nearest', intersect: true },
+          scales: {
+            x: { type: 'time', time: { tooltipFormat: 'yyyy-MM-dd HH:mm' },
+                 ticks: { color: muted, maxRotation: 0, autoSkip: true,
+                   callback: function (v) {
+                     var day = fmtTick(v);
+                     if (zero === null) { return day; }
+                     var d = Math.round((v - zero) / DAY);
+                     return [day, (d < 0 ? 'T−' : 'T+') + Math.abs(d) + ' d'];
+                   } },
+                 grid: { color: token('--border', '#e2e8f0') } },
+            y: { ticks: { color: muted }, grid: { color: token('--border', '#e2e8f0') },
+                 title: { display: !!s.unit, text: s.unit || '', color: muted } }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: function (c) {
+              var q = c.raw || {};
+              return num(q.y) + (s.unit ? ' ' + s.unit : '') + (outOfRange(q) ? ' (utanför referens)' : '') +
+                (q.guid === selectedGuid ? ' (vald)' : '');
+            } } },
+            pdhcMarkers: { lo: sameBand ? los[0] : null, hi: sameBand ? his[0] : null,
+              fill: 'rgba(22, 163, 74, 0.10)', line: muted, text: text, markers: markers() },
+            zoom: {
+              zoom: { wheel: { enabled: true, modifierKey: 'ctrl' }, pinch: { enabled: true }, mode: 'x' },
+              pan: { enabled: true, mode: 'x' },
+              limits: { x: { min: 'original', max: 'original' } }
+            }
+          },
+          onClick: function (evt, els) {
+            if (!els.length) { return; }
+            var q = chart.data.datasets[0].data[els[0].index];
+            if (q && q.guid && !events.selectGuid(q.guid)) {
+              p.body.querySelector('[data-role="ser-legend"]').textContent =
+                'Punkten ligger längre bak i händelselistan än vad som är laddat.';
+            }
+          }
+        },
+        plugins: [markerPlugin]
+      });
+      // AFTER Chart.js and hammer attach: let a vertical drag scroll the page.
+      canvas.style.touchAction = 'pan-y';
+      canvas.setAttribute('aria-label', (data.displayName || current.code) + ': ' + pts.length +
+        ' punkter från ' + fmtDay(pts[0].x) + ' till ' + fmtDay(pts[pts.length - 1].x) +
+        ', senaste ' + num(pts[pts.length - 1].y) + (s.unit ? ' ' + s.unit : '') + '.');
+      p.body.querySelector('[data-role="ser-legend"]').textContent =
+        'Romb = vald mätning. Triangel = utanför referensintervall. Streckade linjer = plan- och diagnoshändelser. ' +
+        'Zooma: nyp (touch) eller ctrl+hjul. Panorera: dra i sidled.';
+      applyRange();
+    }
+
+    function load(row) {
+      if (controller) { controller.abort(); }
+      controller = typeof AbortController === 'function' ? new AbortController() : null;
+      p.status.hidden = false;
+      p.status.classList.remove('is-error');
+      p.status.textContent = 'Hämtar tidsserie…';
+      fetch('/dashboard/patients/' + encodeURIComponent(guid) + '/series/' + codePath(row.codeCanonical), {
+        credentials: 'same-origin', headers: { 'Accept': 'application/json' },
+        signal: controller ? controller.signal : undefined
+      }).then(function (res) {
+        return res.json().then(function (body) {
+          if (!res.ok) { throw new Error((body && (body.message || body.error)) || 'fel ' + res.status); }
+          return body;
+        }, function () { throw new Error('Oväntat svar från servern (' + res.status + ').'); });
+      }).then(function (data) {
+        current = { code: row.codeCanonical, data: data };
+        unitIdx = 0;
+        data.series.forEach(function (s, i) {
+          if (s.points.some(function (q) { return q.observationGuid === selectedGuid; })) { unitIdx = i; }
+        });
+        p.status.hidden = true;
+        p.body.hidden = false;
+        p.node.setAttribute('aria-busy', 'false');
+        draw();
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') { return; }
+        showError(p, err);
+      });
+    }
+
+    function show(row) {
+      if (!row || !row.codeCanonical) { return; }
+      selectedGuid = row.observationGuid;
+      if (current && current.code === row.codeCanonical && chart) {
+        chart.update('none');   // same series: only the highlight moves
+        return;
+      }
+      load(row);
+    }
+
+    function start() {
+      p = panel('panel-series');
+      canvas = p.body.querySelector('[data-role="ser-canvas"]');
+      Array.prototype.forEach.call(p.body.querySelectorAll('.ser-range .ser-btn'), function (b) {
+        b.addEventListener('click', function () { rangeDays = b.getAttribute('data-days'); applyRange(); });
+      });
+      events.onSelect(show);
+    }
+
+    return { start: start };
   })();
 
   loadCard();
   loadPlan();
   events.start();
+  series.start();
 })();

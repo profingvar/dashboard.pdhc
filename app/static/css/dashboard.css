@@ -189,3 +189,20 @@ main { max-width: 1600px; }
 .plan-item.is-link:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
 .plan-item.is-active { background: var(--code-bg); box-shadow: inset 4px 0 0 var(--warning); }
 .ev-load { min-height: 44px; margin-left: 0.5rem; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--card-bg); color: var(--text); cursor: pointer; padding: 0 0.7rem; }
+
+/* ---- series panel (#978) -------------------------------------------------
+ * The canvas takes `touch-action: pan-y` (set by the script after Chart.js
+ * and hammer have attached): a vertical finger-drag scrolls the PAGE, a
+ * horizontal one pans the chart, two fingers pinch-zoom. A chart that
+ * swallows vertical scroll makes the page unusable on touch.
+ */
+.ser-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem 1.5rem; }
+.ser-stats { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; margin: 0; font-size: 0.85rem; }
+.ser-stats dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.ser-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
+.ser-tools { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; margin: 0.6rem 0; }
+.ser-range, .ser-units { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.ser-btn { margin-top: 0; text-decoration: none; display: inline-flex; align-items: center; }
+.ser-btn[aria-pressed="true"] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.ser-canvas { position: relative; height: 320px; max-width: 100%; }
+.ser-canvas canvas { margin-top: 0; }

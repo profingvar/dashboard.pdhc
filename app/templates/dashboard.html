@@ -83,12 +83,36 @@
 
   <section class="dash-panel dash-series" id="panel-series" aria-labelledby="series-heading">
     <h2 id="series-heading">Tidsserie</h2>
-    <div class="dash-status" data-role="status" role="status">Välj en händelse för att visa dess tidsserie (#978).</div>
+    <div class="dash-status" data-role="status" role="status">Välj en händelse för att visa dess tidsserie.</div>
+    <div data-role="body" hidden>
+      <div class="ser-head">
+        <div>
+          <strong data-role="ser-name"></strong>
+          <div class="plan-meta" data-role="ser-code"></div>
+        </div>
+        <dl class="ser-stats" data-role="ser-stats"></dl>
+      </div>
+      <div class="ser-tools">
+        <div class="ser-units" data-role="ser-units" role="group" aria-label="Enhet"></div>
+        <div class="ser-range" role="group" aria-label="Tidsintervall">
+          <button type="button" class="dash-toggle ser-btn" data-days="7" aria-pressed="false">7 d</button>
+          <button type="button" class="dash-toggle ser-btn" data-days="30" aria-pressed="false">30 d</button>
+          <button type="button" class="dash-toggle ser-btn" data-days="90" aria-pressed="false">90 d</button>
+          <button type="button" class="dash-toggle ser-btn" data-days="all" aria-pressed="true">Allt</button>
+        </div>
+        <a class="dash-toggle ser-btn" data-role="ser-csv" href="#">Exportera CSV</a>
+      </div>
+      <div data-role="ser-notes" class="dash-banners"></div>
+      <div class="ser-canvas"><canvas data-role="ser-canvas" role="img" aria-label="Tidsserie"></canvas></div>
+      <p class="dash-note" data-role="ser-legend"></p>
+    </div>
   </section>
 
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='vendor/hammer.min.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/chartjs-plugin-zoom.umd.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/capability.js') }}"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

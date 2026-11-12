@@ -52,6 +52,15 @@ class _FakeCdr1:
                        reason=None):
         return self._series
 
+    def patient_events(self, guid, orgs, *, is_admin=False, cursor=None,
+                       limit=100, codes=None, reason=None):
+        # The series route reads the strict cursor endpoint since #978.
+        pts = [dict(p, observation_guid=p.get("observation_guid") or f"o{i}")
+               for i, p in enumerate(self._series)
+               if not codes or p.get("code") in codes]
+        return {"points": pts, "next_cursor": None, "truncated": False,
+                "limit": limit, "undated_count": 0}
+
 
 def _pt(code, value, unit, at):
     return {"code": code, "at": at, "value": value, "unit": unit,
@@ -130,7 +139,7 @@ def test_series_returns_grouped_points_and_BOTH_sparr_fields(monkeypatch):
     # from "never asked"; both fields must be present.
     assert body["hasBlockedSources"] is False
     assert body["sparrChecked"] is True
-    assert body["provenanceAvailable"] is False      # #983
+    assert body["provenanceAvailable"] is True       # #983 deployed
 
 
 def test_series_reports_sparrChecked_FALSE_when_ips_is_unconfigured(monkeypatch):
