@@ -238,7 +238,8 @@ def assert_patient_open(patient_guid: str, patient_org_guids=None) -> AccessDeci
         )
 
     # The canonical org source is `scope_org_guids(blob)` — affiliations[]
-    # .care_unit_guid with a dual-read to the legacy organization_ids. Reading
+    # .care_unit_guid only (the organization_ids fallback was removed
+    # 2026-11-14). Reading
     # `g.current_user` instead would depend on a route having populated it;
     # the blob is always there when a basis resolved.
     caller_orgs = tuple(scope_org_guids(blob) or ()) if isinstance(blob, dict) else ()

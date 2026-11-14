@@ -76,8 +76,11 @@ def _auth_headers() -> dict:
         is_admin = bool(blob.get("is_su_admin"))
         org_ids = scope_org_guids(blob)
     else:
+        # g.access_blob is always a dict (SSO blob or _DEV_BLOB); this branch
+        # is defensive. It no longer reads the legacy organization_ids
+        # (2026-11-14): no affiliation, no scope.
         is_admin = bool(getattr(blob, "is_su_admin", False))
-        org_ids = getattr(blob, "organization_ids", None) or []
+        org_ids = []
     return {
         "is_admin": is_admin,
         "org_guids": ",".join(str(o) for o in (org_ids or [])),

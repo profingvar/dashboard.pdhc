@@ -839,3 +839,10 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_limit_routes.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/limits_requirements_and_risks.md
+
+## 2026-11-14 — organization_ids fallback removed (care unit = affiliation only)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py — scope_org_guids reads affiliations only
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/audit.py — defensive non-dict branches no longer read organization_ids
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/dashboard/access.py — comment
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_reform_scope.py, test_care_access_auth.py — pinning tests inverted (legacy ids alone: no scope, no care access)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_audit_read.py, test_auth.py — blobs carry affiliations

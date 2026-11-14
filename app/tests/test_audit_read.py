@@ -62,7 +62,8 @@ def app_with_blob():
     def _install_blob():
         g.access_blob = {
             "user_guid": "user-abc",
-            "organization_ids": ["org-1", "org-2"],
+            # care units are affiliations; organization_ids no longer scope (2026-11-14)
+            "affiliations": [{"care_unit_guid": "org-1"}, {"care_unit_guid": "org-2"}],
             "session_id": None,
         }
     return app

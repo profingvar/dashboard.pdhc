@@ -67,15 +67,18 @@ def _phases(blob: dict) -> list:
 
 
 def scope_org_guids(blob: dict) -> list:
-    """Zone-1 read scope (M0 #415): affiliations[].care_unit_guid — the exact
-    equivalent of the legacy flat organization_ids semantics — with a dual-read
-    fallback to organization_ids for pre-reform tokens. Public so route modules
-    (nurse.py) share the same derivation. Zone-2 (parent care organisation) is
-    deliberately NOT folded in here."""
+    """Zone-1 read scope (M0 #415): affiliations[].care_unit_guid, and ONLY
+    that. Public so route modules (nurse.py) share the same derivation. Zone-2
+    (parent care organisation) is deliberately NOT folded in here.
+
+    The dual-read fallback to the legacy organization_ids was REMOVED
+    2026-11-14: those are SSO memberships, not care-unit assignments, and
+    under the main rule (operator 2026-11-13) patients are reached through
+    affiliated care units only. Removed once every professional had an
+    affiliation. An empty scope is refused for a non-admin (access.py), never
+    read as "unrestricted"."""
     affs = blob.get("affiliations") or []
-    if affs:
-        return [a["care_unit_guid"] for a in affs if a.get("care_unit_guid")]
-    return list(blob.get("organization_ids") or [])
+    return [a["care_unit_guid"] for a in affs if a.get("care_unit_guid")]
 
 
 def research_project_guids(blob: dict) -> list:

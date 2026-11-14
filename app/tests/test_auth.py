@@ -122,7 +122,8 @@ def test_sso_authed_session_passes_phase_gate():
         "user_type": "professional",
         "is_su_admin": False,
         "effective_phases": ["analysis"],
-        "organization_ids": [str(uuid.uuid4())],
+        # care units are affiliations; organization_ids no longer scope (2026-11-14)
+        "affiliations": [{"care_unit_guid": str(uuid.uuid4())}],
     }
     # Seed the User the blob refers to — the analysis dashboard "/" records a
     # refresh_log row FK'd to users.guid, which otherwise FK-violates (ticket

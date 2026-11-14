@@ -187,11 +187,11 @@ def _user_guid(blob: Any) -> str | None:
 
 def _org_ids(blob: Any) -> list[str]:
     if isinstance(blob, dict):
-        # M0/X1: attribute the read to care units — affiliations[] first,
-        # legacy organization_ids fallback (same dual-read as app.auth).
+        # M0/X1: attribute the read to care units — affiliations[] only
+        # (the organization_ids fallback was removed 2026-11-14, as in app.auth).
         from app.auth import scope_org_guids
         return scope_org_guids(blob)
-    return list(getattr(blob, "organization_ids", None) or [])
+    return []   # g.access_blob is always a dict; defensive
 
 
 def _session_id(blob: Any) -> str | None:

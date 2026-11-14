@@ -69,10 +69,13 @@ def test_care_access_professional_with_affiliation():
     assert has_care_delivery_access(blob)
 
 
-def test_care_access_professional_legacy_org_ids():
+def test_care_access_professional_legacy_org_ids_ALONE_denied():
+    """2026-11-14: this test used to assert the opposite — that a legacy
+    membership alone grants care access. The fallback is removed: a
+    membership is not a care-unit assignment."""
     blob = {"user_type": "professional", "is_su_admin": False,
             "organization_ids": ["org-y"]}
-    assert has_care_delivery_access(blob)
+    assert not has_care_delivery_access(blob)
 
 
 def test_care_access_professional_no_scope_denied():
