@@ -1,5 +1,5 @@
-"""The patient card: the live euIPS summary (#980) and the two diagnosis
-registers shown side by side, labelled, never merged (#984)."""
+"""The patient card: the live euIPS summary (#980), whose problems section
+IS the diagnosis chips since #984 (the CDR is the record, the EPS derived)."""
 from __future__ import annotations
 
 import pytest
@@ -196,38 +196,52 @@ def test_ABSENT_and_MISSING_are_different_on_the_card(monkeypatch):
     assert secs["10160-0"]["entries"] == []
 
 
-def test_BOTH_registers_are_listed_LABELLED_and_NOT_reconciled(monkeypatch):
+def test_the_chips_ARE_the_EPS_problems_section(monkeypatch):
+    """#984 (operator, 2026-11-16): diagnoses are recorded in the CDR, the EPS
+    is derived from it, and the card reads the EPS. One source — not the two
+    side-by-side registers of 2026-11-11."""
     app = _app()
     _wire(monkeypatch, _summary())
     body = _card(app)
-    src = {s["source"]: s for s in body["diagnosisSources"]}
-    assert src["icd11"]["label"] == "ICD-11-register"
-    assert src["icd11"]["system"] == MMS and src["icd11"]["count"] == 1
-    assert src["ips"]["label"] == "Patientsammanfattning (SNOMED CT)"
-    assert src["ips"]["system"] == SNOMED and src["ips"]["count"] == 2
-    assert body["diagnosisSourcesReconciled"] is False
+    diagnoses = body["patientCard"]["diagnoses"]
+    assert [(d["code"], d["system"]) for d in diagnoses] == [("84114007", SNOMED), ("44054006", SNOMED)]
+    assert "diagnosisSources" not in body and "diagnosisSourcesReconciled" not in body
+    assert body["diagnosisSource"]["source"] == "eps"
+    assert body["diagnosisSource"]["count"] == 2
 
 
-def test_the_two_registers_are_NEVER_MERGED(monkeypatch):
-    """The chips are icd11's alone. Two SNOMED problems from ips must not
-    become chips, or two code systems would be presented as one list."""
+def test_icd11_is_NOT_read_by_the_card(monkeypatch):
+    """icd11's diagnoses reach the chips through the CDR, not by a side read."""
     app = _app()
-    _wire(monkeypatch, _summary())
-    diagnoses = _card(app)["patientCard"]["diagnoses"]
-    assert [d["code"] for d in diagnoses] == ["5A11"]
-    assert all(d["system"] == MMS for d in diagnoses)
+    _wire(monkeypatch, _summary(), icd_ok=False)   # icd11 down must not matter
+    body = _card(app)
+    assert [d["code"] for d in body["patientCard"]["diagnoses"]] == ["84114007", "44054006"]
+    assert not any(u.startswith("icd11") for u in body["unavailable"])
 
 
-def test_an_unreachable_ips_degrades_ONLY_the_summary(monkeypatch):
+def test_each_chip_says_whether_a_CDR_row_backs_it(monkeypatch):
+    s = _summary()
+    probs = next(x for x in s["sections"] if x["key"] == "problems")
+    probs["entries"][0].update(cdr_backed=True, cdr={"name": "cdr2", "guid": "c1"}, onset="2019-05-01")
+    probs["entries"][1].update(cdr_backed=False, cdr=None)
+    app = _app()
+    _wire(monkeypatch, s)
+    body = _card(app)
+    d0, d1 = body["patientCard"]["diagnoses"]
+    assert (d0["cdrBacked"], d0["cdr"], d0["onset"]) == (True, "cdr2", "2019-05-01")
+    assert (d1["cdrBacked"], d1["cdr"]) == (False, None)
+    assert body["diagnosisSource"]["cdrBacked"] == 1
+
+
+def test_an_unreachable_ips_makes_the_diagnoses_UNKNOWN_not_empty(monkeypatch):
     app = _app()
     _wire(monkeypatch, ips_raises=IpsUnreachable("down"))
     body = _card(app)
     assert body["patientCard"]["epsSections"] == []
+    assert body["patientCard"]["diagnoses"] == []
     assert any(u.startswith("eps:unreachable") for u in body["unavailable"])
-    assert [d["code"] for d in body["patientCard"]["diagnoses"]] == ["5A11"]
-    src = {s["source"]: s for s in body["diagnosisSources"]}
-    assert src["ips"]["available"] is False and src["ips"]["count"] is None
-    assert src["icd11"]["available"] is True
+    assert body["diagnosesDefinitivelyEmpty"] is None
+    assert body["diagnosisSource"]["available"] is False
 
 
 def test_a_patient_ips_does_not_know_is_said_so(monkeypatch):
@@ -237,11 +251,22 @@ def test_a_patient_ips_does_not_know_is_said_so(monkeypatch):
     assert "eps:patient-not-in-ips-scope" in body["unavailable"]
 
 
-def test_an_unreachable_icd11_leaves_the_summary_standing(monkeypatch):
+def test_an_EXPLICITLY_ABSENT_problems_section_is_definitively_empty(monkeypatch):
+    s = _summary()
+    probs = next(x for x in s["sections"] if x["key"] == "problems")
+    probs.update(status="EXPLICITLY_ABSENT", entries=[])
     app = _app()
-    _wire(monkeypatch, _summary(), icd_ok=False)
+    _wire(monkeypatch, s)
     body = _card(app)
-    assert body["patientCard"]["diagnoses"] == []
-    src = {s["source"]: s for s in body["diagnosisSources"]}
-    assert src["icd11"]["available"] is False
-    assert src["ips"]["count"] == 2
+    assert body["patientCard"]["diagnoses"] == [] and body["diagnosesDefinitivelyEmpty"] is True
+
+
+def test_a_MISSING_problems_section_is_not_stated_and_says_so(monkeypatch):
+    s = _summary()
+    probs = next(x for x in s["sections"] if x["key"] == "problems")
+    probs.update(status="MISSING", entries=[])
+    app = _app()
+    _wire(monkeypatch, s)
+    body = _card(app)
+    assert body["diagnosesDefinitivelyEmpty"] is False
+    assert body["patientCard"]["diagnosisScopeNote"] == "Patientsammanfattningen anger inte om patienten har problem."

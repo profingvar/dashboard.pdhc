@@ -151,8 +151,7 @@
   }
 
   var UNAVAILABLE_TEXT = {
-    icd11: 'ICD-11-registret kunde inte läsas — diagnoserna nedan är okända, inte tomma.',
-    eps: 'Patientsammanfattningen (EPS) kunde inte läsas.'
+    eps: 'Patientsammanfattningen (EPS) kunde inte läsas — diagnoserna nedan är okända, inte tomma.'
   };
 
   function renderBanners(container, data) {
@@ -173,6 +172,13 @@
   }
 
   /* -- diagnosis chips + their disclosure -- */
+
+  var SYSTEM_TEXT = {
+    'http://snomed.info/sct': 'SNOMED CT',
+    'https://termbank.pdhc.se/CodeSystem/snomed': 'SNOMED CT',
+    'http://id.who.int/icd/release/11/mms': 'ICD-11 MMS',
+    'https://termbank.pdhc.se/CodeSystem/icd11-mms': 'ICD-11 MMS'
+  };
 
   var dxDetail, openChip = null;
 
@@ -209,7 +215,11 @@
       ['Debut', d.onset],
       ['Avslutad', d.abatement],
       ['Registrerad', d.recordedDate],
-      ['Källa', 'ICD-11-register (icd11.pdhc)']
+      ['Kodsystem', SYSTEM_TEXT[d.system] || d.system],
+      // #984: the CDR is the record; the chip is the EPS's summary of it.
+      ['Källa', d.cdrBacked
+        ? 'Patientsammanfattningen, härledd ur ' + (d.cdr || 'CDR')
+        : 'Patientsammanfattningen — ännu inte förankrad i någon CDR']
     ].forEach(function (pair) {
       if (pair[1] === null || pair[1] === undefined || pair[1] === '') { return; }
       dl.appendChild(el('dt', null, pair[0]));
@@ -239,6 +249,11 @@
       chip.setAttribute('aria-controls', 'dx-detail');
       chip.appendChild(el('code', null, d.code));
       chip.appendChild(el('span', null, d.display || DASH));
+      if (d.cdrBacked === false) {
+        chip.classList.add('is-unbacked');
+        chip.appendChild(el('span', 'visually-hidden', ' (ej förankrad i CDR)'));
+        chip.title = (chip.title ? chip.title + ' — ' : '') + 'Ej förankrad i CDR';
+      }
       if (d.clinicalStatus !== 'active') {
         chip.appendChild(el('span', 'visually-hidden', ' (' + (d.clinicalStatus || 'okänd status') + ')'));
         chip.title = d.clinicalStatus || '';
@@ -252,17 +267,18 @@
     if (data.diagnosesDefinitivelyEmpty === null || data.diagnosesDefinitivelyEmpty === undefined) {
       text = 'Diagnoserna kunde inte hämtas — det betyder inte att patienten saknar diagnoser.';
     } else if (!list.length && data.diagnosesDefinitivelyEmpty) {
-      text = 'Inga diagnoser i ICD-11-registret.';
+      text = 'Inga diagnoser i patientsammanfattningen.';
     } else if (!list.length) {
       text = card.diagnosisScopeNote || 'Inga diagnoser som du har behörighet att se.';
     } else if (card.diagnosisScopeNote) {
       text = card.diagnosisScopeNote;
     }
-    // Two registers, never merged (#984): say where the other one is.
-    var ips = (data.diagnosisSources || []).filter(function (s) { return s.source === 'ips'; })[0];
-    if (ips && ips.available && ips.count) {
-      text = (text ? text + ' ' : '') + 'Patientsammanfattningen har ' + ips.count +
-        ' problem kodade i SNOMED CT — ett separat register, inte avstämt mot ICD-11.';
+    // One source since #984: the EPS, derived from the CDR. Say plainly how
+    // many chips no CDR row stands behind yet.
+    var src = data.diagnosisSource || {};
+    if (src.available && src.count && src.cdrBacked < src.count) {
+      text = (text ? text + ' ' : '') + (src.count - src.cdrBacked) + ' av ' + src.count +
+        ' diagnoser finns bara i patientsammanfattningen och är ännu inte förankrade i någon CDR.';
     }
     note.hidden = !text;
     note.textContent = text || '';

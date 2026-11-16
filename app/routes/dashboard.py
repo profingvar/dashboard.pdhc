@@ -137,6 +137,24 @@ def _eps_section(s: dict):
     )
 
 
+def _diagnosis_from_eps(e: dict):
+    """One EPS problems entry -> `dto.Diagnosis` (#984)."""
+    from app.dashboard.dto import Diagnosis
+    cdr = e.get("cdr") or {}
+    return Diagnosis(
+        code=e.get("code") or "",
+        display=e.get("display") or e.get("narrative_text") or "",
+        clinical_status=e.get("status") or "",
+        verification_status=None,
+        onset=e.get("onset"),
+        abatement=e.get("abatement"),
+        recorded_date=e.get("date"),
+        system=e.get("system") or "",
+        cdr_backed=e.get("cdr_backed"),
+        cdr=cdr.get("name"),
+    )
+
+
 @bp.get("/view/<guid>")
 def patient_view(guid: str):
     """The page (#976). A SHELL: it holds the patient guid and nothing else.
@@ -157,39 +175,16 @@ def patient_dashboard(guid: str):
     """The patient card. One failing source degrades its own panel."""
     unavailable: list[str] = []
 
+    # #984 (operator, 2026-11-16): diagnoses are RECORDED in the CDR; the
+    # EPS (ips.pdhc's patient summary) is derived from it, and the card reads
+    # the EPS. So the chips ARE the EPS problems section — one source, not the
+    # two side-by-side registers of 2026-11-11. icd11's diagnoses reach the
+    # chips through the CDR (icd11 writes to cdr2; ips derives from the CDR).
+    # A chip the EPS holds alone (not yet in any CDR) is marked as such.
     diagnoses: tuple = ()
     scope_note = None
-    definitively_empty = None
-    try:
-        from app.services import icd11_client  # noqa: PLC0415
-        problems = icd11_client.build_client().problem_list(guid)
-    except Exception as exc:  # noqa: BLE001 - a panel, not the page
-        # NOT an empty chip list. "Unknown" and "none" are different
-        # statements about a patient, and a card that silently shows no
-        # diagnoses because a service was unreachable asserts the second.
-        unavailable.append(f"icd11:{type(exc).__name__}")
-    else:
-        fields = problems.patient_card_fields()
-        diagnoses = fields["diagnoses"]
-        scope_note = fields["diagnosis_scope_note"]
-        # THREE-WAY, not two. An empty list means either "this patient has no
-        # diagnoses" or "none you are scoped to see", and icd11 tells them
-        # apart with its `urn:pdhc:scope` tag. Collapsing them sent a
-        # clinician hunting a bug that was not there on 2026-10-23, which is
-        # why icd11 carries the note at all — so the dashboard must not be
-        # where it gets dropped.
-        definitively_empty = problems.is_definitively_empty
-
-    # Plans are NOT read here: the plan panel has its own route
-    # (`/patients/<guid>/plan`), so the card no longer pays a request.pdhc
-    # round trip per page view for a list nothing displayed.
-
-    # The LIVE euIPS summary (#980), read from ips.pdhc on every call — not
-    # the frozen snapshot, which the operator declined. A failure is reported
-    # by name and degrades THIS panel only: the ICD-11 chips above stand on
-    # their own source.
+    definitively_empty = None   # None = unknown, True = none, False = not stated
     eps_sections: tuple = ()
-    ips_problem_count = None
     try:
         summary = ips_client._default_client().euips_summary(guid)
     except ips_client.IpsUnreachable as exc:
@@ -200,8 +195,15 @@ def patient_dashboard(guid: str):
         else:
             eps_sections = tuple(_eps_section(s) for s in summary["sections"])
             problems = next((s for s in summary["sections"]
-                             if s.get("key") == "problems"), None)
-            ips_problem_count = len((problems or {}).get("entries") or [])
+                             if s.get("key") == "problems"), None) or {}
+            diagnoses = tuple(_diagnosis_from_eps(e) for e in problems.get("entries") or [])
+            if diagnoses:
+                definitively_empty = False
+            elif problems.get("status") == "EXPLICITLY_ABSENT":
+                definitively_empty = True
+            else:
+                definitively_empty = False
+                scope_note = "Patientsammanfattningen anger inte om patienten har problem."
 
     # Name and birth date come from CDR1's patient index, already read by the
     # organisation check. Sex, personnummer and organisation have NO source the
@@ -211,32 +213,22 @@ def patient_dashboard(guid: str):
     row = getattr(g, "_dashboard_patient_row", None) or {}
     card = PatientCard(patient_guid=guid, name=row.get("name") or None,
                        birth_date=row.get("birth_date"),
-                       diagnoses=tuple(diagnoses),
+                       diagnoses=diagnoses,
                        diagnosis_scope_note=scope_note,
                        eps_sections=eps_sections)
     sparr = sparr_state(guid)
     return jsonify({
         "patientCard": _wire(card),
         "diagnosesDefinitivelyEmpty": definitively_empty,
-        # TWO REGISTERS, SHOWN SIDE BY SIDE AND NEVER MERGED (operator,
-        # 2026-11-11; #984). The chips are icd11's ICD-11 register; the EPS
-        # problems section is ips's SNOMED CT `Condition`s. They are coded in
-        # different systems, populated independently, and where both exist
-        # they disagree for 3 of 4 patients measured. Merging would combine two
-        # code systems as if one; choosing would hide the other. So both are
-        # listed with their source, and `reconciled` says plainly that nobody
-        # has reconciled them.
-        "diagnosisSources": [
-            {"source": "icd11", "label": "ICD-11-register",
-             "system": "http://id.who.int/icd/release/11/mms",
-             "available": definitively_empty is not None,
-             "count": len(diagnoses)},
-            {"source": "ips", "label": "Patientsammanfattning (SNOMED CT)",
-             "system": "http://snomed.info/sct",
-             "available": ips_problem_count is not None,
-             "count": ips_problem_count},
-        ],
-        "diagnosisSourcesReconciled": False,
+        # ONE source since #984: the EPS, derived from the CDR. `cdrBacked`
+        # counts the chips a CDR row stands behind; the rest the EPS holds alone.
+        "diagnosisSource": {
+            "source": "eps",
+            "label": "Patientsammanfattning (härledd ur CDR)",
+            "available": definitively_empty is not None,
+            "count": len(diagnoses),
+            "cdrBacked": sum(1 for d in diagnoses if d.cdr_backed),
+        },
         "unavailable": unavailable,
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,

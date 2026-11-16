@@ -251,34 +251,21 @@ def _wire_icd11(monkeypatch, problems=None, raises=None):
     monkeypatch.setattr(icd, "build_client", lambda: _C())
 
 
-def test_the_scope_note_reaches_the_WIRE(monkeypatch):
-    """icd11 distinguishes "no diagnoses" from "none you may see" and says so
-    in `meta.scopeNote`. The BFF must not be where that is dropped — it exists
-    because the two were once indistinguishable and a clinician went looking
-    for a bug that was not there (2026-10-23)."""
+def test_an_UNREACHABLE_eps_is_not_an_empty_chip_list(monkeypatch):
+    """"Unknown" and "none" are different statements about a patient. Since
+    #984 the chips come from the EPS, so it is the EPS being down that must
+    read as unknown (icd11 is no longer read by the card)."""
     app = _app()
-    _wire_icd11(monkeypatch, _FakeProblems(
-        note="filtered to your 2 organisation(s)", definitively_empty=False))
     monkeypatch.setattr(dash.cdr1_client, "build_client", lambda: _FakeCdr1())
     monkeypatch.setattr(dash.ips_client, "is_configured", lambda: True)
     monkeypatch.setattr(dash.ips_client, "get_active_blocks", lambda *a, **k: [])
-    with app.test_client() as c:
-        body = c.get("/dashboard/patients/p1").get_json()
-    assert body["patientCard"]["diagnosisScopeNote"] == (
-        "filtered to your 2 organisation(s)")
-    assert body["diagnosesDefinitivelyEmpty"] is False
 
-
-def test_an_UNREACHABLE_icd11_is_not_an_empty_chip_list(monkeypatch):
-    """"Unknown" and "none" are different statements about a patient."""
-    app = _app()
-    _wire_icd11(monkeypatch, raises=RuntimeError("down"))
-    monkeypatch.setattr(dash.cdr1_client, "build_client", lambda: _FakeCdr1())
-    monkeypatch.setattr(dash.ips_client, "is_configured", lambda: True)
-    monkeypatch.setattr(dash.ips_client, "get_active_blocks", lambda *a, **k: [])
+    class _Down:
+        def euips_summary(self, guid):
+            raise dash.ips_client.IpsUnreachable("down")
+    monkeypatch.setattr(dash.ips_client, "_default_client", lambda: _Down())
     with app.test_client() as c:
         body = c.get("/dashboard/patients/p1").get_json()
     assert body["patientCard"]["diagnoses"] == []
-    assert any(u.startswith("icd11:") for u in body["unavailable"]), body["unavailable"]
-    # and the three-way flag must NOT claim emptiness it never established
+    assert any(u.startswith("eps:") for u in body["unavailable"]), body["unavailable"]
     assert body["diagnosesDefinitivelyEmpty"] is None

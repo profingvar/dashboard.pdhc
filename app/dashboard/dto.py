@@ -51,7 +51,11 @@ from typing import Any, Literal
 
 @dataclass(frozen=True)
 class Diagnosis:
-    """One ICD-11 diagnosis, from icd11.pdhc's Problem List bundle.
+    """One diagnosis chip. Since #984 it comes from the EPS problems section
+    (ips.pdhc), which is derived from the CDR; `system` says which code
+    system (SNOMED CT or ICD-11 MMS) — it is no longer always ICD-11.
+
+    Historically: one ICD-11 diagnosis, from icd11.pdhc's Problem List bundle.
 
     `system` is fixed to the WHO MMS URI. `display` comes from
     `DiagnosisCode.label` in icd11.pdhc — NOT from termbank, which holds no
@@ -69,6 +73,12 @@ class Diagnosis:
     foundation_uri: str | None = None
     encounter_ref: str | None = None
     system: str = "http://id.who.int/icd/release/11/mms"
+    #: #984: the CDR is the record; the chip comes from the EPS summary of it.
+    #: True when a CDR row backs this diagnosis, False when the EPS holds it
+    #: alone (not yet in any CDR), None when the source does not say.
+    cdr_backed: bool | None = None
+    #: Which CDR holds the backing row ("cdr2"), when backed.
+    cdr: str | None = None
 
 
 @dataclass(frozen=True)

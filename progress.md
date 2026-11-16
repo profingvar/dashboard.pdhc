@@ -686,3 +686,5 @@ PlanClient._headers adds dashboard's read_only plan key (config-then-env, the
 resolve_base_url path). pytest: 772 passed.
 
 ## #942 (2026-11-16): the canonical URI format is owned by termbank.pdhc (app/canonical_uri.py + conformance/canonical_uri_cases.json); the concept URN by plan.pdhc (planp/app/concept_urn.py + conformance/concept_urn_cases.json). Consumers keep byte-identical corpus copies in their tests; tools/check_canonical_uri_conformance.py in the workspace fails on drift or on a literal that breaks the grammar.
+
+## #984/#985 (2026-11-16): operator decision — the CDR is the record for diagnoses (and observations); icd11 codes into the CDR; the ips EPS is a summary derived from the CDR (`derive-conditions-from-cdr`); the dashboard chips read the EPS. EPS Conditions were backfilled into their home CDR (`import-eps-conditions`); those with no home CDR stay, marked not CDR-backed.
