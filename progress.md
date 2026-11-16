@@ -680,3 +680,7 @@ Rollback: image `dashboard_pdhc-app:pre827`; source+`.env`
 `test_sparr_unconfigured.py` and `test_sparr_banner_distinguishes.py`; 10 of
 the 13 were verified to fail against the reverted fix, and the 3 that pass are
 negative cases that pass trivially when nothing renders.
+
+## #931 — dashboard reads plan with a key (2026-11-16)
+PlanClient._headers adds dashboard's read_only plan key (config-then-env, the
+resolve_base_url path). pytest: 772 passed.

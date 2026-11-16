@@ -17,8 +17,11 @@ Two questions the dashboard BFF has to ask plan.pdhc, and nothing else:
     coding plan, and the shape here is the one `request.pdhc`'s
     ``context_service`` already uses against the same endpoint.
 
-THE READS ARE UNAUTHENTICATED, BY NECESSITY — ticket #931
------------------------------------------------------------
+THE READS ARE AUTHENTICATED SINCE #931 (2026-11-16)
+---------------------------------------------------
+``plan_read_headers()`` sends dashboard's own read_only key. The paragraph
+below is the pre-#931 account, kept because it explains why it was needed:
+
 plan.pdhc has no usable machine-auth door: its ``KNOWN_SERVICES`` holds only
 ``sim.pdhc`` and ``SIM_PDHC_SERVICE_KEY`` is unset, so that dict admits
 nobody. ``outbound_session_headers()`` carries ``X-Operator-Session-Id``
@@ -280,6 +283,27 @@ def is_configured() -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _setting(name: str) -> str:
+    """Config then environment — `resolve_base_url`'s single path, for keys."""
+    try:
+        from flask import current_app
+        v = current_app.config.get(name)
+        if v:
+            return str(v).strip()
+    except RuntimeError:  # outside an app context
+        pass
+    return (os.environ.get(name) or "").strip()
+
+
+def plan_read_headers() -> dict:
+    """#931 — dashboard's read_only service key for plan.pdhc, or `{}` if unset."""
+    key = _setting("PLAN_SERVICE_KEY")
+    if not key:
+        return {}
+    return {"X-Source-Service": _setting("PLAN_SOURCE_SERVICE") or "dashboard.pdhc",
+            "X-Service-Key": key}
+
+
 class PlanClient:
     """Thin, read-only wrapper around plan.pdhc's open GET surface.
 
@@ -296,15 +320,12 @@ class PlanClient:
 
     # -- headers ---------------------------------------------------------
     def _headers(self) -> dict:
-        """Accept + the operator session, and NO credential.
+        """Accept + the operator session + dashboard's plan READ key (#931).
 
-        plan.pdhc has no machine-auth door that admits this service (#931):
-        `KNOWN_SERVICES` holds only `sim.pdhc`, whose key is unset. So these
-        reads are unauthenticated BY NECESSITY, like cdr.pdhc's and
-        request.pdhc's reads of the same endpoints. `X-Operator-Session-Id`
-        below is session propagation (#408) so the read lands in the PDL
-        kontroller chain — it authenticates nothing, and a future reader must
-        not mistake it for a credential.
+        `X-Operator-Session-Id` is session propagation (#408) for PDL
+        kontroller and authenticates nothing. The CREDENTIAL is
+        `plan_read_headers()`: plan admits `dashboard.pdhc` as a read_only
+        service key since #931. Unset key = no credential, as before.
         """
         h = {"Accept": "application/json"}
         try:
@@ -312,6 +333,7 @@ class PlanClient:
             h.update(outbound_session_headers())
         except Exception:  # noqa: BLE001 — session headers are best-effort
             pass
+        h.update(plan_read_headers())
         return h
 
     # -- transport -------------------------------------------------------

@@ -850,3 +850,7 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 ## 2026-11-16 — #936 step 2: the nurse view reads a medication in R4, R5 and ips's bare shape
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py — _medication_cc + _regimen (same order as cdr's fhir_paths)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_medication_936.py (NEW)
+
+## #931 — dashboard reads plan.pdhc with its own service key (2026-11-16)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/plan_client.py — plan_read_headers() (config then env); PlanClient._headers sends it
+- .env.example; /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_plan_read_key_931.py (NEW)
