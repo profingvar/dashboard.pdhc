@@ -656,7 +656,8 @@ def _band(verdicts, series_unit):
                      "sourceKind": lim.source_kind,
                      "carePlanGuid": lim.care_plan_guid,
                      "planDefinitionName": lim.plan_definition_name,
-                     "planDefinitionVersion": lim.plan_definition_version},
+                     "planDefinitionVersion": lim.plan_definition_version,
+                     "limitKind": lim.limit_kind, "setBy": lim.set_by},
             "reason": None}
 
 

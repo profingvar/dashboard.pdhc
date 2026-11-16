@@ -421,7 +421,8 @@ def test_the_detail_shows_the_limit_FIRST_with_its_order():
     lim = _fn(js, "renderLimit")
     assert "'Gränsen kommer från: ' + limitSource(l)" in lim
     src = _fn(js, "limitSource")
-    assert "'Mål i patientens vårdplan '" in src and "'Intervall i vårdplanens '" in src
+    # #987: an ACTION limit (request.pdhc goal) and a RECOMMENDED NORMAL range (plan) are named apart.
+    assert "'Åtgärdsgräns i patientens vårdplan '" in src and "'Rekommenderat normalintervall i '" in src
     # the observation's own order is labelled as such, so the two cannot be confused
     assert "'Beställning registrerad på mätvärdet'" in _fn(js, 'renderDetail')
     assert "l.reason && !judged" in lim

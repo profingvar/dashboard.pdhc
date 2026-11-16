@@ -83,6 +83,18 @@ class Limit:
     description: str | None = None
     #: Set when the limit is unusable; the reason, in words.
     invalid: str | None = None
+    #: Whose value it is (request.pdhc, #987): `plan_recommended` while it is
+    #: still plan's recommendation, `requester` once a clinician set it,
+    #: `mixed`, or `unknown` for a CarePlan written before provenance existed.
+    set_by: str | None = None
+
+    @property
+    def limit_kind(self) -> str:
+        """Operator, 2026-11-16: plan.pdhc holds RECOMMENDED NORMAL limits;
+        the limits FOR ACTION are set per patient in request.pdhc. A CarePlan
+        goal is the action limit; the transaction range is the template's
+        recommended normal, the same for every patient on the plan."""
+        return "action" if self.source_kind == "care_plan_goal" else "recommended_normal"
 
 
 @dataclass(frozen=True)
@@ -139,6 +151,7 @@ def _goal_limit(goals: list[Mapping], unit_hint: str | None, base: dict) -> Limi
     low_inc = high_inc = True
     units_seen: set[str] = set()
     descriptions = []
+    setters: set[str] = set()
     try:
         for g in goals:
             ttype = (g.get("target_type") or "").strip().lower()
@@ -155,6 +168,7 @@ def _goal_limit(goals: list[Mapping], unit_hint: str | None, base: dict) -> Limi
                 continue          # "=" / categorical / no operator: a target, not a limit
             if gl is None and gh is None:
                 continue
+            setters.add(str(g.get("limit_source") or "unknown"))
             u = (g.get("target_unit") or "").strip()
             if u:
                 units_seen.add(u)
@@ -175,6 +189,7 @@ def _goal_limit(goals: list[Mapping], unit_hint: str | None, base: dict) -> Limi
 
     if low is None and high is None:
         return None
+    base = dict(base, set_by=setters.pop() if len(setters) == 1 else "mixed")
     desc = "; ".join(dict.fromkeys(descriptions)) or None
     if len({units.normalise_unit(u) or u for u in units_seen}) > 1:
         return Limit(low=low, high=high, unit=None, description=desc,
@@ -194,6 +209,7 @@ def _range_limit(tx: Mapping, base: dict) -> Limit | None:
     raw_low, raw_high = tx.get("range_min"), tx.get("range_max")
     if raw_low in (None, "") and raw_high in (None, ""):
         return None
+    base = dict(base, set_by=tx.get("action_limit_source") or "plan_recommended")
     tx_unit = (tx.get("unit") or "").strip() or None
     concept_unit = (tx.get("concept_unit_name") or "").strip() or None
     try:
@@ -356,7 +372,8 @@ def _wire_limit(lim: Limit) -> dict:
             "sourceKind": lim.source_kind, "carePlanGuid": lim.care_plan_guid,
             "planDefinitionName": lim.plan_definition_name,
             "planDefinitionVersion": lim.plan_definition_version,
-            "description": lim.description}
+            "description": lim.description,
+            "limitKind": lim.limit_kind, "setBy": lim.set_by}
 
 
 def wire(verdict: Verdict) -> dict:
@@ -364,7 +381,7 @@ def wire(verdict: Verdict) -> dict:
     base = _wire_limit(verdict.limit) if verdict.limit else {
         k: None for k in ("low", "high", "unit", "lowInclusive", "highInclusive",
                           "sourceKind", "carePlanGuid", "planDefinitionName",
-                          "planDefinitionVersion", "description")}
+                          "planDefinitionVersion", "description", "limitKind", "setBy")}
     return dict(base, status=verdict.status, outside=verdict.outside,
                 comparedValue=verdict.compared_value, reason=verdict.reason,
                 candidates=[_wire_limit(c) for c in verdict.candidates])

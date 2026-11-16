@@ -54,10 +54,19 @@
   function limitSource(l) {
     if (!l || !l.sourceKind) { return null; }
     var pd = l.planDefinitionName ? l.planDefinitionName + (l.planDefinitionVersion ? ' v' + l.planDefinitionVersion : '') : 'PlanDefinition';
+    // #987: plan.pdhc holds RECOMMENDED NORMAL limits; ACTION limits are set
+    // per patient in request.pdhc. Say which this is, and whose value it is.
+    var who = SET_BY_TEXT[l.setBy] || SET_BY_TEXT.unknown;
     return l.sourceKind === 'care_plan_goal'
-      ? 'Mål i patientens vårdplan ' + l.carePlanGuid + (l.description ? ' (' + l.description + ')' : '')
-      : 'Intervall i vårdplanens ' + pd + ' — inget eget mål för patienten (vårdplan ' + l.carePlanGuid + ')';
+      ? 'Åtgärdsgräns i patientens vårdplan ' + l.carePlanGuid + ' (' + who + ')' + (l.description ? ' — ' + l.description : '')
+      : 'Rekommenderat normalintervall i ' + pd + ' — ingen åtgärdsgräns satt för patienten (vårdplan ' + l.carePlanGuid + ')';
   }
+  var SET_BY_TEXT = {
+    requester: 'satt av beställaren',
+    plan_recommended: 'oförändrad från planens rekommendation',
+    mixed: 'delvis satt av beställaren',
+    unknown: 'ursprung okänt'
+  };
 
   // What one panel learned that another draws: the card's diagnoses (ICD-11
   // onset/abatement markers) and the plan data (T0, done markers).
