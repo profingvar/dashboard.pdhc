@@ -241,12 +241,7 @@ def patient_summary(guid: str):
                 "status": (r.get("clinicalStatus") or {}).get("coding", [{}])[0].get("code"),
             })
         elif rt == "MedicationStatement":
-            regimens.append({
-                "canonical": _coding_uri(r.get("medicationCodeableConcept")),
-                "display": _coding_display(r.get("medicationCodeableConcept")),
-                "start": (r.get("effectivePeriod") or {}).get("start"),
-                "status": r.get("status"),
-            })
+            regimens.append(_regimen(r))
     for entry in kept_obs:
         r = entry.get("resource") or {}
         canonical = _coding_uri(r.get("code"))
@@ -504,6 +499,32 @@ def _obs_org_guid(res: dict | None) -> str | None:
         if ident:
             return ident
     return None
+
+
+def _medication_cc(r: dict) -> dict | None:
+    """The medication's CodeableConcept in any of the three shapes cdr stores
+    (#936): R4 `medicationCodeableConcept`, the R5 CodeableReference
+    `medication.concept`, or ips's bare `medication`. Same order as cdr's
+    `fhir_paths.medication_path`, so both services read one resource alike."""
+    if isinstance(r.get("medicationCodeableConcept"), dict):
+        return r["medicationCodeableConcept"]
+    med = r.get("medication")
+    if isinstance(med, dict):
+        if isinstance(med.get("concept"), dict):
+            return med["concept"]
+        if "coding" in med or "text" in med:
+            return med
+    return None
+
+
+def _regimen(r: dict) -> dict:
+    cc = _medication_cc(r)
+    return {
+        "canonical": _coding_uri(cc),
+        "display": _coding_display(cc),
+        "start": (r.get("effectivePeriod") or {}).get("start"),
+        "status": r.get("status"),
+    }
 
 
 def _coding_uri(cc: dict | None) -> str | None:

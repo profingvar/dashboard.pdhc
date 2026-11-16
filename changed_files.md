@@ -846,3 +846,7 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/dashboard/access.py — comment
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_reform_scope.py, test_care_access_auth.py — pinning tests inverted (legacy ids alone: no scope, no care access)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_audit_read.py, test_auth.py — blobs carry affiliations
+
+## 2026-11-16 — #936 step 2: the nurse view reads a medication in R4, R5 and ips's bare shape
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py — _medication_cc + _regimen (same order as cdr's fhir_paths)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_medication_936.py (NEW)
