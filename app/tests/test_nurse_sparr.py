@@ -18,7 +18,7 @@ import app.routes.nurse as nurse
 
 _PID = "11111111-1111-1111-1111-111111111111"
 _ORG = "clinic-aaaa"
-_CONCEPT_URI = "urn:pdhc:concept/concept-aaaa"
+_CONCEPT_URI = "urn:pdhc:concept/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
 def _app():
@@ -113,11 +113,11 @@ def test_variable_lift_exposes_covered_concept(monkeypatch):
     monkeypatch.setattr(
         nurse, "get_active_blocks",
         lambda g: [_block(_ORG, lift_kind="indispensable_care",
-                          lift_concepts=["concept-aaaa"],
+                          lift_concepts=["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
                           lift_from="2026-01-01", lift_until="2026-12-31")],
     )
     bundle = {"entry": [_obs_entry(concept=_CONCEPT_URI, org=_ORG),
-                        _obs_entry(concept="urn:pdhc:concept/concept-other", org=_ORG)]}
+                        _obs_entry(concept="urn:pdhc:concept/cccccccc-cccc-4ccc-8ccc-cccccccccccc", org=_ORG)]}
     monkeypatch.setattr(nurse, "fanout", lambda *a, **k: _resp([_fr(bundle)]))
     body = app.test_client().get(
         f"/api/nurse/patient/{_PID}/variable/urn:pdhc:concept|c").get_json()

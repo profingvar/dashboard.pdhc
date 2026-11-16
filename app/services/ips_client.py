@@ -26,6 +26,8 @@ caller's filter is identical for a given patient.
 """
 from __future__ import annotations
 
+import re
+
 import os
 import threading
 import time
@@ -431,18 +433,24 @@ def blocked_clinic_ids(blocks: Iterable[Block]) -> set[str]:
 # ``filter_blocked_points`` below is the sole live spärr filter.)
 
 _CONCEPT_URI_PREFIX = "urn:pdhc:concept/"
+_GUID_PAT = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+_CONCEPT_URN_RE = re.compile(rf"^urn:pdhc:concept/({_GUID_PAT})$")
+_CONCEPT_LEGACY_RE = re.compile(rf"^https?://[^/\s]+/api/v1/concepts/({_GUID_PAT})$")
 
 
 def concept_guid_from_canonical(code_canonical):
-    """Parse the plan.pdhc Concept guid out of a CDR ``code_canonical`` URI.
+    """The plan.pdhc Concept GUID in a CDR ``code_canonical``, lower-case, or None.
 
-    Returns None for any value that is not ``urn:pdhc:concept/<guid>`` (a
-    termbank URI, a legacy non-guid code, or None) — which, under a block,
-    keeps the point HIDDEN (the DPO-approved under-expose fallback, #472 Q3)."""
-    if isinstance(code_canonical, str) and code_canonical.startswith(_CONCEPT_URI_PREFIX):
-        guid = code_canonical[len(_CONCEPT_URI_PREFIX):].strip()
-        return guid or None
-    return None
+    #942: plan.pdhc OWNS this format (plan.pdhc/planp/app/concept_urn.py) and
+    tests/conformance/concept_urn_cases.json pins this reader to it. Before,
+    any tail after the prefix was returned as a "guid" -- cdr required a real
+    GUID. None for anything else (a termbank URI, a non-GUID tail), which under
+    a block keeps the point HIDDEN (the DPO-approved under-expose fallback,
+    #472 Q3)."""
+    if not isinstance(code_canonical, str):
+        return None
+    m = _CONCEPT_URN_RE.match(code_canonical) or _CONCEPT_LEGACY_RE.match(code_canonical)
+    return m.group(1).lower() if m else None
 
 
 def _point_lift(concept_guid, observed_iso, lifts: list[Block]):

@@ -145,8 +145,8 @@ from app.services.ips_client import (  # noqa: E402
 )
 
 _CLINIC = "clinic-1111"
-_CA = "concept-aaaa"   # covered by the lift
-_CB = "concept-bbbb"   # not covered
+_CA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"   # covered by the lift
+_CB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"   # not covered
 
 
 def _pt(concept_guid, org=_CLINIC, at="2026-06-15", code=None):
@@ -160,7 +160,8 @@ def _lift(concepts, frm="2026-01-01", until="2026-12-31"):
 
 
 def test_concept_guid_from_canonical_parses_and_falls_back():
-    assert concept_guid_from_canonical("urn:pdhc:concept/abc-123") == "abc-123"
+    assert concept_guid_from_canonical("urn:pdhc:concept/12345678-abcd-4abc-8abc-123456789abc") == "12345678-abcd-4abc-8abc-123456789abc"
+    assert concept_guid_from_canonical("urn:pdhc:concept/abc-123") is None  # #942: not a GUID
     assert concept_guid_from_canonical("http://loinc.org/8480-6") is None
     assert concept_guid_from_canonical("urn:pdhc:concept/") is None
     assert concept_guid_from_canonical(None) is None
