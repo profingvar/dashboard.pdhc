@@ -42,6 +42,37 @@ from app.services import cdr1_client, ips_client
 
 bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
+
+@bp.before_request
+def _start_the_clock():
+    from flask import g as _g
+    import time
+    _g._dash_t0 = time.monotonic()
+
+
+def _over_budget() -> bool:
+    """#974: has this request spent its scan budget?
+
+    Timeouts are per upstream call (cdr1 8 s), and the scans loop over up to
+    20 pages, so a slow cdr1 could hold a request ~160 s -- past gunicorn's
+    120 s, where the worker is killed and the clinician gets a bare 502
+    instead of a panel that says it is incomplete. A scan stops here and
+    reports itself incomplete, exactly as at its page bound."""
+    from flask import current_app, g as _g
+    import time
+    t0 = getattr(_g, "_dash_t0", None)
+    budget = float(current_app.config.get("DASHBOARD_SCAN_BUDGET_S", 60))
+    return t0 is not None and time.monotonic() - t0 > budget
+
+
+@bp.errorhandler(PatientAccessRefused)
+def _refused_inside_a_route(exc: PatientAccessRefused):
+    """A refusal raised AFTER the access decorator -- `sparr_state` when ips
+    cannot be asked (#974) -- answers by name like any other, never a 500."""
+    from flask import g as _g
+    _g._audit_payload_snapshot = {"refused": exc.code}
+    return refusal_response(exc)
+
 #: Wire names are camelCase (the plan's DTO list); the dataclasses are
 #: snake_case (Python). One translation, in one place.
 def _camel(name: str) -> str:
@@ -210,7 +241,22 @@ def patient_dashboard(guid: str):
     # dashboard reads today; they stay None and the page shows "—", which is
     # "not known here", never "none".
     from flask import g
-    row = getattr(g, "_dashboard_patient_row", None) or {}
+    if getattr(g, "_dashboard_patient_row", None) is None:
+        # The organisation check is skipped for an unrestricted caller, so
+        # the index was never read; ask it here (one call, same index).
+        try:
+            from app.auth import scope_org_guids
+            blob = getattr(g, "access_blob", None)
+            orgs = tuple(scope_org_guids(blob) or ()) if isinstance(blob, dict) else ()
+            _patient_orgs(guid, orgs, True)
+        except Exception:  # noqa: BLE001 - reported below, by name
+            pass
+    row = getattr(g, "_dashboard_patient_row", None)
+    if row is None:
+        # #974 resilience: '—' with no reason reads as "no such data"; the
+        # truth is that cdr1's patient index did not answer for this patient.
+        unavailable.append("cdr1:patient-index")
+    row = row or {}
     card = PatientCard(patient_guid=guid, name=row.get("name") or None,
                        birth_date=row.get("birth_date"),
                        diagnoses=diagnoses,
@@ -294,6 +340,9 @@ def patient_plan(guid: str):
             cursor = page["next_cursor"]
             if not cursor:
                 break
+            if _over_budget():
+                complete = False
+                break
         else:
             complete = cursor is None
     except (Cdr1BadCursor, Cdr1ProjectionTooOld, Cdr1NotConfigured,
@@ -331,7 +380,10 @@ def patient_plan(guid: str):
 
     planned_tx = {i.transaction_guid for pl in plans for i in pl.items
                   if i.transaction_guid}
-    unordered_tx = sorted(set(by_tx) - planned_tx)
+    # "Follows a plan nobody ordered" is a claim about the ORDERS. When they
+    # could not be read it cannot be made: every tagged transaction would be
+    # listed as unordered (found by the #974 resilience tests).
+    unordered_tx = sorted(set(by_tx) - planned_tx) if plans_known else []
 
     names: dict = {}
     if unordered_tx:
@@ -393,6 +445,50 @@ def patient_concepts(guid: str):
         return jsonify(error="cdr1_unreachable", message=str(exc)), 503
 
     unavailable: list[str] = []
+    # Spärr (#974, PDL): cdr1's per-concept summary counts EVERY row, blocked
+    # ones included, so with an active block a concept, its count and its date
+    # range could disclose what is hidden -- and a concept present only in
+    # blocked data would appear by name. With blocks, the list is built from
+    # the VISIBLE points instead (bounded, like the series scan). `sparr_state`
+    # fails closed (503) when ips cannot be asked.
+    sparr = sparr_state(guid)
+    complete = True
+    if sparr.blocks:
+        client = cdr1_client.build_client()
+        visible: list = []
+        cur = None
+        try:
+            for _ in range(_SERIES_SCAN_MAX_PAGES):
+                pg = client.patient_events(guid, list(decision.caller_org_guids),
+                                           is_admin=decision.unrestricted, cursor=cur,
+                                           limit=_SERIES_SCAN_PAGE)
+                visible.extend(pg["points"])
+                cur = pg["next_cursor"]
+                if not cur:
+                    break
+                if _over_budget():
+                    complete = False
+                    break
+            else:
+                complete = cur is None
+        except (Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable) as exc:
+            return jsonify(error="cdr1_unreachable", message=str(exc)), 503
+        visible, _exp = ips_client.filter_blocked_points(visible, sparr.blocks)
+        agg: dict = {}
+        for p in visible:
+            code = p.get("code")
+            if not code:
+                continue
+            a = agg.setdefault(code, {"code": code, "unit": p.get("unit"), "count": 0,
+                                      "first_observed_at": p.get("at"),
+                                      "last_observed_at": p.get("at")})
+            a["count"] += 1
+            at = p.get("at")
+            if at and (a["first_observed_at"] is None or at < a["first_observed_at"]):
+                a["first_observed_at"] = at
+            if at and (a["last_observed_at"] is None or at > a["last_observed_at"]):
+                a["last_observed_at"] = at
+        params = sorted(agg.values(), key=lambda a: a["code"])
     concept_of = {p.get("code"): ips_client.concept_guid_from_canonical(p.get("code"))
                   for p in params}
     names: dict = {}
@@ -412,6 +508,10 @@ def patient_concepts(guid: str):
                       "last": p.get("last_observed_at")}
                      for p in params if p.get("code")],
         "unavailable": unavailable,
+        # False only when spärr forced a scan that stopped at its bound.
+        "countsComplete": complete,
+        "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
+        "sparrChecked": sparr.checked,
     })
 
 
@@ -481,9 +581,12 @@ def patient_series(guid: str, code_canonical: str):
     different statements.
 
     A concept may come back as SEVERAL series: units that are not convertible
-    SPLIT rather than being plotted on one axis. HbA1c in % and mmol/mol is
-    the exception that joins, through a named affine function -- the ratio
-    between those two units is real and clinically wrong by ~32 %.
+    SPLIT rather than being plotted on one axis. HbA1c in % and mmol/mol CAN
+    join, through a named affine function (a plain ratio would be clinically
+    wrong by ~32 %) -- but only when the code names the analyte. No substance
+    resolver is passed here, and cdr1's `urn:pdhc:concept/<guid>` codes name
+    none, so on cdr1 data they always SPLIT: the safe direction, pinned by the
+    #974 panel tests.
 
     `?format=csv` returns the same series as CSV. It is the same audited read
     (the decorator logs it), not a side door.
@@ -512,6 +615,9 @@ def patient_series(guid: str, code_canonical: str):
             points.extend(page["points"])
             cursor = page["next_cursor"]
             if not cursor:
+                break
+            if _over_budget():
+                complete = False
                 break
         else:
             complete = cursor is None
@@ -799,10 +905,16 @@ def patient_events(guid: str):
     from app.dashboard import limits as _limits
     patient_limits = _patient_limits(guid, unavailable)
 
-    # "Utanför gräns" (MDR IIa). Only a transaction with a usable limit can
-    # hold an outside value, so cdr1 is asked for exactly those (the echoed
-    # transaction filter) and every page is scanned, bounded. Orders that
-    # could not be read are a 503, never an empty "nothing is outside".
+    # "Utanför gräns" (MDR IIa). Every page is scanned, bounded, and each
+    # value is judged by `limits.evaluate` -- the SAME judgement the list and
+    # the chart make. Orders that could not be read are a 503, never an empty
+    # "nothing is outside".
+    #
+    # The scan may be narrowed to the transactions that carry a limit ONLY
+    # when no CarePlan goal exists: a goal judges a value by its concept
+    # alone, so a value with NO transaction can be outside it. Narrowing
+    # anyway hid exactly those values from this filter while the list marked
+    # them "över" (found 2026-11-17 with the #974 fixtures).
     outside_only = request.args.get("outside") == "1"
     if outside_only:
         if patient_limits is None:
@@ -812,14 +924,17 @@ def patient_events(guid: str):
         ranged = sorted(patient_limits.limited_transactions())
         if transactions:
             ranged = [t for t in ranged if t in transactions]
-        if not ranged:
+        has_goals = bool(patient_limits.goal_concepts())
+        if not ranged and not has_goals:
             sparr0 = sparr_state(guid)
             return jsonify(rows=[], nextCursor=None, truncated=False,
                            undatedCount=0, unavailable=unavailable, noLimits=True,
                            outsideScanComplete=True,
                            hasBlockedSources=ips_client.has_any_active_block(sparr0.blocks),
                            sparrChecked=sparr0.checked)
-        transactions = ranged
+        # With goals: keep only the caller's own transaction filter (None =
+        # every event). Without: exactly the limited transactions.
+        transactions = (transactions or None) if has_goals else ranged
 
     client = cdr1_client.build_client()
     try:
@@ -836,6 +951,9 @@ def patient_events(guid: str):
                 collected.extend(pg["points"])
                 cur = pg["next_cursor"]
                 if not cur:
+                    break
+                if _over_budget():
+                    scan_complete = False
                     break
             else:
                 scan_complete = cur is None
@@ -1092,12 +1210,33 @@ def event_detail(observation_guid: str):
             unavailable.append(f"plan:{type(exc).__name__}")
 
     code = d.get("code") or ""
+    concept = ips_client.concept_guid_from_canonical(code)
+    # #974: the detail's row must say what the list's row says. It used to
+    # carry the raw URN as its name and no T+, and the page renders the
+    # detail from THIS row, so T+ read "ej registrerat" where the list had it.
+    display = code
+    if concept:
+        try:
+            from app.services import plan_client
+            display = plan_client.concept_display_names([concept]).get(concept) or code
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"plan:{type(exc).__name__}")
+    t_plus = None
+    if ctx.get("care_plan_guid"):
+        from app.dashboard.timing import t_from_start_seconds
+        try:
+            from app.services import request_client
+            start = (request_client.build_client().fetch_care_plan(ctx["care_plan_guid"])
+                     or {}).get("period_start")
+            t_plus = t_from_start_seconds(d.get("at"), start)
+        except Exception as exc:  # noqa: BLE001
+            unavailable.append(f"request:{type(exc).__name__}")
     row = EventRow(
         observation_guid=d["observation_guid"], code_canonical=code,
-        display_name=code, value=d.get("value") if d.get("value") is not None
+        display_name=display, t_from_start_seconds=t_plus, value=d.get("value") if d.get("value") is not None
         else d.get("value_string"), unit=d.get("unit"),
         effective_at=d.get("at"), source_cdr="cdr1",
-        concept_guid=ips_client.concept_guid_from_canonical(code),
+        concept_guid=concept,
         transaction_guid=ctx.get("transaction_guid"),
         care_plan_guid=ctx.get("care_plan_guid"),
         service_request_guid=ctx.get("service_request_guid"),
@@ -1130,7 +1269,7 @@ def event_detail(observation_guid: str):
         "context": ctx,
         "contextFound": d.get("context_found"),
         "contextFilledFromRaw": d.get("context_filled_from_raw") or [],
-        "unavailable": unavailable,
+        "unavailable": list(dict.fromkeys(unavailable)),  # one entry per source and reason
         "hasBlockedSources": ips_client.has_any_active_block(sparr.blocks),
         "sparrChecked": sparr.checked,
     })

@@ -76,6 +76,9 @@ main { max-width: 1600px; }
 }
 .dash-chip code { font-weight: 700; margin-right: 0.35rem; }
 .dash-chip.is-inactive { color: var(--text-muted); border-style: dashed; }
+/* #974 step 23 (axe color-contrast): muted text on the global `code`
+ * background (--code-bg) is 4.34:1. An inactive chip's code sits on the chip. */
+.dash-chip.is-inactive code { background: transparent; }
 /* #984: held by the EPS alone, no CDR row behind it yet */
 .dash-chip.is-unbacked { border-style: dotted; }
 .dash-chip[aria-expanded="true"], .dash-toggle[aria-expanded="true"] {
@@ -125,15 +128,22 @@ main { max-width: 1600px; }
 .plan-head strong { display: block; }
 .plan-meta { color: var(--text-muted); font-size: 0.82rem; }
 .plan-group h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0.8rem 0 0.3rem; }
-.plan-group ul { list-style: none; margin: 0; padding: 0; }
+.plan-group ul, .plan-unordered ul { list-style: none; margin: 0; padding: 0; }
 .plan-item {
   display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
-  min-height: 44px; padding: 0.45rem 0; border-top: 1px solid var(--border);
+  min-height: 44px; padding: 0.45rem 0;
 }
-.plan-item:first-child { border-top: 0; }
+/* The separator sits on the <li>: a linked item is a <button> inside it. */
+.plan-group li + li, .plan-unordered li + li { border-top: 1px solid var(--border); }
+button.plan-item {
+  width: 100%; font: inherit; color: inherit; text-align: left;
+  background: none; border: 0; border-radius: 0;
+}
 .plan-item-title { min-width: 0; overflow-wrap: anywhere; }
 .plan-count { color: var(--text-muted); font-size: 0.82rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.plan-flag { display: block; color: var(--warning); font-size: 0.8rem; }
+/* #974 step 23 (axe color-contrast): --warning text is 3.0:1 on the page
+ * background. The text is --text; the warning colour stays as the marker. */
+.plan-flag { display: block; color: var(--text); font-size: 0.8rem; border-left: 3px solid var(--warning); padding-left: 0.35rem; }
 .plan-group.is-overdue h3 { color: var(--danger); }
 .plan-group.is-cancelled .plan-item-title { color: var(--text-muted); text-decoration: line-through; }
 .plan-now {
@@ -183,7 +193,9 @@ main { max-width: 1600px; }
 .ev-detail dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.2rem 1rem; margin: 0; font-size: 0.88rem; }
 .ev-detail dt { color: var(--text-muted); }
 .ev-detail dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.ev-detail .is-missing { color: var(--warning); font-style: italic; }
+/* "ej registrerat": --warning as text was 3.0:1 on --bg (axe, serious). Muted
+ * text (4.5:1) in italics, the warning colour kept as a left marker. */
+.ev-detail .is-missing { color: var(--text-muted); font-style: italic; box-shadow: inset 3px 0 0 var(--warning); padding-left: 0.45rem; }
 .ev-detail h4 { margin: 0.8rem 0 0.3rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
 .ev-detail pre { max-height: 16rem; overflow: auto; font-size: 0.78rem; background: var(--card-bg); padding: 0.5rem; border-radius: 4px; }
 .ev-detail.is-preview { border-style: dashed; }

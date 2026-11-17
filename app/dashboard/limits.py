@@ -266,6 +266,13 @@ class PatientLimits:
                 out.append(rng)
         return out
 
+    def goal_concepts(self) -> set[str]:
+        """Concepts with a usable GOAL. A goal judges a value by its concept
+        ALONE, so a value with no transaction at all can be outside one --
+        which is why the outside filter cannot be narrowed to
+        `limited_transactions` when this is non-empty (found 2026-11-17, #974)."""
+        return {concept for (_cp, concept), lim in self.goals.items() if not lim.invalid}
+
     def limited_transactions(self) -> set[str]:
         """Transactions that can carry an outside value: those with a range,
         and those whose concept has a goal in the same CarePlan."""

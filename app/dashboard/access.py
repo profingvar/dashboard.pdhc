@@ -194,15 +194,15 @@ def sparr_state(patient_guid: str) -> SparrState:
 
     `checked` is `ips_client.is_configured()` — "could we even ask?" — which is
     what the existing six sites report as `sparr_checked`. When ips is
-    configured but unreachable the blocks come back empty and `checked` stays
-    True; that is a deliberate limitation of the existing client and is not
-    made worse here, but it is why `has_any_block` is not evidence of safety.
+    configured but unreachable this now FAILS CLOSED (503 undetermined) via the
+    client's strict mode (#974): before, the client swallowed the error, the
+    blocks came back empty and blocked rows were served with `checked` True.
     """
     checked = ips_client.is_configured()
     if not checked:
         return SparrState(checked=False, blocks=())
     try:
-        blocks = tuple(ips_client.get_active_blocks(patient_guid) or ())
+        blocks = tuple(ips_client.get_active_blocks(patient_guid, strict=True) or ())
     except ips_client.IpsUnreachable:
         # Fail closed at the caller's level, but do NOT report this as "no
         # blocks" — an unreachable spärr authority is the `undetermined` case.

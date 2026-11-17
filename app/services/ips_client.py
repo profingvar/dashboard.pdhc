@@ -129,7 +129,13 @@ class IpsClient:
         h.update(outbound_session_headers())
         return h
 
-    def fetch_active_blocks(self, patient_guid: str) -> list[Block]:
+    def fetch_active_blocks(self, patient_guid: str, *, strict: bool = False) -> list[Block]:
+        """`strict=True` (the patient dashboard, #974): a CONFIGURED ips that
+        does not answer raises `IpsUnreachable` instead of returning "no
+        blocks". The older views keep failing open as documented below; the
+        dashboard's access layer was written to fail CLOSED here
+        (`access.sparr_state` -> 503 undetermined) and never could, because
+        this method swallowed the error. Found by the #974 resilience tests."""
         if not self.base_url:
             # An UNCONFIGURED ips used to return [] in silence, and an empty
             # block list means NOTHING IS HIDDEN and the PDL Ch 4 §4 ¶3 banner
@@ -155,7 +161,9 @@ class IpsClient:
                 url, params={"active": "true"},
                 headers=self._headers(), timeout=self.timeout,
             )
-        except requests.RequestException:
+        except requests.RequestException as exc:
+            if strict:
+                raise IpsUnreachable(f"ips blocks: {type(exc).__name__}") from exc
             current_app.logger.warning(
                 "ips block fetch failed for %s (network error) — "
                 "falling back to empty list",
@@ -165,6 +173,8 @@ class IpsClient:
         if r.status_code == 404:
             return []
         if r.status_code >= 400:
+            if strict:
+                raise IpsUnreachable(f"ips blocks: status {r.status_code}")
             current_app.logger.warning(
                 "ips block fetch failed for %s — status %s",
                 patient_guid[:12] if patient_guid else "?", r.status_code,
@@ -312,8 +322,10 @@ def get_active_blocks(
     *,
     client: IpsClient | None = None,
     use_cache: bool = True,
+    strict: bool = False,
 ) -> list[Block]:
-    """Return the patient's active blocks. Caches results for 30 s."""
+    """Return the patient's active blocks. Caches results for 30 s.
+    `strict`: see `IpsClient.fetch_active_blocks`; a failure is never cached."""
     if not patient_guid:
         return []
     if use_cache:
@@ -321,7 +333,8 @@ def get_active_blocks(
         if cached is not None:
             return cached
     client = client or _default_client()
-    blocks = [b for b in client.fetch_active_blocks(patient_guid) if b.is_active]
+    blocks = [b for b in (client.fetch_active_blocks(patient_guid, strict=True) if strict
+                          else client.fetch_active_blocks(patient_guid)) if b.is_active]
     if use_cache:
         _cache.put(patient_guid, blocks)
     return blocks

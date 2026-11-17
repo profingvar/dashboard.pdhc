@@ -335,7 +335,14 @@
   function wireEps(scope) {
     epsToggle = document.getElementById('eps-toggle');
     epsDetail = document.getElementById('eps-detail');
+    // #974 step 23: with real hover, the pointer ENTERS the button before it
+    // clicks it, so the hover accelerator had already opened the summary and
+    // the click then toggled it shut — a mouse user could not open it by
+    // clicking. A click within a second of a hover-open keeps it open; a
+    // later click toggles as usual. (No leave handler: hover never closes.)
+    var hoverOpenedAt = 0;
     epsToggle.addEventListener('click', function () {
+      if (Date.now() - hoverOpenedAt < 1000) { hoverOpenedAt = 0; setEps(true, false); return; }
       setEps(epsToggle.getAttribute('aria-expanded') !== 'true', false);
     });
     scope.querySelector('[data-role="eps-close"]').addEventListener('click', function () {
@@ -344,7 +351,10 @@
     // Hover accelerator: OPENS only, and only with real hover. It never
     // closes on mouseleave — the detail stays until it is closed.
     epsToggle.addEventListener('mouseenter', function () {
-      if (cap.hasHover) { setEps(true, false); }
+      if (cap.hasHover && epsToggle.getAttribute('aria-expanded') !== 'true') {
+        setEps(true, false);
+        hoverOpenedAt = Date.now();
+      }
     });
   }
 
@@ -558,11 +568,16 @@
    */
   var activePlanItem = null;
 
-  function makePlanLink(li, tx, title, count, complete) {
+  function makePlanLink(item, tx, title, count, complete) {
     if (!tx || count === 0) { return; }
-    li.classList.add('is-link');
-    li.tabIndex = 0;
-    li.setAttribute('role', 'button');
+    // #974 step 23 (axe `list`, serious): a <li role="button"> stops being a
+    // list item, so the <ul> held non-items. The control is now a real
+    // <button> INSIDE the <li>; Enter/Space come with it.
+    var li = el('button', item.className + ' is-link');
+    li.type = 'button';
+    while (item.firstChild) { li.appendChild(item.firstChild); }
+    item.className = 'plan-li';
+    item.appendChild(li);
     li.setAttribute('aria-pressed', 'false');
     function activate() {
       var on = activePlanItem !== li;
@@ -575,9 +590,6 @@
       events.link(on ? { tx: tx, title: title, count: count, complete: complete } : null, true);
     }
     li.addEventListener('click', activate);
-    li.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); activate(); }
-    });
     li.addEventListener('mouseenter', function () {
       if (cap.hasHover && !activePlanItem) { events.link({ tx: tx, title: title, count: count, complete: complete }, false); }
     });
@@ -1037,10 +1049,16 @@
    */
   var filters = (function () {
     var form, concepts = [], conceptsKnown = false, timer = null, rejected = [];
+    // #974 step 23 (found by the e2e run): `code` and `plan` are <select>s
+    // whose options arrive LATER (concepts, plans). Setting them at read time
+    // matched no option, so ?code=... was refused on every reload and ?plan=
+    // was never read back. They wait here until their options exist.
+    var pending = {};
 
     function readUrl() {
       var q = new URLSearchParams(window.location.search);
-      ['q', 'code', 'from', 'to'].forEach(function (k) {
+      ['code', 'plan'].forEach(function (k) { if (q.get(k)) { pending[k] = q.get(k); } });
+      ['q', 'from', 'to'].forEach(function (k) {
         if (!q.get(k) || !form.elements[k]) { return; }
         form.elements[k].value = q.get(k);
         // A date input REFUSES an invalid value silently (it becomes ''),
@@ -1126,6 +1144,16 @@
         sel.appendChild(o);
       });
       sel.value = keep;
+      settle(sel, 'code');
+    }
+
+    /* Apply a URL value to a select once its options exist; a value that
+     * matches no option is REFUSED by name, never silently dropped. */
+    function settle(sel, k) {
+      if (!pending[k]) { return; }
+      sel.value = pending[k];
+      if (sel.value !== pending[k]) { rejected.push(k + '=' + pending[k]); }
+      delete pending[k];
     }
 
     function fillPlans(data) {
@@ -1145,6 +1173,7 @@
         sel.appendChild(u);
       }
       sel.value = keep;
+      settle(sel, 'plan');
     }
 
     function start() {
@@ -1152,7 +1181,10 @@
       var url = readUrl();
       var conceptsLoaded = getJson('/dashboard/patients/' + encodeURIComponent(guid) + '/concepts')
         .then(function (d) { concepts = d.concepts || []; conceptsKnown = true; fillConcepts(); })
-        .catch(function () { conceptsKnown = false; });
+        .catch(function () {
+          conceptsKnown = false;
+          settle(form.querySelector('[data-role="ev-code"]'), 'code');
+        });
       var plansLoaded = planReady.then(fillPlans);
       // Apply the URL's filter only once what it refers to is known; a
       // plain visit loads at once.

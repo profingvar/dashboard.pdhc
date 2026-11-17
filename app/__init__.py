@@ -136,6 +136,14 @@ def create_app(config=None):
     # §7's deliberate loopback exceptions.
     for _key in ("PLAN_BASE_URL", "REQUEST_BASE_URL", "ICD11_BASE_URL"):
         app.config.setdefault(_key, os.environ.get(_key, ""))
+    # #974 (Phase 6 step 22) — the SYNTHETIC fixture layer, for tests, the
+    # e2e run and local development. Opt-in only, and `install` RAISES unless
+    # AUTH_MODE=off, so fixture data can never be served behind a real login.
+    for _key in ("DASHBOARD_FIXTURES", "DASHBOARD_FIXTURES_FAIL",
+                 "DASHBOARD_FIXTURES_ANCHOR"):
+        app.config.setdefault(_key, os.environ.get(_key, ""))
+    from app.dashboard.fixtures import maybe_install
+    maybe_install(app)
     db.init_app(app)
     Migrate(app, db, directory=os.path.join(os.path.dirname(__file__), "migrations"))
 
