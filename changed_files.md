@@ -875,3 +875,7 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js (EPS click after hover-open; plan-item <button>; URL code/plan filters applied once options exist)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css (axe contrast: is-missing, plan-flag, inactive chip code; plan list separators/bullets)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html (nav "PDHC / services" link: opacity removed, contrast)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py (2026-11-18, cross-CDR summary + multi-code AGP)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py (2026-11-18, NURSE_CGM_CODES)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_sparr.py (2026-11-18, fakes route the Observation search)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_cross_cdr.py (2026-11-18, new)

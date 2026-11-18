@@ -688,3 +688,10 @@ resolve_base_url path). pytest: 772 passed.
 ## #942 (2026-11-16): the canonical URI format is owned by termbank.pdhc (app/canonical_uri.py + conformance/canonical_uri_cases.json); the concept URN by plan.pdhc (planp/app/concept_urn.py + conformance/concept_urn_cases.json). Consumers keep byte-identical corpus copies in their tests; tools/check_canonical_uri_conformance.py in the workspace fails on drift or on a literal that breaks the grammar.
 
 ## #984/#985 (2026-11-16): operator decision — the CDR is the record for diagnoses (and observations); icd11 codes into the CDR; the ips EPS is a summary derived from the CDR (`derive-conditions-from-cdr`); the dashboard chips read the EPS. EPS Conditions were backfilled into their home CDR (`import-eps-conditions`); those with no home CDR stay, marked not CDR-backed.
+
+## 2026-11-18 — Nurse view reads observations from every CDR (9ba70b2)
+- Summary (`/api/nurse/patient/<guid>`): one Observation search across all CDRs; 404 only with neither a Patient resource nor a visible observation. New fields `patient_record_found`, `observation_cdrs`.
+- AGP: fans out per CGM code (`NURSE_CGM_CODES`, default LOINC 41653-7 + plan concept CGM 22d0f6c6) and merges per CDR.
+- Why: the 40 Hackathon patients' simulated CGM data sits in cdr2 with no Patient resource there (sim writes none); 39 of 40 answered "not found".
+- Tests: +6 (app/tests/test_nurse_cross_cdr.py; 5 fail on the old code), 879 pass. Deployed as an overlay image, rollback tag `dashboard_pdhc-app:pre_nurse` + `*.pre_nurse` files in current/. Verified live on klin1 (owner cdr1, values cdr1+cdr2, AGP n=86) and klin2 (no Patient anywhere, values cdr2, AGP n=78).
+- Known cosmetic gap: values from cdr2 carry no coding display, so the summary shows the concept-guid tail instead of "CGM"/"B-glucos".
