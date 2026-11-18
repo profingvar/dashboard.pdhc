@@ -107,3 +107,35 @@ def test_nurse_cgm_codes_override(monkeypatch):
     app.config["NURSE_CGM_CODES"] = " a|1 , b|2 "
     with app.app_context():
         assert nurse._cgm_codes() == ["a|1", "b|2"]
+
+
+def test_summary_names_values_that_arrive_without_a_display(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    e = _obs_entry(concept=CGM_CONCEPT, value=7.0)
+    del e["resource"]["code"]["coding"][0]["display"]
+    monkeypatch.setattr(nurse, "fanout", _fake(set(), {"cdr2": [e]}))
+    from app.services import plan_client
+    asked = []
+    monkeypatch.setattr(plan_client, "concept_display_names",
+                        lambda guids, **k: asked.append(list(guids)) or
+                        {"22d0f6c6-2438-4637-ad4e-9d85431b8edb": "CGM"})
+    body = app.test_client().get(f"/api/nurse/patient/{_PID}").get_json()
+    assert [v["display"] for v in body["latest_values"]] == ["CGM"]
+    assert asked == [["22d0f6c6-2438-4637-ad4e-9d85431b8edb"]]
+
+
+def test_summary_still_renders_when_plan_cannot_name(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    e = _obs_entry(concept=CGM_CONCEPT, value=7.0)
+    del e["resource"]["code"]["coding"][0]["display"]
+    monkeypatch.setattr(nurse, "fanout", _fake(set(), {"cdr2": [e]}))
+    from app.services import plan_client
+
+    def boom(*a, **k):
+        raise RuntimeError("plan down")
+    monkeypatch.setattr(plan_client, "concept_display_names", boom)
+    r = app.test_client().get(f"/api/nurse/patient/{_PID}")
+    assert r.status_code == 200
+    assert r.get_json()["latest_values"][0]["display"] is None

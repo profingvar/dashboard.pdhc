@@ -337,6 +337,7 @@ def patient_summary(guid: str):
                 "effective": eff,
             }
 
+    _fill_missing_displays(last_obs.values())
     return jsonify({
         "patient": owner.body if owner is not None
                    else {"resourceType": "Patient", "id": guid},
@@ -600,6 +601,29 @@ def _regimen(r: dict) -> dict:
         "start": (r.get("effectivePeriod") or {}).get("start"),
         "status": r.get("status"),
     }
+
+
+def _fill_missing_displays(values) -> None:
+    """Name values whose coding carries no display (sim and provider rows
+    arrive as bare `urn:pdhc:concept|<guid>`) from plan.pdhc's concept index
+    — the same cached lookup the dashboard's events panel uses. A label is
+    cosmetic: if plan.pdhc cannot be asked, the value is shown unnamed rather
+    than the summary failing."""
+    missing = {v["canonical"]: concept_guid_from_canonical(v["canonical"])
+               for v in values if not v.get("display") and v.get("canonical")}
+    guids = sorted({g for g in missing.values() if g})
+    if not guids:
+        return
+    from app.services import plan_client
+    try:
+        names = plan_client.concept_display_names(guids)
+    except Exception as exc:  # noqa: BLE001
+        current_app.logger.warning("nurse: concept names unavailable: %s", exc)
+        return
+    for v in values:
+        g_ = missing.get(v.get("canonical"))
+        if g_ and g_ in names:
+            v["display"] = names[g_]
 
 
 def _coding_uri(cc: dict | None) -> str | None:
