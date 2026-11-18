@@ -694,4 +694,4 @@ resolve_base_url path). pytest: 772 passed.
 - AGP: fans out per CGM code (`NURSE_CGM_CODES`, default LOINC 41653-7 + plan concept CGM 22d0f6c6) and merges per CDR.
 - Why: the 40 Hackathon patients' simulated CGM data sits in cdr2 with no Patient resource there (sim writes none); 39 of 40 answered "not found".
 - Tests: +6 (app/tests/test_nurse_cross_cdr.py; 5 fail on the old code), 879 pass. Deployed as an overlay image, rollback tag `dashboard_pdhc-app:pre_nurse` + `*.pre_nurse` files in current/. Verified live on klin1 (owner cdr1, values cdr1+cdr2, AGP n=86) and klin2 (no Patient anywhere, values cdr2, AGP n=78).
-- Known cosmetic gap: values from cdr2 carry no coding display, so the summary shows the concept-guid tail instead of "CGM"/"B-glucos".
+- Display names (859176f, deployed same day, rollback tag `:pre_names`): values with no coding display are named from plan.pdhc's concept index. Verified live: "B-glucos", "Kontinuerlig glucosmätning CGM".

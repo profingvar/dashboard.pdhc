@@ -879,3 +879,4 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py (2026-11-18, NURSE_CGM_CODES)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_sparr.py (2026-11-18, fakes route the Observation search)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_cross_cdr.py (2026-11-18, new)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py (2026-11-18, display names from plan concept index)
