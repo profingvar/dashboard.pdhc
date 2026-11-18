@@ -39,6 +39,8 @@ from flask import Blueprint, abort, current_app, g, jsonify, request
 from app.services.audit import audit_read
 from app.analyse.federation import (
     CdrRegistry,
+    FanoutResponse,
+    FanoutResult,
     fanout,
     lttb_downsample,
     merge_agp_bands,
@@ -176,6 +178,59 @@ def _sparr_filter_entries(guid: str, entries: list[dict]) -> tuple[list[dict], b
     return kept_entries, has_blocked
 
 
+# CGM readings arrive under more than one code: LOINC 41653-7 from devices
+# that code it, and plan.pdhc's own CGM concept from the CGM plan (provider
+# deliveries and simulation). cdr's `code` search has no OR, so the AGP asks
+# once per code and merges per CDR. Override with NURSE_CGM_CODES
+# (comma-separated `system|code`).
+DEFAULT_CGM_CODES = (
+    "https://termbank.pdhc.se/CodeSystem/loinc|41653-7",
+    "urn:pdhc:concept|22d0f6c6-2438-4637-ad4e-9d85431b8edb",  # plan.pdhc concept "CGM"
+)
+
+
+def _cgm_codes() -> list[str]:
+    raw = current_app.config.get("NURSE_CGM_CODES") or ""
+    codes = [c.strip() for c in raw.split(",") if c.strip()]
+    return codes or list(DEFAULT_CGM_CODES)
+
+
+def _fanout_codes(codes, *, params: dict, auth: dict) -> FanoutResponse:
+    """One Observation fan-out per code, merged into ONE result per CDR.
+
+    A CDR is ok only if every per-code read of it succeeded — a partial read
+    must not be presented as the whole picture."""
+    per_cdr: dict[str, FanoutResult] = {}
+    for code in codes:
+        resp = fanout(
+            _registry(),
+            method="GET",
+            path="api/v1/fhir/Observation",
+            params={**params, "code": code},
+            org_guids_header=auth["org_guids"],
+            is_admin_header=auth["is_admin"],
+        )
+        for r in resp.results:
+            prev = per_cdr.get(r.cdr_id)
+            entries = (r.body.get("entry") or []) if (r.ok and isinstance(r.body, dict)) else []
+            if prev is None:
+                per_cdr[r.cdr_id] = FanoutResult(
+                    cdr_id=r.cdr_id, base_url=r.base_url, region_label=r.region_label,
+                    ok=r.ok, status_code=r.status_code,
+                    body={"resourceType": "Bundle", "entry": list(entries)},
+                    elapsed_ms=r.elapsed_ms, error=r.error)
+            else:
+                prev.body["entry"].extend(entries)
+                prev.elapsed_ms += r.elapsed_ms
+                if not r.ok:
+                    prev.ok, prev.status_code, prev.error = False, r.status_code, r.error
+    results = list(per_cdr.values())
+    succeeded = [r.cdr_id for r in results if r.ok]
+    failed = [r.cdr_id for r in results if not r.ok]
+    mode = "complete" if not failed else ("degraded" if succeeded else "error")
+    return FanoutResponse(mode=mode, results=results, succeeded=succeeded, failed=failed)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/nurse/patient/<guid>
 # ---------------------------------------------------------------------------
@@ -200,31 +255,57 @@ def patient_summary(guid: str):
         is_admin_header=auth["is_admin"],
     )
     owner = next((r for r in pat_resp.results if r.ok), None)
-    if owner is None:
-        abort(404, description="patient not found in any CDR")
 
     since = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
-    everything_resp = fanout(
+    # 2026-11-18: observations are read from EVERY CDR, not only the owner.
+    # Simulated and provider-delivered data routinely land in a different CDR
+    # from the one holding the Patient resource (sim writes no Patient at
+    # all), and the summary used to show none of it — while the variable
+    # chart below already fanned out to all CDRs. Each CDR still applies its
+    # own Rule 24 scope to this search (X-Org-Guids), as it does there.
+    obs_resp = fanout(
         _registry(),
         method="GET",
-        path=f"api/v1/fhir/Patient/{guid}/$everything",
-        cdr_ids=[owner.cdr_id],
-        params={"_since": since, "_count": "500"},
+        path="api/v1/fhir/Observation",
+        params={"patient": guid, "date": f"ge{since}", "_count": "5000"},
         org_guids_header=auth["org_guids"],
         is_admin_header=auth["is_admin"],
     )
-    everything_body = next(
-        (r.body for r in everything_resp.results if r.ok and isinstance(r.body, dict)),
-        {"entry": []},
-    )
+    obs_entries = []
+    obs_cdrs = []
+    for r in obs_resp.results:
+        if not (r.ok and isinstance(r.body, dict)):
+            continue
+        got = [e for e in (r.body.get("entry") or [])
+               if (e.get("resource") or {}).get("resourceType") == "Observation"]
+        if got:
+            obs_cdrs.append(r.cdr_id)
+            obs_entries.extend(got)
 
-    entries = everything_body.get("entry") or []
-    # Spärr the Observation entries; non-Observation entries pass through the
-    # filter unchanged (no org_guid → never in a blocked clinic set).
-    obs_entries = [e for e in entries
-                   if (e.get("resource") or {}).get("resourceType") == "Observation"]
-    other_entries = [e for e in entries
-                     if (e.get("resource") or {}).get("resourceType") != "Observation"]
+    # No Patient resource anywhere AND no observation this caller may see:
+    # nothing to show. A patient known only through observations is shown —
+    # the observations themselves passed each CDR's scope check.
+    if owner is None and not obs_entries:
+        abort(404, description="patient not found in any CDR")
+
+    other_entries = []
+    if owner is not None:
+        everything_resp = fanout(
+            _registry(),
+            method="GET",
+            path=f"api/v1/fhir/Patient/{guid}/$everything",
+            cdr_ids=[owner.cdr_id],
+            params={"_since": since, "_count": "500"},
+            org_guids_header=auth["org_guids"],
+            is_admin_header=auth["is_admin"],
+        )
+        everything_body = next(
+            (r.body for r in everything_resp.results if r.ok and isinstance(r.body, dict)),
+            {"entry": []},
+        )
+        other_entries = [e for e in (everything_body.get("entry") or [])
+                         if (e.get("resource") or {}).get("resourceType") != "Observation"]
+
     kept_obs, has_blocked = _sparr_filter_entries(guid, obs_entries)
 
     conditions = []
@@ -257,9 +338,12 @@ def patient_summary(guid: str):
             }
 
     return jsonify({
-        "patient": owner.body,
-        "owner_cdr": owner.cdr_id,
-        "owner_region": owner.region_label,
+        "patient": owner.body if owner is not None
+                   else {"resourceType": "Patient", "id": guid},
+        "owner_cdr": owner.cdr_id if owner is not None else None,
+        "owner_region": owner.region_label if owner is not None else None,
+        "patient_record_found": owner is not None,
+        "observation_cdrs": sorted(obs_cdrs),
         "conditions": conditions,
         "regimen": regimens,
         "latest_values": list(last_obs.values()),
@@ -288,19 +372,10 @@ def patient_agp(guid: str):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     auth = _auth_headers()
-    cgm_canonical = "https://termbank.pdhc.se/CodeSystem/loinc|41653-7"
-    raw = fanout(
-        _registry(),
-        method="GET",
-        path="api/v1/fhir/Observation",
-        params={
-            "patient": guid,
-            "code": cgm_canonical,
-            "date": f"ge{since}",
-            "_count": "30000",
-        },
-        org_guids_header=auth["org_guids"],
-        is_admin_header=auth["is_admin"],
+    raw = _fanout_codes(
+        _cgm_codes(),
+        params={"patient": guid, "date": f"ge{since}", "_count": "30000"},
+        auth=auth,
     )
 
     # Spärr each per-CDR bundle's Observation entries before aggregation.

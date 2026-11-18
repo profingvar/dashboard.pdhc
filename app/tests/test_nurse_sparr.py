@@ -141,8 +141,13 @@ def test_summary_owner_and_latest_values(monkeypatch):
     ]}
 
     def fake_fanout(*a, **k):
-        if "$everything" in k.get("path", ""):
+        path = k.get("path", "")
+        if "$everything" in path:
             return _resp([_fr(everything)])
+        if path == "api/v1/fhir/Observation":
+            # Observations now come from the all-CDR search, not $everything.
+            return _resp([_fr({"entry": [e for e in everything["entry"]
+                                         if e["resource"]["resourceType"] == "Observation"]})])
         return _resp([_fr(patient_body)])
 
     monkeypatch.setattr(nurse, "fanout", fake_fanout)
@@ -170,7 +175,8 @@ def test_summary_sparr_hides_blocked_obs(monkeypatch):
     everything = {"entry": [_obs_entry(org=_ORG, value=5.5)]}
 
     def fake_fanout(*a, **k):
-        if "$everything" in k.get("path", ""):
+        path = k.get("path", "")
+        if "$everything" in path or path == "api/v1/fhir/Observation":
             return _resp([_fr(everything)])
         return _resp([_fr(patient_body)])
 

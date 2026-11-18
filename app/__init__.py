@@ -134,6 +134,9 @@ def create_app(config=None):
     # Cross-service base URLs are the PUBLIC subdomain (#830). icd11.pdhc has
     # a live vhost and answers 302; unlike termbank and cdr_6 it is not one of
     # §7's deliberate loopback exceptions.
+    # Nurse AGP: which Observation codes count as CGM (comma-separated
+    # system|code). Unset = the defaults in routes/nurse.py.
+    app.config.setdefault("NURSE_CGM_CODES", os.environ.get("NURSE_CGM_CODES", ""))
     for _key in ("PLAN_BASE_URL", "REQUEST_BASE_URL", "ICD11_BASE_URL"):
         app.config.setdefault(_key, os.environ.get(_key, ""))
     # #974 (Phase 6 step 22) — the SYNTHETIC fixture layer, for tests, the
