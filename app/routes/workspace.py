@@ -2,7 +2,7 @@
 
 Platform-plan execution §4.4.a / §4.7.b. Since #543 extracted the
 group/population analyse-engine into the separate analyse.pdhc service,
-the only clinical workspace this (cd-assist) service serves is the nurse
+the only clinical workspace this service serves is the nurse
 single-patient view. The selector therefore always routes straight to
 the nurse workspace. Route guards are duplicated from the JSON-API
 decorators since these are HTML pages a user navigates to.

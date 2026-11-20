@@ -169,7 +169,7 @@ def create_app(config=None):
     # #543 — the group/population "analyse-engine" half (researcher +
     # /api/cohort, plus the analyse-layer observations_search / stats /
     # canonical / openehr blueprints) was extracted into the separate
-    # analyse.pdhc service. Only the individual/point-of-care (cd-assist)
+    # analyse.pdhc service. Only the individual/point-of-care
     # surface remains here; the CDR2-5 federation still backs the nurse
     # single-patient views (app/analyse/federation.py + aggregations.py).
     app.register_blueprint(auth_bp)

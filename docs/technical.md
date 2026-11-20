@@ -1,14 +1,13 @@
-# cd-assist — Technical Description
+# dashboard — Technical Description
 
 ## Purpose
-cd-assist is the **individual / point-of-care** half of the old dashboard,
-kept after the analyse-engine split (#533 / #543). It serves a treating
+dashboard is the **individual / point-of-care** half of the platform's clinical
+tooling, kept after the analyse-engine split (#533 / #543). It serves a treating
 clinician a **single-patient** clinical-decision-assist surface: a patient
 picker, a CDR1-backed per-patient charts view, and the nurse single-patient
 views (summary / AGP / variable / events) federated across the regional CDRs.
 
-It is a **low-friction rename** of dashboard.pdhc: it keeps the host
-`dashboard.pdhc.se`, the port block **9026–9029**, and the container names
+It runs on the host `dashboard.pdhc.se`, port block **9026–9029**, with the container names
 `dashboard_pdhc_app` / `dashboard_pdhc_db` (compose project `dashboard_pdhc`).
 
 > The **group / population** features (researcher cohort engine, cohort export,
@@ -58,7 +57,7 @@ metadata-only banner (PDL Ch 4 §4).
 ## Architecture
 ```
                        ┌── CDR1 (cdr.pdhc.se) ── charts + picker (care-delivery reads)
-browser ──SSO──▶ cd-assist ─┤
+browser ──SSO──▶ dashboard ─┤
  (dashboard.pdhc.se)   └── CDR2..CDR3 fan-out ── nurse summary/AGP/variable/events
                             │
                    ips.pdhc (spärr blocks)   Postgres 9026 / Flask(gunicorn) 9027

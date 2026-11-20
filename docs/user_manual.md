@@ -1,10 +1,10 @@
-# cd-assist — User Manual
+# dashboard — User Manual
 
-**cd-assist** is the individual / point-of-care **clinical-decision-assist**
-tool of the PDHC platform — the former *dashboard*, refocused. It lets a
+**dashboard** is the individual / point-of-care **clinical-decision-assist**
+tool of the PDHC platform. It lets a
 treating clinician look at **one patient at a time**: their latest values,
 time series, ambulatory glucose profile (AGP), and clinical events. It runs on
-`dashboard.pdhc.se` (the host is unchanged from the old dashboard).
+`dashboard.pdhc.se`.
 
 > **Population / cohort analysis moved out.** The group features — the
 > researcher cohort builder, cohort exports, and federated
@@ -18,7 +18,7 @@ time series, ambulatory glucose profile (AGP), and clinical events. It runs on
 - **Production**: `AUTH_MODE=sso` — log in via the PDHC SSO portal. Your session
   is re-validated with SSO on every request, so a logout (or an admin revoking
   your session) takes effect immediately.
-- **Access is a care relationship, not an analysis grant.** You reach cd-assist
+- **Access is a care relationship, not an analysis grant.** You reach dashboard
   if you are an SU admin, or a professional with at least one **care-unit
   scope** (a care relationship). You do **not** need the *analysis* phase — that
   phase gates analyse.pdhc, not this service.

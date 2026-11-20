@@ -95,7 +95,7 @@ def test_care_access_none():
 
 def test_clinical_path_classification():
     # #546/#543: /api/nurse/* + the nurse workspace page (/nurse, /workspace)
-    # are care-delivery clinical paths; cd-assist has no analyse routes left.
+    # are care-delivery clinical paths; dashboard has no analyse routes left.
     for p in ("/", "/refresh", "/select", "/patient/abc", "/api/v1/designs",
               "/api/v1/designs/xyz", "/api/nurse/patient/x", "/api/nurse/patient/g/agp",
               "/nurse", "/workspace"):
@@ -132,7 +132,7 @@ def test_care_only_user_reaches_nurse_workspace():
     app = _app("sso")
     c = app.test_client()
     _login_as(c, _CARE_ONLY)
-    # #543/#546: cd-assist has no analyse routes left; the nurse workspace is
+    # #543/#546: dashboard has no analyse routes left; the nurse workspace is
     # care-delivery, so a care-only nurse (nurse affiliation, no analysis phase)
     # reaches /workspace, which redirects to the nurse view.
     r = c.get("/workspace")

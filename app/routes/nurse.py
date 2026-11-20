@@ -1,6 +1,6 @@
 """Nurse workspace API — individual / point-of-care single-patient views.
 
-Part of cd-assist (the individual clinical-decision-assist half of the old
+Part of dashboard (the individual clinical-decision-assist half of the old
 dashboard — analyse-engine split #533, pivot 2026-08-07). Endpoints (all
 under ``/api/nurse``):
 
@@ -12,7 +12,7 @@ under ``/api/nurse``):
   GET /patient/<guid>/events                — hypo / encounter markers
 
 Two properties distinguish these from the analyse-engine (researcher) routes
-(#546, the nurse-fold; salvaged from the discarded greenfield cd-assist):
+(#546, the nurse-fold; salvaged from a discarded greenfield rewrite):
 
 1. Gate — these are CARE-DELIVERY routes, NOT analysis-phase. ``/api/nurse``
    is registered as a clinical path in ``app.auth._is_clinical_path``, so the

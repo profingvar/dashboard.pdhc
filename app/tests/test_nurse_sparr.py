@@ -1,6 +1,6 @@
 """Nurse single-patient endpoints — care-delivery re-gate + spärr (#546).
 
-The nurse views were folded from the analyse engine into cd-assist's
+The nurse views were folded from the analyse engine into dashboard's
 care-delivery surface: gated via ``/api/nurse`` being a clinical path
 (``app.auth._is_clinical_path``) and spärr-filtered per patient exactly like
 ``routes/charts.py::series``. The federation never opens a socket here —

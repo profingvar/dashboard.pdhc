@@ -112,6 +112,10 @@ Tracks progress against readme.md. Same numbering. Each step records tests deplo
   - /auth/login → 302 (handoff to sso.pdhc)
 - 18.j reverse proxy — operator already live (dashboard.pdhc.se → 127.0.0.1:9027). Not touched.
 
+### 2026-11-20 — the service is called dashboard again (cd-assist removed)
+- Page titles (base, select, nurse workspace, logged out), the h1, code comments, tests' comments and both manuals say "dashboard". The host, ports and containers were already dashboard.
+- Suite 881 passed. Templates need a deploy to show.
+
 ### start.sh rewrite (2026-04-11)
 Replaced the foreground `flask run` pattern with a robust daemonized setup
 matching gateway.pdhc / 1177 / cgm conventions:

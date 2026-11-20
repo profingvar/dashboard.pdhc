@@ -44,7 +44,7 @@ def callback():
     if not blob:
         flash("SSO token validation failed.", "danger")
         return redirect(url_for("auth.login"))
-    # cd-assist is a care-delivery service now (#543) with only a vestigial
+    # dashboard is a care-delivery service now (#543) with only a vestigial
     # analysis surface. Admit anyone who can reach SOME route — a care
     # relationship OR the analysis phase — so a pure care-delivery nurse can
     # log in (#546). The per-request route-aware loader (app.auth) then gates
@@ -96,7 +96,7 @@ LOGGED_OUT_PAGE = """\
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Logged out — cd-assist</title>
+<title>Logged out — dashboard</title>
 <style>
   body { font-family: system-ui, sans-serif; display: flex; justify-content: center;
          align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
