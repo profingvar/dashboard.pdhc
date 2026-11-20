@@ -114,7 +114,7 @@ Tracks progress against readme.md. Same numbering. Each step records tests deplo
 
 ### 2026-11-20 — the service is called dashboard again (cd-assist removed)
 - Page titles (base, select, nurse workspace, logged out), the h1, code comments, tests' comments and both manuals say "dashboard". The host, ports and containers were already dashboard.
-- Suite 881 passed. Templates need a deploy to show.
+- Suite 881 passed. Deployed 2026-11-20 (overlay, rollback tag :pre_rename).
 
 ### start.sh rewrite (2026-04-11)
 Replaced the foreground `flask run` pattern with a robust daemonized setup
