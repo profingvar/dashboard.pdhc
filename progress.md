@@ -704,3 +704,17 @@ resolve_base_url path). pytest: 772 passed.
 - Event list "Patient" badge; detail "Ursprung" row (never "ej registrerat": unmarked = healthcare by policy) plus a note; chart hollow points with a legend line and an aria-label count; CSV `data_origin` as the LAST column. Fixtures mark EQ VAS, the free-text well-being answers and the HF manual weights.
 - 5 unit tests (fail with the change reverted) + e2e `fixtures-specs/origin.spec.ts` (badge, note, legend, axe wcag2a/aa with the marked row selected; it caught a selected-row badge contrast of 2.83, fixed). Suite 886; fixtures e2e 16/16.
 - Deployed 2026-11-21 (overlay, image tag `dashboard_pdhc-app:pre_origin2`, pg_dump in ~/backups/predeploy/origin2_dash/). Health 200, hashes ok, the served JS/CSS carry the markers, smoke --all green before and after.
+
+## #1019 — EPS rename phase 3 (2026-11-21, local commit, NOT deployed)
+dashboard reads EPS_BASE_URL first, IPS_BASE_URL only when EPS_BASE_URL is
+blank (app/eps_env.py), in both create_app and ips_client.resolve_base_url.
+Both unset = "" as before (is_configured() False, SPARR_UNAVAILABLE logged).
+dashboard reads no IPS_API_KEY from the environment (the smoke's
+cfg.get("IPS_API_KEY") reads a config key nothing loads), so only
+EPS_BASE_URL is needed. pytest: 886 -> 898 passed (+11 eps, +1 guard).
+Mutation proof: reverted helper fails 4 new-name tests, EPS-only 4 old-name
+tests, invented default 3 unset tests.
+Baseline: .env.example and app/tests/test_blocks_filter.py in the container
+are OLDER than git (#931 / #942 not shipped into the image); all touched code
+files match. Operator, at deploy: add EPS_BASE_URL=https://eps.pdhc.se to
+shared/.env (env_file), then docker-compose up -d.

@@ -61,6 +61,7 @@ def _no_ambient_ips_url(monkeypatch):
     want it in the environment set it themselves.
     """
     monkeypatch.delenv("IPS_BASE_URL", raising=False)
+    monkeypatch.delenv("EPS_BASE_URL", raising=False)  # #1019: read first
 
 
 @pytest.fixture(autouse=True)

@@ -165,7 +165,7 @@ def main(as_json: bool = False) -> int:
         def _():
             miss = [n for n, v in (("SSO_BASE_URL", sso),
                                    ("CDR1_BASE_URL", cdr1),
-                                   ("IPS_BASE_URL", ips)) if not v]
+                                   ("EPS_BASE_URL (or IPS_BASE_URL)", ips)) if not v]
             note = "SSO/CDR1/IPS set" if not miss else "MISSING: " + ", ".join(miss)
             if not gw:
                 note += "; GATEWAY_BASE_URL unset"
@@ -262,7 +262,7 @@ def main(as_json: bool = False) -> int:
         @check("ips: /patients/<g>/blocks EXISTS (not 404)")
         def _():
             if not ips:
-                return False, "IPS_BASE_URL not set"
+                return False, "EPS_BASE_URL (or deprecated IPS_BASE_URL) not set"
             code, _b = _probe(f"{ips}/api/v1/patients/{NOBODY}/blocks",
                               params={"active": "true"},
                               headers={"Accept": "application/json"})
@@ -287,7 +287,7 @@ def main(as_json: bool = False) -> int:
             # still enforced one layer down. It is reported so the second
             # layer's absence is VISIBLE rather than silent.
             if not (ips and svc_key):
-                return True, "skipped — IPS_BASE_URL or the service key unset"
+                return True, "skipped — EPS_BASE_URL or the service key unset"
             code, _b = _probe(f"{ips}/api/v1/patients/{NOBODY}/blocks",
                               params={"active": "true"},
                               headers={"Accept": "application/json",
@@ -320,7 +320,7 @@ def main(as_json: bool = False) -> int:
         @check("ips: /patients/analysis-filter EXISTS (not 404)")
         def _():
             if not ips:
-                return False, "IPS_BASE_URL not set"
+                return False, "EPS_BASE_URL (or deprecated IPS_BASE_URL) not set"
             # POST-only, so GET is a 405 — which proves it is routed without
             # this smoke sending a patient list to a sibling.
             code, _b = _probe(f"{ips}/api/v1/patients/analysis-filter")

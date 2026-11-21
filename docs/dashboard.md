@@ -74,7 +74,7 @@ field that is `null` means "not recorded", never "could not fetch".
 | card | Diagnoser (chips) | ips — `GET /api/v1/patients/<guid>/euips-summary` via `IpsClient.euips_summary`, the section with `key == "problems"` | Since #984 the only source. `code`, `display`, `status`, `onset`, `abatement`, `date`, `system`, `cdr_backed`, `cdr` are read from each entry. `verificationStatus` is always `null`. A chip with `cdrBacked: false` is marked "ej förankrad i CDR". icd11.pdhc is **not** called. |
 | card | diagnosis note | derived from the problems section | Three states: `diagnosesDefinitivelyEmpty` `null` = ips failed (unknown), `true` = section is `EXPLICITLY_ABSENT`, `false` with no chips = section does not say. |
 | card | Patientsammanfattning (EPS) | ips — same `euips-summary` body, all sections | Each section → `EpsSection` (`_eps_section`, `dashboard.py:107`). An explicitly-absent section shows its absent-assertion text. |
-| card | spärr banner | ips — `GET /api/v1/patients/<guid>/blocks?active=true` via `get_active_blocks(strict=True)` (`sparr_state`, `access.py`) | `sparrChecked: false` when `IPS_BASE_URL` is unset; ips configured but unreachable → 503 `undetermined` on every patient read (#974). |
+| card | spärr banner | ips — `GET /api/v1/patients/<guid>/blocks?active=true` via `get_active_blocks(strict=True)` (`sparr_state`, `access.py`) | `sparrChecked: false` when `EPS_BASE_URL` (and the deprecated `IPS_BASE_URL`) is unset; ips configured but unreachable → 503 `undetermined` on every patient read (#974). |
 | card | unavailable banners | `unavailable` list | `eps:unreachable:…`, `eps:patient-not-in-ips-scope` (ips 404). |
 
 ### 2.2 Plan panel

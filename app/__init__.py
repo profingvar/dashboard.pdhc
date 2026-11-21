@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify
 from flask_migrate import Migrate
 from app.models import db
+from app.eps_env import eps_env
 
 
 def _results_dir():
@@ -119,9 +120,14 @@ def create_app(config=None):
     # answering "not configured" even with the variable set. Exactly the
     # cdr_6 defect in #783's sibling smoke: one resolution path for the
     # client, a different one for the question "can we ask at all?".
+    #
+    # #1019 (epic #1015): ips.pdhc is becoming eps.pdhc. EPS_BASE_URL is read
+    # first and the deprecated IPS_BASE_URL only when it is blank; both unset
+    # is "" exactly as before. The CONFIG key keeps its old name, so every
+    # caller of `current_app.config["IPS_BASE_URL"]` is unchanged.
     app.config.setdefault(
         "IPS_BASE_URL",
-        os.environ.get("IPS_BASE_URL", ""),
+        eps_env("BASE_URL", ""),
     )
     # #982 — the same shape as the #827 comment above, on three more
     # variables. The patient dashboard's clients for plan.pdhc,

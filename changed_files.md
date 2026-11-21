@@ -887,3 +887,13 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js, app/static/css/dashboard.css
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_data_origin_1014.py (NEW), test_dashboard_panels_974.py
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/e2e/fixtures-specs/origin.spec.ts (NEW)
+
+## 2026-11-21 — #1019 (epic #1015) EPS_* first, IPS_* as deprecated fallback
+- app/eps_env.py (NEW) — the one helper for every IPS_* environment read
+- app/__init__.py — IPS_BASE_URL config key filled by eps_env("BASE_URL")
+- app/services/ips_client.py — resolve_base_url's env fallback via eps_env; messages name EPS_BASE_URL; unused `import os` removed
+- app/templates/charts.html — operator hint names EPS_BASE_URL (IPS_BASE_URL deprecated)
+- .env.example — EPS_BASE_URL=https://eps.pdhc.se offered; IPS_BASE_URL commented, deprecated
+- app/tests/test_eps_env.py (NEW, 11); app/tests/test_base_url_config.py (RENAMED_ENV alias + 1 test)
+- app/tests/test_sparr_unconfigured.py, test_sparr_banner_distinguishes.py — autouse also clears EPS_BASE_URL
+- deploy/smoke_siblings.py, docs/dashboard.md, scripts/run_fixtures.sh — name EPS_BASE_URL

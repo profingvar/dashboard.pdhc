@@ -34,6 +34,7 @@ def _no_ambient_ips_url(monkeypatch):
     `IPS_BASE_URL` would make every "unconfigured" case below assert the
     opposite of what it reads."""
     monkeypatch.delenv("IPS_BASE_URL", raising=False)
+    monkeypatch.delenv("EPS_BASE_URL", raising=False)  # #1019: read first
 
 
 def _app(**over):

@@ -99,12 +99,19 @@ def keys_loaded_by_create_app() -> set[str]:
     return out
 
 
+#: #1019 (epic #1015): config keys whose ENVIRONMENT name has been renamed.
+#: The config key keeps the old name; `.env.example` offers the new one, and
+#: `app/eps_env.py` reads it first. Offering the new name satisfies the key.
+RENAMED_ENV = {"IPS_BASE_URL": "EPS_BASE_URL"}
+
+
 def keys_offered_by_env_example() -> set[str]:
     """`KEY=` at the start of a line. Anchored: the file explains the gap in
     prose that names IPS_BASE_URL, and prose is not an offer."""
     text = (REPO / ".env.example").read_text()
-    return {m.group(1) for m in
-            re.finditer(r"^([A-Z][A-Z0-9_]*_BASE_URL)=", text, re.M)}
+    offered = {m.group(1) for m in
+               re.finditer(r"^([A-Z][A-Z0-9_]*_BASE_URL)=", text, re.M)}
+    return offered | {old for old, new in RENAMED_ENV.items() if new in offered}
 
 
 def _all_read() -> set[str]:
@@ -177,3 +184,15 @@ def test_a_key_named_only_in_PROSE_is_not_counted():
     only_prose = "# PLAN_BASE_URL is mentioned here and nowhere set\n"
     assert not re.findall(r"^([A-Z][A-Z0-9_]*_BASE_URL)=", only_prose, re.M)
     assert "IPS_BASE_URL" in offered
+
+
+def test_the_renamed_key_is_offered_under_its_NEW_name_only():
+    """#1019: `.env.example` offers EPS_BASE_URL on a line of its own and
+    keeps IPS_BASE_URL only as a commented, deprecated example. A raw parse
+    (without the alias) must see EPS and not IPS, or the alias above would be
+    hiding an example that still teaches the old name."""
+    text = (REPO / ".env.example").read_text()
+    raw = set(re.findall(r"^([A-Z][A-Z0-9_]*_BASE_URL)=", text, re.M))
+    assert "EPS_BASE_URL" in raw
+    assert "IPS_BASE_URL" not in raw
+    assert re.search(r"^EPS_BASE_URL=https://eps\.pdhc\.se$", text, re.M)

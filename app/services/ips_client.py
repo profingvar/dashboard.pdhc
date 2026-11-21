@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import re
 
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -36,6 +35,8 @@ from typing import Iterable
 
 import requests
 from flask import current_app
+
+from app.eps_env import eps_env
 
 
 DEFAULT_TTL_SECONDS = 30  # legal 2026-06-04
@@ -96,7 +97,8 @@ def resolve_base_url() -> str:
         from_config = (current_app.config.get("IPS_BASE_URL") or "").strip()
     except RuntimeError:  # no application context
         from_config = ""
-    return (from_config or os.environ.get("IPS_BASE_URL", "")).strip()
+    # #1019: the environment half goes through the one EPS-first helper.
+    return (from_config or eps_env("BASE_URL", "")).strip()
 
 
 class IpsClient:
@@ -201,7 +203,8 @@ class IpsClient:
         if not patient_guids:
             return {"allowed": [], "excluded": []}
         if not self.base_url:
-            raise IpsUnreachable("IPS_BASE_URL not configured")
+            raise IpsUnreachable(
+                "EPS_BASE_URL (or the deprecated IPS_BASE_URL) not configured")
         url = f"{self.base_url}/api/v1/patients/analysis-filter"
         try:
             r = requests.post(
@@ -245,7 +248,8 @@ class IpsClient:
         """
         if not self.base_url:
             raise IpsUnreachable(
-                "IPS_BASE_URL not configured — the summary is UNKNOWN, which "
+                "EPS_BASE_URL (or the deprecated IPS_BASE_URL) not "
+                "configured — the summary is UNKNOWN, which "
                 "is not the same as empty")
         try:
             r = requests.get(
@@ -353,7 +357,8 @@ def _log_unconfigured(patient_guid: str | None = None) -> None:
     _UNCONFIGURED_REPORTED = True
     try:
         current_app.logger.error(
-            "SPARR_UNAVAILABLE IPS_BASE_URL is not configured, so every "
+            "SPARR_UNAVAILABLE EPS_BASE_URL (or the deprecated IPS_BASE_URL) "
+            "is not configured, so every "
             "spärr lookup returns NO BLOCKS without asking ips: nothing is "
             "hidden by this service and the PDL Ch 4 §4 ¶3 banner cannot "
             "render. cdr1 still applies care_access_policy on the "
