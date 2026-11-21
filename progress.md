@@ -718,3 +718,10 @@ Baseline: .env.example and app/tests/test_blocks_filter.py in the container
 are OLDER than git (#931 / #942 not shipped into the image); all touched code
 files match. Operator, at deploy: add EPS_BASE_URL=https://eps.pdhc.se to
 shared/.env (env_file), then docker-compose up -d.
+
+## 2026-11-22 — #1019 eps rename code DEPLOYED
+
+- Overlay image on the running one, baseline-hashed first; rollback tag `:pre_eps`, replaced release files kept as `*.pre_eps.<ts>`.
+- Health 200 and file hashes verified in the container; sibling smoke green before (pre-rename smoke) and after.
+- No behaviour change until `EPS_*` is set in .env: operator script `/tmp/epsdep/eps_env.sh <group>` (refuses until https://eps.pdhc.se answers as eps.pdhc).
+
