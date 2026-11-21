@@ -699,3 +699,8 @@ resolve_base_url path). pytest: 772 passed.
 - Why: the 40 Hackathon patients' simulated CGM data sits in cdr2 with no Patient resource there (sim writes none); 39 of 40 answered "not found".
 - Tests: +6 (app/tests/test_nurse_cross_cdr.py; 5 fail on the old code), 879 pass. Deployed as an overlay image, rollback tag `dashboard_pdhc-app:pre_nurse` + `*.pre_nurse` files in current/. Verified live on klin1 (owner cdr1, values cdr1+cdr2, AGP n=86) and klin2 (no Patient anywhere, values cdr2, AGP n=78).
 - Display names (859176f, deployed same day, rollback tag `:pre_names`): values with no coding display are named from plan.pdhc's concept index. Verified live: "B-glucos", "Kontinuerlig glucosmätning CGM".
+
+### 2026-11-21 — #1014 patient-generated data shown to the professional
+- Event list "Patient" badge; detail "Ursprung" row (never "ej registrerat": unmarked = healthcare by policy) plus a note; chart hollow points with a legend line and an aria-label count; CSV `data_origin` as the LAST column. Fixtures mark EQ VAS, the free-text well-being answers and the HF manual weights.
+- 5 unit tests (fail with the change reverted) + e2e `fixtures-specs/origin.spec.ts` (badge, note, legend, axe wcag2a/aa with the marked row selected; it caught a selected-row badge contrast of 2.83, fixed). Suite 886; fixtures e2e 16/16.
+- Deployed 2026-11-21 (overlay, image tag `dashboard_pdhc-app:pre_origin2`, pg_dump in ~/backups/predeploy/origin2_dash/). Health 200, hashes ok, the served JS/CSS carry the markers, smoke --all green before and after.

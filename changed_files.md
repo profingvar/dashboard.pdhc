@@ -880,3 +880,10 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_sparr.py (2026-11-18, fakes route the Observation search)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_nurse_cross_cdr.py (2026-11-18, new)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/nurse.py (2026-11-18, display names from plan concept index)
+
+## 2026-11-21 — #1014 data_origin
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/dashboard/dto.py, units.py, fixtures.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js, app/static/css/dashboard.css
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_data_origin_1014.py (NEW), test_dashboard_panels_974.py
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/e2e/fixtures-specs/origin.spec.ts (NEW)
