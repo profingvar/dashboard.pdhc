@@ -203,6 +203,10 @@ class EventRow:
     #: The verdict of `app.dashboard.limits` on this value, as wired by
     #: `limits.wire`. None only where limits were not evaluated at all.
     limit: dict | None = None
+    #: #1014: "patient_generated", or None = produced or endorsed by
+    #: healthcare (opt-in by policy, so None is NOT "not recorded").
+    #: Patient-generated data has a different legal status; the page marks it.
+    data_origin: str | None = None
 
 
 @dataclass(frozen=True)
@@ -257,6 +261,8 @@ class SeriesPoint:
     transaction_guid: str | None = None
     #: The `limits` verdict status for this point ("above", "no_limit", ...).
     limit_status: str | None = None
+    #: #1014: "patient_generated" or None (= healthcare). See EventRow.
+    data_origin: str | None = None
 
 
 @dataclass(frozen=True)

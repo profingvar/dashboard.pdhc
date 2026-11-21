@@ -37,6 +37,13 @@
     unknown: 'ej bedömd — vårdplanerna kunde inte läsas'
   };
   var LIMIT_SYMBOL = { above: '▲', below: '▼' };
+
+  // #1014: patient-generated data (PGD) has a different legal status from data
+  // produced or endorsed by healthcare. Opt-in on the platform: only
+  // "patient_generated" is ever set; an unmarked value is healthcare data.
+  var ORIGIN_PATIENT_TEXT = 'Patientgenererad data – registrerad av patienten, inte av vården';
+  var ORIGIN_HEALTHCARE_TEXT = 'Vård (producerad eller godkänd av vården)';
+  function isPatientGenerated(r) { return !!r && r.dataOrigin === 'patient_generated'; }
   function limitRange(l) {
     if (!l) { return null; }
     var has = function (v) { return v !== null && v !== undefined; };
@@ -670,7 +677,16 @@
       n.setAttribute('aria-posinset', String(i + 1));
       n.style.top = (i * h) + 'px';
       if (linked && r.transactionGuid === linked.tx) { n.classList.add('is-linked'); }
-      n.appendChild(el('span', null, r.displayName || r.codeCanonical || DASH));
+      var nameCell = el('span', null, r.displayName || r.codeCanonical || DASH);
+      if (isPatientGenerated(r)) {
+        // #1014: patient-generated data has a different legal status.
+        var pg = el('span', 'origin-badge', 'Patient');
+        pg.title = ORIGIN_PATIENT_TEXT;
+        nameCell.appendChild(document.createTextNode(' '));
+        nameCell.appendChild(pg);
+        n.classList.add('is-patient-generated');
+      }
+      n.appendChild(nameCell);
       var valCell = el('span');
       var lim = r.limit || {};
       if (lim.outside) {
@@ -898,7 +914,12 @@
         ['Transaktion', row.transactionGuid],
         ['Kontrakt', d.contractGuid]
       ]);
+      if (isPatientGenerated(row)) {
+        detail.appendChild(el('p', 'origin-note', ORIGIN_PATIENT_TEXT + '.'));
+      }
       block('Organisation och källa', [
+        // #1014: never "ej registrerat" — unmarked data is healthcare by policy.
+        ['Ursprung', isPatientGenerated(row) ? 'Patientgenererad' : ORIGIN_HEALTHCARE_TEXT],
         ['Patientens organisation', d.patientOrgGuid],
         ['Utförande organisation', d.providerOrgGuid],
         ['Källa', row.sourceCdr],
@@ -1433,12 +1454,13 @@
       stats(s);
       var pts = s.points.map(function (q) {
         return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
-                 ls: q.limitStatus };
+                 ls: q.limitStatus, pg: isPatientGenerated(q) };
       });
       var bandInfo = (data.limitBands || [])[unitIdx] || {};
       var band = bandInfo.band;
       var primary = token('--primary', '#2563eb'), danger = token('--danger', '#dc2626');
       var text = token('--text', '#1e293b'), muted = token('--text-muted', '#64748b');
+      var surface = token('--card-bg', '#ffffff');
       var dense = pts.length > 300;
       var zero = t0();
 
@@ -1456,14 +1478,23 @@
             var q = c.raw || {};
             if (q.guid && q.guid === selectedGuid) { return 8; }
             if (outOfRange(q)) { return 5; }
+            if (q.pg) { return 4; }           // #1014: visible even when dense
             return dense ? 0 : 3;
           },
           pointHitRadius: 8,
           pointBackgroundColor: function (c) {
             var q = c.raw || {};
             if (q.guid && q.guid === selectedGuid) { return text; }
+            // #1014: a patient-generated value is drawn HOLLOW.
+            if (q.pg) { return surface; }
             return outOfRange(q) ? danger : primary;
-          }
+          },
+          pointBorderColor: function (c) {
+            var q = c.raw || {};
+            if (q.guid && q.guid === selectedGuid) { return text; }
+            return outOfRange(q) ? danger : primary;
+          },
+          pointBorderWidth: function (c) { return (c.raw || {}).pg ? 2 : 1; }
         }] },
         options: {
           animation: false, maintainAspectRatio: false, normalized: true,
@@ -1486,6 +1517,7 @@
             tooltip: { callbacks: { label: function (c) {
               var q = c.raw || {};
               return num(q.y) + (s.unit ? ' ' + s.unit : '') + (q.ls ? ' — ' + (LIMIT_TEXT[q.ls] || q.ls) : '') +
+                (q.pg ? ' — patientgenererad' : '') +
                 (q.guid === selectedGuid ? ' (vald)' : '');
             } } },
             pdhcMarkers: { lo: band ? band.low : null, hi: band ? band.high : null,
@@ -1510,13 +1542,16 @@
       });
       // AFTER Chart.js and hammer attach: let a vertical drag scroll the page.
       canvas.style.touchAction = 'pan-y';
+      var nPg = pts.filter(function (q) { return q.pg; }).length;   // #1014
       canvas.setAttribute('aria-label', (data.displayName || current.code) + ': ' + pts.length +
-        ' punkter från ' + fmtDay(pts[0].x) + ' till ' + fmtDay(pts[pts.length - 1].x) +
+        ' punkter' + (nPg ? ' (varav ' + nPg + ' patientgenererade)' : '') + ' från ' + fmtDay(pts[0].x) + ' till ' + fmtDay(pts[pts.length - 1].x) +
         ', senaste ' + num(pts[pts.length - 1].y) + (s.unit ? ' ' + s.unit : '') + '.');
       p.body.querySelector('[data-role="ser-legend"]').textContent =
         'Romb = vald mätning. Triangel = utanför vårdplanens gräns. Grönt fält = gränsen' +
         (band ? ' ' + limitRange(band) + ' — ' + limitSource(band) : ' (ingen entydig gräns)') + '. ' +
         'Streckade linjer = plan- och diagnoshändelser. ' +
+        // #1014: explained only when the series actually holds such a point.
+        (nPg ? 'Ofylld punkt = patientgenererad (registrerad av patienten, inte av vården). ' : '') +
         'Zooma: nyp (touch) eller ctrl+hjul. Panorera: dra i sidled.';
       applyRange();
     }
@@ -1544,7 +1579,7 @@
           if (!w) { return; }
           chart.data.datasets[0].data = withGaps(w.points.map(function (q) {
             return { x: Date.parse(q.effectiveAt), y: q.value, guid: q.observationGuid,
-                     ls: q.limitStatus };
+                     ls: q.limitStatus, pg: isPatientGenerated(q) };
           }));
           chart.update('none');
           refined = true;

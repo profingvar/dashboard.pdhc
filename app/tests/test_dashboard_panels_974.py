@@ -406,10 +406,13 @@ def test_events_rows_without_context_say_not_recorded(fixtures_app, fixtures_cli
 
     # The detail names EVERY context key, null, so the panel can say
     # "ej registrerat" field by field rather than omit the field.
-    d = _detail(fixtures_client, bare[0]["observationGuid"])
+    # #1014: an unmarked (healthcare) row, so data_origin is null too.
+    plain = next(r for r in bare if r["dataOrigin"] is None)
+    d = _detail(fixtures_client, plain["observationGuid"])
     ctx_keys = {"plan_definition_guid", "contract_guid", "provider_org_guid",
                 "service_request_guid", "care_plan_guid", "transaction_guid",
-                "plan_activity_guid", "author_org_guid", "requesting_org_guid"}
+                "plan_activity_guid", "author_org_guid", "requesting_org_guid",
+                "data_origin"}
     assert set(d["context"]) == ctx_keys
     assert all(d["context"][k] is None for k in ctx_keys)
     for k in ("contractGuid", "providerOrgGuid", "planDefinitionName",
@@ -637,7 +640,8 @@ def _csv(c, guid, concept):
 
 
 _CSV_HEADER = ["code_canonical", "unit", "effective_at", "value",
-               "observation_guid", "transaction_guid", "limit_status"]
+               "observation_guid", "transaction_guid", "limit_status",
+               "data_origin"]          # #1014: appended last, positions kept
 
 
 def test_series_csv_export_carries_the_same_points_and_its_caveats(fixtures_app, fixtures_client):

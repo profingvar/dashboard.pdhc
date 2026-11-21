@@ -646,7 +646,8 @@ def patient_series(guid: str, code_canonical: str):
              "code_canonical": p.get("code") or code_canonical,
              "unit": p.get("unit"), "value": p.get("value"),
              "effective_at": p.get("at"),
-             "transaction_guid": p.get("transaction_guid")}
+             "transaction_guid": p.get("transaction_guid"),
+             "data_origin": p.get("data_origin")}           # #1014
             for p in points
             if isinstance(p.get("value"), (int, float)) and p.get("at")]
     non_numeric = len(points) - len(rows)
@@ -778,13 +779,16 @@ def _series_csv(code_canonical: str, series, complete: bool):
     if not complete:
         buf.write("# incomplete: the scan stopped at its bound; older points "
                   "are missing\n")
+    # #1014: data_origin is the LAST column so existing readers keep their
+    # column positions. Empty = produced or endorsed by healthcare.
     w.writerow(["code_canonical", "unit", "effective_at", "value",
-                "observation_guid", "transaction_guid", "limit_status"])
+                "observation_guid", "transaction_guid", "limit_status",
+                "data_origin"])
     for s_ in series:
         for p in s_.points:
             w.writerow([s_.code_canonical, s_.unit or "", p.effective_at,
                         p.value, p.observation_guid, p.transaction_guid or "",
-                        p.limit_status or ""])
+                        p.limit_status or "", p.data_origin or ""])
     safe = "".join(ch if ch.isalnum() else "_" for ch in code_canonical)[-60:]
     return Response(buf.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition":
@@ -1061,6 +1065,7 @@ def patient_events(guid: str):
             limit=_limits.wire(_limits.evaluate(
                 p.get("value"), p.get("unit"), p.get("transaction_guid"),
                 patient_limits, code_canonical=code, concept_guid=concept)),
+            data_origin=p.get("data_origin"),                # #1014
         ))
 
     _g._audit_n_rows = len(rows)
@@ -1242,7 +1247,8 @@ def event_detail(observation_guid: str):
         service_request_guid=ctx.get("service_request_guid"),
         plan_activity_guid=ctx.get("plan_activity_guid"),
         ingest_raw_guid=d.get("ingest_raw_guid"),
-        provider_org=ctx.get("provider_org_guid"))
+        provider_org=ctx.get("provider_org_guid"),
+        data_origin=ctx.get("data_origin"))                  # #1014
     detail = EventDetail(
         row=row,
         # The patient's organisation is not established per datapoint (#774);

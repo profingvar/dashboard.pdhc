@@ -926,6 +926,7 @@ def group_series(
                 reference_low=_get(row, "reference_low"),
                 reference_high=_get(row, "reference_high"),
                 transaction_guid=_get(row, "transaction_guid"),
+                data_origin=_get(row, "data_origin"),     # #1014
             ))
 
         points.sort(key=lambda p: (p.effective_at or "",

@@ -245,7 +245,7 @@ def build_dataset(anchor: datetime | None = None) -> Dataset:
 
     def obs(patient, concept_key, at, value=None, *, unit="__concept__",
             value_string=None, org=None, tx=None, care_plan=None, sr=None,
-            pd=None, act=None, raw_extra=None):
+            pd=None, act=None, raw_extra=None, origin=None):
         counter[0] += 1
         n = counter[0]
         cg, name, cunit = CONCEPTS[concept_key]
@@ -273,6 +273,8 @@ def build_dataset(anchor: datetime | None = None) -> Dataset:
             "plan_activity_guid": act,
             "contract_guid": _g(K_CONTRACT, 1) if tx else None,
             "provider_org_guid": org if tx else None,
+            # #1014: "patient_generated" or None (= healthcare).
+            "data_origin": origin,
             "raw": raw,
         })
 
@@ -308,9 +310,11 @@ def build_dataset(anchor: datetime | None = None) -> Dataset:
     # Patient-reported form answers (via the app): never tagged.
     for i in range(12):
         at = a - timedelta(days=7 * (12 - i)) + timedelta(hours=19)
-        obs(p, "eqvas", at, float(60 + rng.randint(-10, 20)))
+        # #1014: self-reported answers are patient-generated.
+        obs(p, "eqvas", at, float(60 + rng.randint(-10, 20)), origin="patient_generated")
         obs(p, "wellbeing", at + timedelta(seconds=30), None,
-            value_string=rng.choice(["Mår bra", "Lite trött", "Ont i fötterna", "Bra vecka"]))
+            value_string=rng.choice(["Mår bra", "Lite trött", "Ont i fötterna", "Bra vecka"]),
+            origin="patient_generated")
     # Waist from an OLD plan nobody ordered for this patient -> `unordered`.
     for i in range(3):
         obs(p, "waist", a - timedelta(days=200 - 60 * i), float(104 - i), tx="waist")
@@ -359,8 +363,11 @@ def build_dataset(anchor: datetime | None = None) -> Dataset:
         v = round(81.0 + 2.5 * math.sin(i / 9) + (2.0 if 60 <= i <= 66 else 0)
                   + rng.uniform(-0.4, 0.4), 1)
         # Device-reported weight is tagged; manual entries (every 5th) are not.
+        # #1014: the manual entries are the patient's own (patient-generated);
+        # the device-reported ones arrive through healthcare's integration.
         obs(p, "weight", at, v, tx="hf_weight" if i % 5 else None,
-            raw_extra={"device": {"display": "Fixturvåg BT-1"}})
+            raw_extra={"device": {"display": "Fixturvåg BT-1"}},
+            origin=None if i % 5 else "patient_generated")
     for i, v in enumerate([310, 420, 380, 650, 520, 360]):
         at = a - timedelta(days=30 * (6 - i)) + timedelta(hours=10)
         # Two results come from a clinic the patient has blocked (spärr).
@@ -571,7 +578,7 @@ def _dt(s: str) -> datetime:
 
 _POINT_FIELDS = ("code", "at", "value", "unit", "value_string", "org_guid",
                  "observation_guid", "transaction_guid", "ingest_raw_guid",
-                 "care_plan_guid")
+                 "care_plan_guid", "data_origin")
 
 
 class FakeCdr1Client(cdr1_client.Cdr1Client):
@@ -616,7 +623,8 @@ class FakeCdr1Client(cdr1_client.Cdr1Client):
                    "care_plan_guid": o["care_plan_guid"],
                    "transaction_guid": o["transaction_guid"],
                    "plan_activity_guid": o["plan_activity_guid"],
-                   "author_org_guid": None, "requesting_org_guid": None}
+                   "author_org_guid": None, "requesting_org_guid": None,
+                   "data_origin": o["data_origin"]}
             return 200, {**{k: o[k] for k in _POINT_FIELDS},
                          "patient_guid": o["patient_guid"],
                          "received_at": o["received_at"],
