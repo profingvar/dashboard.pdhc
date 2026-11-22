@@ -942,3 +942,11 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/invite.html, invite_confirm.html, invite_done.html, invite_message.html — rewritten; _invite_style.html (NEW); invite_half.html, _invite_hidden.html (DELETED)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_invite_1050.py — rewritten (35)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
+
+## 2026-11-22 — #1050 picker: names and personnummer from eps
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/eps_roster.py (NEW) — eps roster per affiliated unit, bearer, bounded
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/picker.py — union eps ∪ cdr1, banners, no-store, count-only audit
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/select.html — name, personnummer, unit, filter, banners, narrow layout
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_picker_roster_1050.py (NEW, 22)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_patient_picker.py — cdr1 names no longer shown
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md

@@ -910,3 +910,14 @@ allow an iMessage to be formed that sends the invite".
   an eps user row with clinic assignments, as the card's euips-summary already
   does).
 - Deploy: code only (dashboard), no migration, no dependency, no `.env` key.
+
+## 2026-11-22 — #1050 picker: names and personnummer from eps (LOCAL, not deployed)
+
+- Operator question: "why is the patient list in the invite lacking patient names and personnummer?" Cause (production, aggregate): the picker listed cdr1 only; of 51 cdr1 patients with observations 1 had a name, none a personnummer (CDRs hold no demographics by design), and patients without observations were not listed at all, so a new eps patient could not be opened and therefore not invited.
+- `/select` = eps rosters of the caller's affiliated units (bearer, `services/eps_roster.py`, max 20 units) ∪ cdr1 patients-with-data (unchanged). Name, personnummer YYYYMMDD-XXXX, unit, count, last data / "ingen data än"; cdr1-only rows "ej i patientregistret" (only when every roster was read and not SU; else "namn okänt"). Filter: name, personnummer (with/without dash, YYMMDD), guid. Banners: eps down / partial / refused / truncated. no-store; audit counts only.
+- SU: attest first (unchanged), then cdr1 whole set + rosters of the SU's own units only (bounded; no all-clinics fan-out).
+- Needs eps's #1050 roster change deployed first (ips.pdhc commit of the same day): eps `require_auth` answers 401 to a professional bearer without an eps user row.
+- Tests: `app/tests/test_picker_roster_1050.py` (22); `test_patient_picker.py` one assertion changed (cdr1 names not shown). Suite 1046 -> 1068 passed, 13 skipped. 10 dashboard + 7 eps mutation controls, each fails on an assertion (scratchpad picker1050/controls.py).
+- Render: headless Chrome 820x1180 and 390x844, everything outside 127.0.0.1 aborted (0 attempted), 200 from our own server (nonce header + listener pid), no horizontal overflow, filter by personnummer without dash finds 1 row; eps-down variant shows the banner.
+- Not verified: production eps rosters against real professionals (needs the eps deploy); production `IPS_BASE_URL`/`EPS_BASE_URL` present in dashboard's env (invite already relies on it). The invite's own eps reads (`/state`, `/clinics`) still need an eps user row (+ eps clinic assignments for `/state`) — see ips.pdhc docs/technical.md 6d.
+- Deploy: code only (dashboard), no migration, no dependency, no `.env` key.

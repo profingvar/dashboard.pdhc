@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Choose patient · dashboard{% endblock %}
-{% block h1 %}Choose patient{% endblock %}
+{% block title %}Välj patient · dashboard{% endblock %}
+{% block h1 %}Välj patient{% endblock %}
 {% block content %}
 {% if attest_required %}
 <div class="card">
@@ -18,52 +18,102 @@
   </form>
 </div>
 {% else %}
+<style>
+  .pk-banner { padding:.5rem .75rem;border-radius:4px;margin-bottom:.6rem;font-size:.92em;
+               background:#fef3c7;border:1px solid #fde68a;color:#92400e; }
+  .pk-note { color:var(--text-muted);font-size:.9em;margin:.2rem 0 .6rem; }
+  .pk-table { width:100%; }
+  .pk-table td, .pk-table th { vertical-align:top; }
+  .pk-pnr { font-variant-numeric:tabular-nums;white-space:nowrap; }
+  .pk-sub { display:none;color:var(--text-muted);font-size:.85em; }
+  .pk-missing { color:var(--text-muted);font-style:italic; }
+  @media (max-width: 700px) {
+    .pk-col-guid, .pk-col-unit, .pk-col-count { display:none; }
+    .pk-sub { display:block; }
+    .pk-table td, .pk-table th { padding:.35rem .3rem; }
+  }
+</style>
 <div class="card">
   {% if not cdr1_configured %}
   <p style="color:var(--text-muted);padding:.5rem 0;">
     CDR1 is not configured in this environment (<code>CDR1_BASE_URL</code> unset),
-    so no patients can be listed yet. This picker reads production patients from
-    CDR1 once wired (#465/#468).
+    so no observation data can be listed. Patients from the patient register are
+    still listed below.
   </p>
   {% endif %}
+  {% if roster is defined and roster %}
+    {% if roster.status == "unavailable" %}
+    <div class="pk-banner" id="eps-down" role="alert">Patientregistret (eps) svarar inte – namn saknas.
+      Listan visar bara patienter med data i CDR1, utan namn och personnummer.</div>
+    {% elif roster.status == "not_configured" %}
+    <div class="pk-banner" id="eps-down" role="alert">Patientregistret (eps) svarar inte – namn saknas
+      (<code>EPS_BASE_URL</code> är inte satt i den här miljön).</div>
+    {% elif roster.units_failed %}
+    <div class="pk-banner" id="eps-partial" role="alert">Patientregistret (eps) svarade inte för
+      {{ roster.units_failed }} av {{ roster.units_asked }} vårdenheter – namn kan saknas.</div>
+    {% endif %}
+    {% if roster.units_refused %}
+    <div class="pk-banner" id="eps-refused">Patientregistret (eps) nekade listan för
+      {{ roster.units_refused }} vårdenhet(er) som du står som affilierad till.</div>
+    {% endif %}
+    {% if roster.truncated %}
+    <div class="pk-banner" id="eps-truncated">Du är affilierad till fler än {{ max_units|default(20) }}
+      vårdenheter; bara de första visas.</div>
+    {% endif %}
+    {% if is_admin and not n_units %}
+    <p class="pk-note" id="su-note">Som administratör ser du alla patienter med data i CDR1.
+      Namn och personnummer visas för patienter vid vårdenheter du själv är affilierad till;
+      öppna en patient för att se övriga uppgifter.</p>
+    {% endif %}
+  {% endif %}
   <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.6rem;">
-    <input id="filter" type="search" placeholder="Filter by name or id…"
-           autocomplete="off"
-           style="flex:1;padding:.4rem .6rem;box-sizing:border-box;"
+    <input id="filter" type="search" placeholder="Sök namn, personnummer eller id…"
+           autocomplete="off" aria-label="Sök patient"
+           style="flex:1;min-width:0;padding:.4rem .6rem;box-sizing:border-box;"
            oninput="filterPatients(this.value)">
     <a href="{{ url_for('picker.select') }}" class="btn btn-secondary btn-sm"
-       title="Reload the patient list">↻ Uppdatera</a>
+       title="Läs om patientlistan">↻ Uppdatera</a>
   </div>
-  <table>
+  <table class="pk-table">
     <thead>
       <tr>
-        <th>Namn</th><th>Födelseår</th><th>Patient-GUID</th>
-        <th style="text-align:right;">Datapunkter</th><th>Senaste data</th>
+        <th>Namn</th><th>Personnummer</th><th class="pk-col-unit">Vårdenhet</th>
+        <th class="pk-col-guid">Patient-GUID</th>
+        <th class="pk-col-count" style="text-align:right;">Datapunkter</th><th>Senaste data</th>
       </tr>
     </thead>
     <tbody id="rows">
       {% for p in patients %}
-      <tr class="prow" data-search="{{ (p.name ~ ' ' ~ p.guid) | lower }}"
+      <tr class="prow" data-guid="{{ p.guid }}"
+          data-search="{{ (p.name ~ ' ' ~ p.personnummer ~ ' ' ~ p.personnummer|replace('-', '') ~ ' ' ~ p.guid) | lower }}"
+          data-in-eps="{{ 'ja' if p.in_eps else 'nej' }}"
           style="cursor:pointer;"
           onclick="location.href='{{ url_for('charts.charts_page', guid=p.guid) }}'">
-        <td>{{ p.name or '—' }}</td>
-        <td>{{ p.birth_date[:4] if p.birth_date else '—' }}</td>
-        <td class="monospace">
-          <a href="{{ url_for('charts.charts_page', guid=p.guid) }}"
-             title="{{ p.guid }}" onclick="event.stopPropagation()">{{ p.guid[:8] }}…</a>
+        <td>
+          {% if p.name %}<a href="{{ url_for('charts.charts_page', guid=p.guid) }}"
+             onclick="event.stopPropagation()" class="pk-name">{{ p.name }}</a>
+          {% elif p.in_eps %}<a href="{{ url_for('charts.charts_page', guid=p.guid) }}"
+             onclick="event.stopPropagation()" class="pk-missing">namn saknas i patientregistret</a>
+          {% else %}<a href="{{ url_for('charts.charts_page', guid=p.guid) }}"
+             onclick="event.stopPropagation()" class="pk-missing pk-not-in-eps">{{ absent_label|default('namn okänt') }}</a>
+          {% endif %}
+          <span class="pk-sub monospace">{{ p.units|join(', ') if p.units else p.guid[:8] ~ '…' }}</span>
         </td>
-        <td style="text-align:right;font-variant-numeric:tabular-nums;">{{ p.observation_count if p.observation_count is not none else '—' }}</td>
-        <td>{{ p.last_observed_at[:10] if p.last_observed_at else '—' }}</td>
+        <td class="pk-pnr">{{ p.personnummer or '—' }}</td>
+        <td class="pk-col-unit">{{ p.units|join(', ') if p.units else '—' }}</td>
+        <td class="monospace pk-col-guid" title="{{ p.guid }}">{{ p.guid[:8] }}…</td>
+        <td class="pk-col-count" style="text-align:right;font-variant-numeric:tabular-nums;">{{ p.observation_count if p.observation_count is not none else '—' }}</td>
+        <td>{% if p.has_data %}{{ p.last_observed_at[:10] if p.last_observed_at else '—' }}{% else %}<span class="pk-missing pk-no-data">ingen data än</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:1rem;">
-        No patients with data for your organisation{% if cdr1_configured %} in CDR1{% endif %}.
+      <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:1rem;">
+        Inga patienter vid dina vårdenheter.
       </td></tr>
       {% endfor %}
     </tbody>
   </table>
   <p id="empty" style="display:none;text-align:center;color:var(--text-muted);padding:1rem;">
-    No patients match the filter.
+    Ingen patient matchar sökningen.
   </p>
 </div>
 {% endif %}
@@ -72,10 +122,14 @@
 <script>
 function filterPatients(q) {
   q = (q || '').trim().toLowerCase();
+  // A personnummer typed with or without the dash, or as YYMMDD-XXXX, matches.
+  var qd = q.replace(/[^0-9]/g, '');
   var rows = document.querySelectorAll('#rows .prow');
   var shown = 0;
   rows.forEach(function (r) {
-    var hit = !q || (r.getAttribute('data-search') || '').indexOf(q) !== -1;
+    var hay = r.getAttribute('data-search') || '';
+    var hit = !q || hay.indexOf(q) !== -1 ||
+              (qd.length >= 6 && qd.length === q.replace(/[\s-]/g, '').length && hay.indexOf(qd) !== -1);
     r.style.display = hit ? '' : 'none';
     if (hit) shown++;
   });

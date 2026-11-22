@@ -214,7 +214,7 @@ browser ──SSO──▶ dashboard ─┤
 - **Routes**
   - `routes/views.py` — legacy redirects: `/` → `/select`,
     `/patient/<guid>` → `/patient/<guid>/charts`.
-  - `routes/picker.py` — `GET /select` clinical patient picker (CDR1).
+  - `routes/picker.py` — `GET /select` clinical patient picker (eps rosters ∪ CDR1; `services/eps_roster.py`).
   - `routes/charts.py` — `GET /patient/<guid>/charts` (page) +
     `GET /api/v1/patient/<guid>/parameters` + `.../series` (CDR1, spärr).
   - `routes/nurse.py` — `GET /api/nurse/patient/<guid>{,/agp,/variable/<c>,/events}`
@@ -254,7 +254,7 @@ browser ──SSO──▶ dashboard ─┤
 | `/healthz` | GET | liveness + AUTH_MODE |
 | `/metadata` | GET | FHIR R5 CapabilityStatement |
 | `/` | GET | → `/select` (picker) |
-| `/select` | GET | clinical patient picker (CDR1) |
+| `/select` | GET | clinical patient picker (eps rosters ∪ CDR1, #1050) |
 | `/patient/<guid>` | GET | → `/patient/<guid>/charts` |
 | `/patient/<guid>/charts` | GET | per-patient charts page |
 | `/api/v1/patient/<guid>/parameters` | GET | concept list for the dropdown |
@@ -273,6 +273,59 @@ browser ──SSO──▶ dashboard ─┤
 | `/eps-granskning/kort/<card_version>/beslut` | POST | card version: send the decision to cdr1 (CSRF, #1049) |
 | `/admin/audit` | GET | SU-only audit browse (#215) |
 | `/admin/audit/export.csv` | GET | SU-only audit CSV export (#215) |
+
+## Patient picker: names and personnummer from eps (#1050, 2026-11-22)
+
+Operator: "why is the patient list in the invite lacking patient names and
+personnummer?" The picker listed cdr1's `GET /api/v1/clinical/patients` only.
+cdr1 holds no demographics by design (production 2026-11-22: 51 patients with
+observations, 1 with a name, none with a personnummer), and lists only
+patients WITH observations, so a newly registered patient could not be opened
+and therefore not invited.
+
+`GET /select` (`routes/picker.py`) is now the UNION of:
+
+1. **eps rosters** (`services/eps_roster.py`): `GET
+   {IPS_BASE_URL}/api/v1/clinics/<care_unit_guid>/patients` for each unit in
+   `affiliations[].care_unit_guid` (Rule 24; never `organization_ids`), at most
+   `MAX_UNITS` (20) per load. Auth = the professional's own SSO bearer (the
+   invite_client rule, reusing its `_get`); no service key. eps admits that
+   bearer without a local eps user row and only for units the caller is
+   affiliated to (eps `require_auth_or_care_bearer` + 403 `not_affiliated`).
+   Name = given + family; personnummer shown as `YYYYMMDD-XXXX` only for the
+   personnummer/samordningsnummer OIDs.
+2. **cdr1** `list_org_patients`, unchanged (service key, `X-Org-Guids` /
+   break-glass `X-Is-Admin`): observation count and last observed. cdr1's
+   `name` is not displayed.
+
+Merged by lower-case guid. A cdr1 row not in the rosters reads "ej i
+patientregistret" only when every roster was read and the caller is not an
+SU; otherwise "namn okänt". eps-only rows read "ingen data än" and link to
+`/patient/<guid>/charts` like every row, so they can be opened and invited.
+
+Degrade: every unit failed (network, 5xx) or `IPS_BASE_URL` unset → banner
+`#eps-down` "Patientregistret (eps) svarar inte – namn saknas" with the cdr1
+list; some units failed → `#eps-partial`; eps 403 on a unit → `#eps-refused`;
+more than 20 units → `#eps-truncated`. eps 404 (no clinic for the unit) is an
+empty roster, not an outage.
+
+SU: break-glass attestation first (#575, unchanged); then cdr1's whole set plus
+the eps rosters of the SU's OWN affiliated units only. Reading every eps clinic
+would put the whole register on one page, unbounded, so it is not done.
+
+Personnummer: in the page only (`no-store`, `Pragma: no-cache`); never logged,
+never in a URL. The audit row carries counts only:
+`payload_snapshot = {eps_roster, eps_units_asked, eps_units_failed,
+eps_units_refused, eps_patients, cdr1_patients}`. The filter box searches
+`data-search` (name, personnummer with and without dash, guid) client-side.
+
+Tests: `app/tests/test_picker_roster_1050.py` (22), auth ON, only
+`requests.get/post` patched; `test_patient_picker.py` updated (cdr1 names no
+longer shown).
+
+Depends on eps (ips.pdhc) with the #1050 roster gate deployed FIRST: the old
+eps answers 401 to a professional without an eps user row, which the picker
+shows as the eps-down banner.
 
 ## Bjud in till patientappen (#1050, v2 2026-11-22)
 

@@ -32,11 +32,25 @@ time series, ambulatory glucose profile (AGP), and clinical events. It runs on
   when a patient has blocked sources so you know the picture may be incomplete.
 
 ## 2. Choosing a patient
-After login you land on the **patient picker** (`/select`):
-- One row per patient your care units are affiliated with, read live from CDR1.
-- Patients are listed by name; click a patient to open their charts.
-- If no CDR1 is configured (local dev), the page says so rather than looking
-  falsely empty.
+After login you land on the **patient picker** (`/select`, "Välj patient"):
+- One row per patient **listed at the care units you are affiliated to** in the
+  patient register (eps), plus every patient with data for those units in CDR1.
+  A patient registered today, with no data yet, is listed too ("ingen data än"),
+  so you can open them and invite them to the patient app.
+- Each row: **name** and **personnummer** (YYYYMMDD-XXXX) from the patient
+  register, the care unit, the number of data points and the date of the
+  latest data from CDR1. Patients with fresh data come first.
+- A patient CDR1 has data for but the register does not list at your units
+  shows its id and **"ej i patientregistret"**.
+- The search box matches name, personnummer (with or without the dash, also
+  YYMMDD-XXXX) and id. Click a row to open the patient.
+- If the register does not answer, a yellow banner says **"Patientregistret
+  (eps) svarar inte – namn saknas"** and the list shows only the CDR1 patients,
+  by id ("namn okänt"). The list is never silently empty or nameless.
+- Administrators: after stating a reason (break-glass), you see every patient
+  with data in CDR1; names and personnummer are shown for patients at care
+  units you are yourself affiliated to, the others read "namn okänt".
+- If no CDR1 is configured (local dev), the page says so.
 
 ## 3. Per-patient charts (`/patient/<guid>/charts`)
 The charts view is the core single-patient surface, backed by CDR1:

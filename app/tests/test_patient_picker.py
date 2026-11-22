@@ -108,9 +108,12 @@ def test_select_route_lists_and_scopes(monkeypatch):
     r = _c.get("/select")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
-    # both patients rendered, sorted by name (Alpha before Zeta)
+    # both patients rendered in a deterministic order (no data dates: by guid)
     assert html.index("p-alpha") < html.index("p-zeta")
-    assert "Alpha" in html and "Zeta" in html
+    # #1050: cdr1 holds no demographics by design, so its name is not shown;
+    # an SU's cdr1 rows outside eps rosters read "namn okänt" with the guid.
+    assert "Alpha" not in html and "Zeta" not in html
+    assert html.count("namn okänt") == 2
     # dev SU is admin → no org restriction forwarded
     assert captured["is_admin"] is True
     assert captured["orgs"] == []
