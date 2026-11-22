@@ -5,6 +5,11 @@
 <div class="card">
   <p class="monospace" style="color:var(--text-muted);">Patient GUID: {{ patient_guid }}</p>
   <p><a href="{{ url_for('picker.select') }}">← back to patient list</a></p>
+  {% if can_invite %}
+  <p style="margin-top:0.5rem;"><a class="btn btn-primary" id="invite-action" lang="sv"
+     style="display:inline-flex;align-items:center;min-height:44px;"
+     href="{{ url_for('invite.form', guid=patient_guid) }}">Bjud in till patientappen</a></p>
+  {% endif %}
 </div>
 
 {% if has_blocked_sources %}

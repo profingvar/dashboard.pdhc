@@ -46,6 +46,8 @@ The charts view is the core single-patient surface, backed by CDR1:
   on this side before it reaches your browser (the browser never talks to CDR1
   directly).
 - The banner flags when the patient has blocked sources.
+- **Bjud in till patientappen** (professionals): invite this patient to the
+  patient app — see section 7b.
 
 ## 4. Nurse single-patient views (`/nurse`)
 The **nurse workspace** page (`/nurse`, reachable via `/workspace`) drives four
@@ -184,37 +186,47 @@ Därefter visas en bekräftelsesida med jämförelsen och dina ändringar
 - *"CDR saknar granskning av patientkort"*: den anslutna CDR har ännu inte
   version 2. Enskilda svar kan fortfarande granskas.
 
-## 7b. Bjud in patient (för vårdpersonal, #1050)
+## 7b. Bjud in till patientappen (för vårdpersonal, #1050)
 
 Patienter kommer in i patientappen **bara genom en inbjudan från sin
-vårdenhet**. Inbjudan görs här, under **Bjud in patient** i menyn.
+vårdenhet**. Inbjudan görs för den patient du har öppen.
 
-1. Fyll i patientens **förnamn**, **efternamn**, **personnummer** och gärna
-   **mobilnummer**. *Under piloten tas bara testpersonnummer emot.*
-2. **Vårdenhet.** Har du en vårdenhet är den redan vald. Har du flera måste du
-   välja en; ingen är förvald. Har du ingen affiliering till någon vårdenhet
-   kan du inte bjuda in, och sidan säger det.
-3. Välj **Fortsätt**. Kontrollera namn, personnummer och vårdenhet på nästa
-   sida och välj **Bekräfta och skapa inbjudan**. Inget skickas förrän du bekräftat.
-4. Patienten registreras i patientregistret (eps) vid vårdenheten, eller hittas
-   om hen redan finns där. Sedan skapas inbjudan.
-5. **Länken visas en gång.** Kopiera den med **Kopiera länken** och ge den till
-   patienten, tillsammans med texten som står under. Sms skickas inte ännu.
-   Länken fungerar en gång och gäller i sju dagar.
+1. Välj patienten i patientlistan. På patientens sida finns knappen
+   **Bjud in till patientappen**.
+2. Sidan visar patientens **namn** (från patientregistret, eps). Du skriver
+   inte in namn eller personnummer.
+3. **Vårdenhet.** Bara vårdenheter där du är affilierad *och* där patienten är
+   listad i patientregistret kan väljas. Finns en sådan är den redan vald.
+   Finns flera måste du välja en; ingen är förvald. Är patienten inte listad
+   vid någon av dina vårdenheter säger sidan det, och ingen inbjudan kan göras
+   härifrån.
+4. **Mobilnummer.** Numret i patientregistret är ifyllt: kontrollera det med
+   patienten och ändra om det inte stämmer. Saknas nummer skriver du in det.
+   Ett ändrat nummer används bara för det här meddelandet och sparas inte i
+   patientregistret.
+5. Välj **Fortsätt**, kontrollera patient, vårdenhet och mobil, och välj
+   **Bekräfta och skapa inbjudan**. Inget skapas förrän du bekräftat.
+6. Välj **Skicka inbjudan i Meddelanden**. Meddelanden öppnas med patientens
+   nummer och texten ifylld – tryck skicka. Sidan kan inte se om meddelandet
+   skickades. Öppnas inte Meddelanden (till exempel på en dator utan
+   Meddelanden), använd **Kopiera texten** eller **Kopiera länken** och ge
+   länken till patienten på annat sätt.
 
-Patienten öppnar länken, skriver sitt personnummer (det måste vara samma som du
-skrev), e-post och lösenord, och lägger till en passkey.
+**Länken visas bara en gång.** Den kan användas en gång och gäller i sju dagar.
+Patienten öppnar länken, skriver sitt personnummer (det kontrolleras mot
+patientregistret), väljer e-post och lösenord och lägger till en passkey.
 
 **Om det inte går**
 
 | sidan säger | betyder | gör så här |
 |---|---|---|
+| Öppna patienten först | Sidan öppnades utan att patienten är öppen | Välj patienten i patientlistan och välj knappen där |
+| Patienten är inte listad vid din vårdenhet | Patienten finns inte vid någon av dina vårdenheter i patientregistret | Inbjudan görs från en vårdenhet där patienten är listad |
 | Patienten har redan ett konto | Patienten är redan kopplad | Ingen ny inbjudan behövs; patienten loggar in |
-| Du är inte affilierad till den valda vårdenheten | Fel vårdenhet | Välj en av dina vårdenheter |
-| Det finns redan en patient med det personnumret, under ett annat namn | Numret finns under ett annat namn | Kontrollera personnumret. Inget har ändrats |
-| Patientregistret (eps) svarade inte | eps nåddes inte | Inget har gjorts. Försök igen om en stund |
-| Patienten är registrerad, men inbjudan skapades inte | eps lyckades, sso inte | Patienten finns nu vid vårdenheten. Välj **Försök skapa inbjudan igen** |
-| Piloten tar bara emot syntetiska testpersonnummer / inte ett giltigt personnummer | | Kontrollera numret |
+| Patienten finns inte i patientregistret, eller ligger utanför … | eps visar inte patienten för dig | Kontrollera att du har öppnat rätt patient |
+| Patientregistret har inget fullständigt namn | Namnet saknas i eps | Namnet behöver finnas i patientregistret först |
+| Patientregistret (eps) / Inloggningstjänsten (sso) svarade inte | En tjänst nåddes inte | Ingenting har gjorts. Försök igen om en stund |
+| Ange ett svenskt mobilnummer | Numret är inte ett svenskt mobilnummer | Skriv 07… eller +467… |
 
 ## 8. Getting help
 - Runtime logs: `results/<timestamp>_results/app.log` (local) or

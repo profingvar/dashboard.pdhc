@@ -274,40 +274,72 @@ browser ──SSO──▶ dashboard ─┤
 | `/admin/audit` | GET | SU-only audit browse (#215) |
 | `/admin/audit/export.csv` | GET | SU-only audit CSV export (#215) |
 
-## Bjud in patient (#1050)
+## Bjud in till patientappen (#1050, v2 2026-11-22)
 
 `app/routes/invite.py` (blueprint `invite`, `/bjud-in-patient`) with
 `app/services/invite_client.py`. Patients join the patient app only by
-invitation; this page is where it is made.
+invitation. v2 (operator 2026-11-22): the invite is an action on the patient
+the professional has OPEN; nothing about the patient is typed. The v1
+standalone form (name, personnummer, unit) is removed, for SU too.
 
 | route | does |
 |---|---|
-| `GET /bjud-in-patient` | the form; 403 page when the user has no affiliation and is not SU |
-| `POST /bjud-in-patient/bekrafta` | CSRF + validation; the confirmation page. Calls nothing |
-| `POST /bjud-in-patient/skicka` | CSRF + `confirmed=ja`; then eps, then sso |
+| `GET /bjud-in-patient` | 302 to the patient picker (`/select`): a patient is always chosen first |
+| `GET /bjud-in-patient/<guid>` | the page for the open patient: name (eps), unit, mobile to confirm |
+| `POST /bjud-in-patient/<guid>/bekrafta` | CSRF + validation; the confirmation page. Reads eps, writes nothing |
+| `POST /bjud-in-patient/<guid>/skicka` | CSRF + `confirmed=ja`; sso invite; the done page with the `sms:` button |
 
-- **Units** come from the blob's `affiliations[].care_unit_guid` only (never
-  `organization_ids`). One unit is the default; several require a choice with
-  no default (radios `required`, none `checked`); none and not SU is refused.
-  An SU may type any unit guid.
-- **Gate.** `app/auth.py::has_invite_page_access` admits an SU or any
-  professional (no phase gate), so a professional without a unit reaches the
-  page and is told why. `routes/auth.py::callback` lets such a professional
-  sign in only when `sso_next` is the invite page.
-- **Calls**, both with the user's own bearer (`session["sso_token"]`) and no
-  service key: eps `POST {IPS_BASE_URL}/api/v1/patients/register-at-unit`,
-  then sso `POST {SSO_BASE_URL}/api/patient-links/invites` with the name.
-  Every failure is an `InviteError(step, code, status)` rendered as a named
-  Swedish message. eps ok + sso failed is the **half-done** page
-  (`invite_half.html`): the patient IS registered; a retry form resends the
-  same data (eps answers 200 for an existing patient).
-- **The link** is shown once (`invite_done.html`, `Cache-Control: no-store`)
-  with a copy button and a text for the patient. Nothing stores it.
-- **Audit**: `DashboardAudit` rows `patient_invite_form` / `_confirm` / `_send`
-  with an `outcome` (e.g. `eps_not_affiliated`) and unit; never the personnummer, name or link.
-- **Config**: `IPS_BASE_URL` (the config key, filled from `EPS_BASE_URL` first, #1019) and `SSO_BASE_URL`; unset → named
-  "inte konfigurerad" message.
-- Tests: `app/tests/test_invite_1050.py`, auth ON, HTTP boundary patched.
+- **The patient in context.** The dashboard has no session patient: the
+  patient is the guid in the URL of the view opened from the picker.
+  `charts_page` (`/patient/<guid>/charts`) and `patient_view`
+  (`/dashboard/view/<guid>`) call `remember_opened_patient`, which keeps the
+  last 20 opened guids in the session (`_opened_patients`). The invite routes
+  refuse a guid not opened in this session (403 "Öppna patienten först"), and
+  refuse a `patient_guid` / `ips_patient_guid` form field that differs from
+  the path (400). Both views show "Bjud in till patientappen" when
+  `has_invite_page_access` holds. The base-template nav item is gone.
+- **eps reads**, with the user's own bearer: `GET /api/v1/patients/<guid>/state`
+  (name.given, name.family, telecom; eps scopes it with
+  `patient_export.exportable`, 404 outside the reader's scope) and
+  `GET /api/v1/patients/<guid>/clinics` (units the patient is ACTIVELY listed
+  at; the same list sso's `_eps_check` reads). An `X-PDHC-Patient-Guid` that
+  differs from the guid is refused (`not_platform_guid`). The name always comes
+  from eps, never from the form. No full name in eps → 409 refusal.
+- **Units.** Non-SU: `affiliations[].care_unit_guid`, narrowed to the units eps
+  lists the patient at. One → preselected; several → `required` radios, none
+  `checked`; none → 409 "Patienten är inte listad vid …". No affiliation and
+  not SU → 403 before eps is asked. SU: the units eps lists. `register-at-unit`
+  is NOT called any more: it needs a personnummer, which this flow does not
+  have, so a patient not listed at the unit is refused, not attached.
+- **Mobile.** Prefilled from eps (first phone that normalises to a Swedish
+  mobile, `use=mobile` first; else the first raw value, to be corrected);
+  required; normalised to `+467XXXXXXXX` (`normalise_mobile`, a per-repo copy
+  of sso's rule). A number different from eps's is "for this message only, not
+  saved": eps's only telecom write is the unscoped whole-resource FHIR
+  `PUT /fhir/Patient/<id>`, so no save is offered.
+- **sso**: `POST {SSO_BASE_URL}/api/patient-links/invites` with
+  `ips_patient_guid` (the path guid), `care_unit_guid` and eps's name, bearer
+  only, no service key. sso re-checks the affiliation and asks eps that the
+  patient is at the unit. Errors are named (`patient_already_linked` → 409
+  "Patienten har redan ett konto…").
+- **The message.** `invite_done.html`, `Cache-Control: no-store`, shown once:
+  a button "Skicka inbjudan i Meddelanden" with
+  `href = sms:<+46…>&body=<quote(text, safe="")>` (`sms_href`). The `&body=`
+  form is Apple's (iOS 8+, and the form used for macOS Messages); RFC 5724's
+  `?body=` is not used. `safe=""` encodes spaces as `%20` and every `& ? = # /
+  +` of the link, so the link cannot end the body. Text: "Hej <förnamn>!
+  <Vårdenhet> bjuder in dig till Patientappen. Öppna länken för att skapa ditt
+  konto: <länk> Länken gäller en gång." Copy buttons for the text and for the
+  link. The page says Messages opens with the text filled in and that it
+  cannot see whether the message was sent. **Not verified on a real
+  iPhone/iPad/Mac.**
+- **Audit**: `patient_invite_form` / `_confirm` / `_send` with `outcome`
+  (`shown`, `invited`, `not_in_context`, `patient_mismatch`, `not_listed`,
+  `eps_<code>`, `sso_<code>`, `csrf_refused`, …), the patient guid and unit;
+  never the name, the mobile or the link.
+- **Config**: `IPS_BASE_URL` (filled from `EPS_BASE_URL` first, #1019) and
+  `SSO_BASE_URL`; unset → named "inte konfigurerad" message.
+- Tests: `app/tests/test_invite_1050.py` (35), auth ON, only HTTP patched.
 
 ## Running locally
 ```

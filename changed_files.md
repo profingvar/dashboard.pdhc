@@ -932,3 +932,13 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — nav link
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_invite_1050.py (NEW, 22)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
+
+## 2026-11-22 — #1050 dashboard v2 (invite the open patient, sms:)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/invite.py — rewritten: per-patient routes, context check, eps name/units/mobile, sms_href
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/invite_client.py — eps reads `patient_details` (/state), `patient_units` (/clinics); `register_at_unit` removed
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/charts.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py — remember the opened patient; `can_invite`
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/charts.html, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html — "Bjud in till patientappen" action
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — nav item removed
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/invite.html, invite_confirm.html, invite_done.html, invite_message.html — rewritten; _invite_style.html (NEW); invite_half.html, _invite_hidden.html (DELETED)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_invite_1050.py — rewritten (35)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md

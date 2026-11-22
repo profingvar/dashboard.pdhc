@@ -197,7 +197,14 @@ def patient_view(guid: str):
     and duplicating the check here would audit a read that did not happen.
     The door in `app/auth.py` still requires a care or analysis basis.
     """
-    return render_template("dashboard.html", patient_guid=guid)
+    # #1050 v2: the patient is open in this session -> may be invited.
+    from flask import g as _g
+    from app.auth import has_invite_page_access
+    from app.routes.invite import remember_opened_patient
+    remember_opened_patient(guid)
+    return render_template(
+        "dashboard.html", patient_guid=guid,
+        can_invite=has_invite_page_access(getattr(_g, "access_blob", None)))
 
 
 @bp.get("/patients/<guid>")

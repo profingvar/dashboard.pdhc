@@ -873,3 +873,40 @@ works, and the nav count shows "?".
 - Tests: `app/tests/test_invite_1050.py` (22), auth ON, HTTP boundary patched. Suite 1011 -> 1033 passed. 7 mutation controls (D1-D6 + bearer-only), each fails on an assertion.
 - Loopback e2e (sso + eps + dashboard + patientapp, real apps): 18/18.
 - Deploy: code only, no migration, no new dependency. Uses the config key `IPS_BASE_URL`, which create_app fills from `EPS_BASE_URL` first (#1019), and `SSO_BASE_URL`; both are already set for the dashboard's other features. No `.env` change.
+
+## 2026-11-22 — #1050 dashboard v2: invite the OPEN patient, sms: message (LOCAL, not deployed)
+
+Operator feedback: "the patient is chosen as I enter into the dashboard - then
+the invite - No need to identify the patient - just confirm the contact way and
+allow an iMessage to be formed that sends the invite".
+
+- The action "Bjud in till patientappen" sits on the open patient's views
+  (`/patient/<guid>/charts`, `/dashboard/view/<guid>`); the nav item and the v1
+  standalone form (name + personnummer, SU guid field) are removed.
+  `GET /bjud-in-patient` redirects to the picker.
+- Patient in context = the path guid, which must have been opened in this
+  session (`remember_opened_patient`, last 20). A differing guid in the form is
+  refused. Name from eps `/patients/<guid>/state` (bearer, eps-scoped); units
+  from eps `/clinics`; eligible = affiliations ∩ listed (SU: listed). Not listed
+  → refused by name; `register-at-unit` is no longer called (it needs a
+  personnummer). sso/eps unchanged.
+- Mobile prefilled from eps for confirmation, required, normalised to +467…;
+  a changed number is "for this message only, not saved" (eps has no scoped
+  telecom write; the generic FHIR PUT was not used).
+- Done page (no-store): `sms:<+46…>&body=<percent-encoded>` button "Skicka
+  inbjudan i Meddelanden", copy buttons for text and link, "Meddelanden öppnas
+  med texten ifylld – tryck skicka". Never claims the message was sent.
+- Tests: `test_invite_1050.py` rewritten, 35 (v1's 22 removed). Suite 1033 ->
+  1046 passed. 11 mutation controls (context check, form guid, form name,
+  `?body=`, weak encoding, no-store, unlisted unit eligible, unnormalised
+  mobile, CSRF on send, no-affiliation gate, eps service key instead of bearer)
+  all caught; the unmutated copy passes 35/35.
+- Render: headless Chrome, 820x1180 and 390x844, all requests outside
+  127.0.0.1 aborted (0 attempted): invite pages no horizontal overflow, every
+  control ≥44 px. (charts page: pre-existing Logout and design buttons are
+  21 px; the new action is ≥44.)
+- UNVERIFIED: the `sms:` link on a real iPhone/iPad (iOS 16+) and in macOS
+  Messages; that eps `/state` answers for production professionals (it needs
+  an eps user row with clinic assignments, as the card's euips-summary already
+  does).
+- Deploy: code only (dashboard), no migration, no dependency, no `.env` key.

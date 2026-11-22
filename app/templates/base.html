@@ -27,10 +27,9 @@
   {% if g.current_user %}
   <a href="/eps-granskning" id="eps-nav" style="color:white;font-size:0.9rem;{% if request.path.startswith('/eps-granskning') %}text-decoration:underline;{% endif %}">EPS att granska<span id="eps-nav-count"{% if eps_nav_count is defined %} data-known="{{ eps_nav_count }}"{% endif %}></span></a>
   {% endif %}
-  {# #1050: professionals (and SU) invite patients to the patient app. #}
-  {% if g.current_user and g.access_blob is mapping and (g.access_blob.get('user_type') == 'professional' or g.access_blob.get('is_su_admin')) %}
-  <a href="/bjud-in-patient" id="invite-nav" style="color:white;font-size:0.9rem;{% if request.path.startswith('/bjud-in-patient') %}text-decoration:underline;{% endif %}">Bjud in patient</a>
-  {% endif %}
+  {# #1050 v2: no "Bjud in patient" here any more. The invite is an action on
+     the OPEN patient (charts / patient overview), because the patient is
+     always chosen first. #}
   {% if g.current_user and (g.current_user.is_admin or g.current_user.is_su) %}
   <a href="/admin/audit" style="color:white;font-size:0.9rem;{% if request.path.startswith('/admin') %}text-decoration:underline;{% endif %}">Spärrlogg</a>
   {% endif %}

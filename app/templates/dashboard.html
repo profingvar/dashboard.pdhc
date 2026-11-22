@@ -8,6 +8,11 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 {% endblock %}
 {% block content %}
+{% if can_invite %}
+<p style="margin:0 0 0.75rem;"><a class="btn btn-primary" id="invite-action" lang="sv"
+   style="display:inline-flex;align-items:center;min-height:44px;"
+   href="{{ url_for('invite.form', guid=patient_guid) }}">Bjud in till patientappen</a></p>
+{% endif %}
 <div class="dash-grid" id="dashboard" data-patient-guid="{{ patient_guid }}">
 
   <section class="dash-panel dash-card" id="panel-card" aria-labelledby="card-heading" aria-busy="true">

@@ -1,21 +1,28 @@
-"""#1050 — "Bjud in patient": a patient joins the patient app ONLY by an
-invitation from their care unit, made here.
+"""#1050 v2 — "Bjud in till patientappen" for the patient OPEN in the dashboard.
+
+Operator 2026-11-22: the patient is chosen on entry; the invite only confirms
+the contact way and forms a message (sms: link) carrying the invite.
 
 Every test goes through the real routes with AUTH_MODE=sso, so the request
 loader, the gate and the CSRF check all run. The ONLY thing patched is the
 outbound HTTP boundary (`requests.get` / `requests.post`): one fake answers as
 sso.pdhc (`/api/auth/me/service`, `/api/patient-links/invites`) and as eps
-(`/api/v1/patients/register-at-unit`), each refusing what the real service
-refuses (a service key, a unit the bearer is not affiliated to). No client of
-ours is patched, so a wrong URL, header or body is a failing test.
+(`/patients/<guid>/state`, `/clinics`, `/blocks`), each refusing what the real
+service refuses (a service key; sso: a unit the bearer is not affiliated to,
+or a patient eps does not list there). No client of ours is patched.
 
-Synthetic data only: the personnummer below have a WRONG check digit.
+A patient is "opened" the way a professional opens one: GET of the real
+charts page.
+
+Synthetic data only: no personnummer appears anywhere in this flow.
 """
 from __future__ import annotations
 
+import html as htmllib
 import json
 import re
 import uuid
+from urllib.parse import quote, unquote
 
 import pytest
 import requests
@@ -29,28 +36,29 @@ EPS = "https://eps.test"
 TOKEN = "tok-operator"
 UNIT_A = "cccccccc-1050-4000-8000-00000000000a"
 UNIT_B = "cccccccc-1050-4000-8000-00000000000b"
-PNR = "19790517-3219"          # synthetic (wrong check digit)
-P_NEW = "aaaaaaaa-1050-4000-8000-000000000001"
-INVITE_URL = "https://sso.test/patient-invite/ONE-TIME-TOKEN-xyz"
+P1 = "aaaaaaaa-1050-4000-8000-000000000001"
+P2 = "aaaaaaaa-1050-4000-8000-000000000002"
+INVITE_URL = "https://sso.test/patient-invite/ONE-TIME_tok-xyz"
+NAMES = {UNIT_A: "Vårdcentralen Norr", UNIT_B: "Vårdcentralen Söder"}
 
 
 def _blob(units=(UNIT_A,), **kw):
-    names = {UNIT_A: "Vårdcentralen Norr", UNIT_B: "Vårdcentralen Söder"}
     b = {"user_guid": "dddddddd-1050-4000-8000-000000000001",
          "email": "ssk@example.test", "user_type": "professional",
          "is_su_admin": False, "session_phases": [],
          "affiliations": [{"affiliation_guid": f"a{i}", "role": "nurse",
-                           "care_unit_guid": u, "care_unit_name": names.get(u, u)}
+                           "care_unit_guid": u, "care_unit_name": NAMES.get(u, u)}
                           for i, u in enumerate(units)]}
     b.update(kw)
     return b
 
 
 class _Resp:
-    def __init__(self, status, body=None, text=None):
+    def __init__(self, status, body=None, text=None, headers=None):
         self.status_code = status
         self._body = body
         self.text = text if text is not None else json.dumps(body)
+        self.headers = headers or {}
 
     def json(self):
         if self._body is None:
@@ -58,13 +66,34 @@ class _Resp:
         return self._body
 
 
+def _state(given=("Synt",), family="Inbjudensson", phones=(("070-000 00 01", "mobile"),)):
+    facts = []
+    if given is not None:
+        facts.append({"fact_type": "name.given", "value": {"value": list(given)}})
+    if family is not None:
+        facts.append({"fact_type": "name.family", "value": {"value": family}})
+    for v, use in phones:
+        facts.append({"fact_type": "telecom",
+                      "value": {"system": "phone", "value": v, "use": use}})
+    facts.append({"fact_type": "telecom",
+                  "value": {"system": "email", "value": "x@example.test", "use": None}})
+    return {"patient_guid": P1, "facts": facts, "count": len(facts)}
+
+
 class Fake:
     def __init__(self):
         self.blob = _blob()
-        self.eps_calls, self.sso_calls = [], []
-        self.eps_answer = None      # _Resp or Exception: overrides the logic
+        self.calls = []             # (method, url-path, headers, json)
+        self.state = {P1: _state(), P2: _state(given=("Annan",), family="Patient")}
+        self.listed = {P1: [UNIT_A], P2: [UNIT_A]}
+        self.platform_header = {}   # guid -> header value override
+        self.eps_answer = None      # _Resp or Exception for /state
         self.sso_answer = None
-        self.patients = {}          # pnr -> guid
+
+    def _who(self, headers):
+        if "X-Service-Key" in headers or "X-Source-Service" in headers:
+            return "service"
+        return "ok" if headers.get("Authorization") == f"Bearer {TOKEN}" else None
 
     def get(self, url, headers=None, params=None, timeout=None, **kw):
         headers = headers or {}
@@ -72,45 +101,47 @@ class Fake:
             if headers.get("Authorization") != f"Bearer {TOKEN}":
                 return _Resp(401, {"error": "invalid"})
             return _Resp(200, self.blob)
+        m = re.fullmatch(rf"{EPS}/api/v1/patients/([^/]+)/(state|clinics|blocks)", url)
+        if m:
+            guid, what = m.groups()
+            if what == "blocks":
+                return _Resp(200, {"blocks": []})
+            self.calls.append(("GET", what, dict(headers), guid))
+            # eps require_auth reads Authorization only: the service key the
+            # ips client attaches elsewhere must NOT be what authenticates.
+            if self._who(headers) != "ok" and "Authorization" not in headers:
+                return _Resp(401, {"error": "Missing Authorization header"})
+            if what == "state":
+                if isinstance(self.eps_answer, Exception):
+                    raise self.eps_answer
+                if self.eps_answer is not None:
+                    return self.eps_answer
+                if guid not in self.state:
+                    return _Resp(404, {"error": "patient not found"})
+                return _Resp(200, self.state[guid])
+            if guid not in self.listed:
+                return _Resp(404, {"error": "Patient not found"})
+            return _Resp(200, [{"guid": str(uuid.uuid4()), "care_unit_guid": u,
+                                "organisation_guid": u, "name": NAMES.get(u, u) + " (eps)"}
+                               for u in self.listed[guid]],
+                         headers={"X-PDHC-Patient-Guid": self.platform_header.get(guid, guid)})
         return _Resp(404, None, "<html>404</html>")
-
-    def _person(self, headers):
-        if "X-Service-Key" in headers or "X-Source-Service" in headers:
-            return "service"
-        return "ok" if headers.get("Authorization") == f"Bearer {TOKEN}" else None
 
     def post(self, url, headers=None, json=None, timeout=None, **kw):
         headers = headers or {}
-        units = {a["care_unit_guid"] for a in self.blob.get("affiliations") or []}
-        if url == f"{EPS}/api/v1/patients/register-at-unit":
-            self.eps_calls.append({"headers": dict(headers), "json": dict(json)})
-            who = self._person(headers)
-            if who == "service":
-                return _Resp(403, {"resourceType": "OperationOutcome"})
-            if who is None:
-                return _Resp(401, {"resourceType": "OperationOutcome"})
-            if isinstance(self.eps_answer, Exception):
-                raise self.eps_answer
-            if self.eps_answer is not None:
-                return self.eps_answer
-            if not self.blob.get("is_su_admin") and json["care_unit_guid"] not in units:
-                return _Resp(403, {"error": "not_affiliated"})
-            if json["personnummer"] in self.patients:
-                return _Resp(200, {"patient_guid": self.patients[json["personnummer"]],
-                                   "created": False, "assignment": "existing"})
-            self.patients[json["personnummer"]] = P_NEW
-            return _Resp(201, {"patient_guid": P_NEW, "created": True, "assignment": "added"})
         if url == f"{SSO}/api/patient-links/invites":
-            self.sso_calls.append({"headers": dict(headers), "json": dict(json)})
-            who = self._person(headers)
-            if who != "ok":
+            self.calls.append(("POST", "invites", dict(headers), dict(json)))
+            if self._who(headers) != "ok":
                 return _Resp(401, {"error": "unauthorized"})
             if isinstance(self.sso_answer, Exception):
                 raise self.sso_answer
             if self.sso_answer is not None:
                 return self.sso_answer
+            units = {a["care_unit_guid"] for a in self.blob.get("affiliations") or []}
             if not self.blob.get("is_su_admin") and json["care_unit_guid"] not in units:
                 return _Resp(403, {"error": "not_affiliated"})
+            if json["care_unit_guid"] not in self.listed.get(json["ips_patient_guid"], []):
+                return _Resp(403, {"error": "patient_not_at_unit"})
             return _Resp(201, {"invite_guid": str(uuid.uuid4()),
                                "ips_patient_guid": json["ips_patient_guid"],
                                "care_unit_guid": json["care_unit_guid"],
@@ -119,6 +150,12 @@ class Fake:
                                "expires_at": "2026-11-29T12:00:00+00:00",
                                "invite_url": INVITE_URL})
         return _Resp(404, None, "<html>404</html>")
+
+    def sso_invites(self):
+        return [c for c in self.calls if c[1] == "invites"]
+
+    def eps_calls(self):
+        return [c for c in self.calls if c[1] in ("state", "clinics")]
 
 
 @pytest.fixture
@@ -157,25 +194,27 @@ def c(app, up):
     return client
 
 
-def _csrf(client):
-    html = client.get("/bjud-in-patient").get_data(as_text=True)
-    m = re.search(r'name="csrf_token" value="([^"]+)"', html)
-    assert m, html[:500]
+def _open(client, guid=P1):
+    r = client.get(f"/patient/{guid}/charts")
+    assert r.status_code == 200, r.get_data(as_text=True)[:300]
+    return r
+
+
+def _csrf(client, guid=P1):
+    r = client.get(f"/bjud-in-patient/{guid}")
+    m = re.search(r'name="csrf_token" value="([^"]+)"', r.get_data(as_text=True))
+    assert m, r.get_data(as_text=True)[:800]
     return m.group(1)
 
 
-def _form(**over):
-    f = {"given_name": "Synt", "family_name": "Inbjudensson",
-         "personnummer": PNR, "mobile": "070-000 00 01", "care_unit_guid": UNIT_A}
-    f.update(over)
-    return {k: v for k, v in f.items() if v is not None}
-
-
-def _send(client, **over):
-    data = _form(**over)
-    data.setdefault("csrf_token", _csrf(client))
-    data.setdefault("confirmed", "ja")
-    return client.post("/bjud-in-patient/skicka", data=data)
+def _post(client, step, guid=P1, csrf=True, **data):
+    if csrf:
+        data.setdefault("csrf_token", _csrf(client, guid))
+    if step == "skicka":
+        data.setdefault("confirmed", "ja")
+    data.setdefault("mobile", "070-000 00 01")
+    return client.post(f"/bjud-in-patient/{guid}/{step}",
+                       data={k: v for k, v in data.items() if v is not None})
 
 
 def _audit(app):
@@ -185,201 +224,348 @@ def _audit(app):
                 for r in DashboardAudit.query.order_by(DashboardAudit.timestamp).all()]
 
 
+def _sms_href(html):
+    m = re.search(r'id="iv-sms" href="([^"]+)"', html)
+    assert m, html[:1500]
+    return htmllib.unescape(m.group(1))
+
+
+def _expected_text(url=INVITE_URL, given="Synt", unit="Vårdcentralen Norr"):
+    return (f"Hej {given}! {unit} bjuder in dig till Patientappen. Öppna länken "
+            f"för att skapa ditt konto: {url} Länken gäller en gång.")
+
+
 # --------------------------------------------------------------------------
-# the unit choice
+# entry: the patient is chosen first
 # --------------------------------------------------------------------------
 
-def test_one_affiliation_is_preselected_and_linked_from_the_nav(c, up):
+def test_the_open_patient_carries_the_action_and_the_nav_item_is_gone(c, up):
+    html = _open(c).get_data(as_text=True)
+    assert f'href="/bjud-in-patient/{P1}"' in html
+    assert "Bjud in till patientappen" in html
+    assert 'id="invite-nav"' not in html
+
+
+def test_the_patient_overview_page_also_opens_the_patient_and_carries_the_action(c, up):
+    r = c.get(f"/dashboard/view/{P2}")
+    assert r.status_code == 200
+    assert f'href="/bjud-in-patient/{P2}"' in r.get_data(as_text=True)
+    assert c.get(f"/bjud-in-patient/{P2}").status_code == 200
+
+
+def test_no_patient_redirects_to_the_patient_picker(c, up):
     r = c.get("/bjud-in-patient")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/select")
+
+
+def test_a_patient_not_opened_in_this_session_is_refused_before_eps_is_asked(c, up):
+    _open(c, P1)
+    r = c.get(f"/bjud-in-patient/{P2}")
+    assert r.status_code == 403
+    assert "Öppna patienten först" in r.get_data(as_text=True)
+    assert [x for x in up.eps_calls() if x[3] == P2] == []
+
+
+def test_a_malformed_guid_is_a_404(c, up):
+    assert c.get("/bjud-in-patient/not-a-guid").status_code == 404
+
+
+# --------------------------------------------------------------------------
+# the page: name from eps, no identity entry, mobile for confirmation
+# --------------------------------------------------------------------------
+
+def test_the_page_shows_eps_name_and_prefills_the_normalised_mobile(c, up):
+    _open(c)
+    r = c.get(f"/bjud-in-patient/{P1}")
     html = r.get_data(as_text=True)
     assert r.status_code == 200
-    assert 'id="invite-nav"' in html
+    assert 'id="iv-patient">Synt Inbjudensson<' in html
+    assert 'name="mobile"' in html and 'value="+46700000001"' in html
+    for gone in ('name="personnummer"', 'name="given_name"', 'name="family_name"',
+                 "Personnummer"):
+        assert gone not in html
     assert "Vårdenhet:</strong> Vårdcentralen Norr" in html
     assert f'type="hidden" name="care_unit_guid" value="{UNIT_A}"' in html
-    assert 'type="radio"' not in html
-    for label in ("Förnamn", "Efternamn", "Personnummer (syntetiskt i piloten)", "Mobil (valfri)"):
-        assert label in html
+    # eps read with the professional's bearer; Authorization is the bearer.
+    for _, what, headers, _ in up.eps_calls():
+        assert headers["Authorization"] == f"Bearer {TOKEN}"
 
 
-def test_several_affiliations_force_a_choice_with_no_default(c, up):
+def test_no_mobile_in_eps_means_an_empty_required_field(c, up):
+    up.state[P1] = _state(phones=())
+    _open(c)
+    html = c.get(f"/bjud-in-patient/{P1}").get_data(as_text=True)
+    assert re.search(r'name="mobile" required[^>]*value=""', html)
+    assert "inget mobilnummer" in html
+    r = _post(c, "bekrafta", mobile="")
+    assert r.status_code == 400
+    assert "Ange patientens mobilnummer" in r.get_data(as_text=True)
+    assert up.sso_invites() == []
+
+
+def test_a_landline_only_in_eps_is_prefilled_raw_and_must_be_corrected(c, up):
+    up.state[P1] = _state(phones=(("08-123 456", "home"),))
+    _open(c)
+    html = c.get(f"/bjud-in-patient/{P1}").get_data(as_text=True)
+    assert 'value="08-123 456"' in html
+    r = _post(c, "bekrafta", mobile="08-123 456")
+    assert r.status_code == 400
+    assert "svenskt mobilnummer" in r.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("typed,norm", [("070-000 00 01", "+46700000001"),
+                                        ("+46 70 000 00 01", "+46700000001"),
+                                        ("0046700000001", "+46700000001"),
+                                        ("(073) 000-0009", "+46730000009")])
+def test_the_mobile_is_normalised_to_plus_46(c, up, typed, norm):
+    _open(c)
+    r = _post(c, "bekrafta", mobile=typed)
+    assert r.status_code == 200
+    assert f'id="iv-c-mobile">{norm}<' in r.get_data(as_text=True)
+
+
+def test_a_changed_mobile_is_said_to_be_for_this_message_only(c, up):
+    _open(c)
+    same = _post(c, "bekrafta", mobile="+46700000001").get_data(as_text=True)
+    assert 'id="iv-not-saved"' not in same
+    other = _post(c, "bekrafta", mobile="070-000 00 02").get_data(as_text=True)
+    assert 'id="iv-not-saved"' in other
+    assert "används bara för det här meddelandet och sparas inte" in other
+    assert up.sso_invites() == []
+
+
+# --------------------------------------------------------------------------
+# units
+# --------------------------------------------------------------------------
+
+def test_several_listed_units_are_a_required_choice_with_no_default(c, up):
     up.blob = _blob(units=(UNIT_A, UNIT_B))
-    html = c.get("/bjud-in-patient").get_data(as_text=True)
-    radios = re.findall(r'<input type="radio"[^>]*>', html)
-    assert len(radios) == 2
-    assert all("checked" not in x and "required" in x for x in radios)
-    # the server refuses a POST without a choice, and calls nobody
-    data = _form(care_unit_guid=None)
-    data["csrf_token"] = _csrf(c)
-    r = c.post("/bjud-in-patient/bekrafta", data=data)
+    up.listed[P1] = [UNIT_A, UNIT_B]
+    _open(c)
+    html = c.get(f"/bjud-in-patient/{P1}").get_data(as_text=True)
+    assert html.count('type="radio" name="care_unit_guid"') == 2
+    assert "checked" not in html.split('id="iv-units"')[1].split("</fieldset>")[0]
+    r = _post(c, "bekrafta")
     assert r.status_code == 400 and "Välj vårdenhet." in r.get_data(as_text=True)
-    data["confirmed"] = "ja"
-    r = c.post("/bjud-in-patient/skicka", data=data)
-    assert r.status_code == 400 and "Välj vårdenhet." in r.get_data(as_text=True)
-    assert up.eps_calls == [] and up.sso_calls == []
-    # with a choice: B, and B is what eps and sso are asked for
-    r = _send(c, care_unit_guid=UNIT_B)
-    assert r.status_code == 200
-    assert up.eps_calls[0]["json"]["care_unit_guid"] == UNIT_B
-    assert up.sso_calls[0]["json"]["care_unit_guid"] == UNIT_B
+    r = _post(c, "bekrafta", care_unit_guid=UNIT_B)
+    assert r.status_code == 200 and 'id="iv-c-unit">Vårdcentralen Söder<' in r.get_data(as_text=True)
 
 
-def test_no_affiliation_and_not_su_is_refused_with_a_message(c, up):
+def test_only_units_the_patient_is_listed_at_can_be_chosen(c, up):
+    up.blob = _blob(units=(UNIT_A, UNIT_B))
+    up.listed[P1] = [UNIT_B]
+    _open(c)
+    html = c.get(f"/bjud-in-patient/{P1}").get_data(as_text=True)
+    assert f'type="hidden" name="care_unit_guid" value="{UNIT_B}"' in html
+    assert 'id="iv-not-listed"' in html and "Vårdcentralen Norr" in html
+    r = _post(c, "skicka", care_unit_guid=UNIT_A)
+    assert r.status_code == 400
+    assert "inte listad vid den valda vårdenheten" in r.get_data(as_text=True)
+    assert up.sso_invites() == []
+
+
+def test_a_patient_not_listed_at_any_of_my_units_is_refused_by_name(app, c, up):
+    up.listed[P1] = [UNIT_B]
+    _open(c)
+    r = c.get(f"/bjud-in-patient/{P1}")
+    assert r.status_code == 409
+    text = r.get_data(as_text=True)
+    assert "Patienten är inte listad vid Vårdcentralen Norr" in text
+    assert "Ingenting har gjorts" in text
+    r = _post(c, "skicka", csrf=False, csrf_token="x")
+    assert up.sso_invites() == []
+    assert any(a["payload"].get("outcome") == "not_listed" for a in _audit(app))
+
+
+def test_a_unit_i_am_not_affiliated_to_is_refused(c, up):
+    _open(c)
+    r = _post(c, "skicka", care_unit_guid=UNIT_B)
+    assert r.status_code == 400
+    assert "inte affilierad" in r.get_data(as_text=True)
+    assert up.sso_invites() == []
+
+
+def test_no_affiliation_and_not_su_is_refused_before_eps(c, up):
     up.blob = _blob(units=())
-    r = c.get("/bjud-in-patient")
-    html = r.get_data(as_text=True)
+    # Such a professional cannot open the picker/charts (care door); go direct.
+    with c.session_transaction() as s:
+        s["_opened_patients"] = [P1]
+    r = c.get(f"/bjud-in-patient/{P1}")
     assert r.status_code == 403
-    assert "Du har ingen affiliering till någon vårdenhet" in html
-    assert 'id="iv-form"' not in html
-    with c.session_transaction() as sess:       # the page offers no form
-        sess["_csrf_token"] = "known-token"
-    r = c.post("/bjud-in-patient/skicka", data=dict(_form(), confirmed="ja",
-                                                    csrf_token="known-token"))
-    assert r.status_code == 403 and up.eps_calls == []
-    assert "Du har ingen affiliering" in r.get_data(as_text=True)
+    assert "ingen affiliering" in r.get_data(as_text=True)
+    assert up.eps_calls() == []
 
 
-def test_a_membership_is_not_an_affiliation(c, up):
-    up.blob = _blob(units=(), organization_ids=[UNIT_A])
-    assert c.get("/bjud-in-patient").status_code == 403
-
-
-def test_a_unit_outside_the_affiliations_is_refused_before_any_call(c, up):
-    r = _send(c, care_unit_guid=UNIT_B)
-    assert r.status_code == 400
-    assert "inte affilierad till den valda vårdenheten" in r.get_data(as_text=True)
-    assert up.eps_calls == []
-
-
-def test_su_without_affiliation_may_name_a_unit(c, up):
+def test_su_chooses_among_the_units_eps_lists(c, up):
     up.blob = _blob(units=(), is_su_admin=True)
-    html = c.get("/bjud-in-patient").get_data(as_text=True)
-    assert 'name="care_unit_guid_su"' in html
-    r = _send(c, care_unit_guid=None, care_unit_guid_su=UNIT_B)
-    assert r.status_code == 200, r.get_data(as_text=True)[:400]
-    assert up.eps_calls[0]["json"]["care_unit_guid"] == UNIT_B
-
-
-def test_a_patient_is_refused_by_the_gate(c, up):
-    up.blob = _blob(user_type="patient")
-    assert c.get("/bjud-in-patient").status_code == 403
-    assert 'id="invite-nav"' not in c.get("/bjud-in-patient").get_data(as_text=True)
-
-
-# --------------------------------------------------------------------------
-# the two steps
-# --------------------------------------------------------------------------
-
-def test_csrf_and_confirmation_are_required(c, up):
-    r = c.post("/bjud-in-patient/bekrafta", data=_form())
-    assert r.status_code == 403
-    r = c.post("/bjud-in-patient/skicka", data=dict(_form(), confirmed="ja"))
-    assert r.status_code == 403
-    r = c.post("/bjud-in-patient/skicka", data=dict(_form(), csrf_token=_csrf(c)))
-    assert r.status_code == 400
-    assert up.eps_calls == [] and up.sso_calls == []
-
-
-def test_confirm_shows_the_data_and_calls_nothing(c, up):
-    data = dict(_form(), csrf_token=_csrf(c))
-    r = c.post("/bjud-in-patient/bekrafta", data=data)
-    html = r.get_data(as_text=True)
+    up.listed[P1] = [UNIT_A, UNIT_B]
+    _open(c)
+    html = c.get(f"/bjud-in-patient/{P1}").get_data(as_text=True)
+    assert html.count('type="radio" name="care_unit_guid"') == 2
+    r = _post(c, "skicka", care_unit_guid=UNIT_B)
     assert r.status_code == 200
-    assert "Synt Inbjudensson" in html and "Vårdcentralen Norr" in html
-    assert "+46700000001" in html                 # normalised
-    assert 'action="/bjud-in-patient/skicka"' in html
-    assert up.eps_calls == [] and up.sso_calls == []
+    assert up.sso_invites()[-1][3]["care_unit_guid"] == UNIT_B
 
 
-def test_send_calls_eps_then_sso_with_the_bearer_only_and_shows_the_link_once(app, c, up):
-    r = _send(c)
-    html = r.get_data(as_text=True)
-    assert r.status_code == 200, html[:500]
-    assert r.headers["Cache-Control"] == "no-store"
-    assert html.count(INVITE_URL) == 1
-    assert 'id="iv-copy"' in html and "Sms skickas inte ännu" in html
-    (e,), (s,) = up.eps_calls, up.sso_calls
-    for call in (e, s):
-        assert call["headers"]["Authorization"] == f"Bearer {TOKEN}"
-        assert "X-Service-Key" not in call["headers"]
-    assert e["json"] == {"given_name": "Synt", "family_name": "Inbjudensson",
-                         "personnummer": PNR, "care_unit_guid": UNIT_A,
-                         "mobile": "+46700000001"}
-    assert s["json"] == {"ips_patient_guid": P_NEW, "care_unit_guid": UNIT_A,
-                         "given_name": "Synt", "family_name": "Inbjudensson"}
-    rows = [x for x in _audit(app) if x["event"] == "patient_invite_send"]
-    assert len(rows) == 1 and rows[0]["payload"]["outcome"] == "invited"
-    assert str(rows[0]["patient"]) == P_NEW
-    blob = json.dumps(_audit(app), default=str)
-    for secret in (PNR, PNR.replace("-", ""), INVITE_URL, "ONE-TIME-TOKEN", "Inbjudensson"):
-        assert secret not in blob
+def test_a_non_professional_cannot_reach_the_page(c, up):
+    up.blob = _blob(user_type="patient")
+    assert c.get(f"/bjud-in-patient/{P1}").status_code in (302, 403)
+    assert up.eps_calls() == []
 
 
-def test_mobile_is_optional_and_validated(c, up):
-    assert _send(c, mobile="").status_code == 200
-    assert "mobile" not in up.eps_calls[-1]["json"]
-    r = _send(c, mobile="12345")
-    assert r.status_code == 400 and "svenskt mobilnummer" in r.get_data(as_text=True)
+# --------------------------------------------------------------------------
+# no IDOR: the patient is the one in context, never the form's
+# --------------------------------------------------------------------------
+
+def test_a_different_patient_guid_in_the_form_is_refused(c, up):
+    _open(c, P1)
+    _open(c, P2)
+    for key in ("patient_guid", "ips_patient_guid"):
+        r = _post(c, "skicka", P1, **{key: P2})
+        assert r.status_code == 400, key
+        assert "annan patient" in r.get_data(as_text=True)
+    assert up.sso_invites() == []
+
+
+def test_names_in_the_form_are_ignored_and_eps_names_are_sent(c, up):
+    _open(c)
+    r = _post(c, "skicka", given_name="Mallory", family_name="Annan",
+              patient_guid=P1)
+    assert r.status_code == 200
+    (_, _, headers, body), = up.sso_invites()
+    assert body == {"ips_patient_guid": P1, "care_unit_guid": UNIT_A,
+                    "given_name": "Synt", "family_name": "Inbjudensson"}
+    assert headers["Authorization"] == f"Bearer {TOKEN}"
+    assert "X-Service-Key" not in headers
+    assert "Mallory" not in r.get_data(as_text=True)
+
+
+def test_a_guid_eps_knows_under_another_platform_guid_is_refused(c, up):
+    up.platform_header[P1] = "ffffffff-0000-4000-8000-000000000000"
+    _open(c)
+    r = c.get(f"/bjud-in-patient/{P1}")
+    assert r.status_code == 502
+    assert "annat id" in r.get_data(as_text=True)
+
+
+def test_eps_out_of_scope_404_and_eps_down_503(c, up):
+    _open(c)
+    up.eps_answer = _Resp(404, {"error": "patient not found"})
+    r = c.get(f"/bjud-in-patient/{P1}")
+    assert r.status_code == 404 and "utanför" in r.get_data(as_text=True)
+    up.eps_answer = requests.ConnectionError("down")
+    r = c.get(f"/bjud-in-patient/{P1}")
+    assert r.status_code == 503 and "svarade inte" in r.get_data(as_text=True)
+
+
+def test_eps_without_a_full_name_is_refused(c, up):
+    up.state[P1] = _state(family=None)
+    _open(c)
+    r = c.get(f"/bjud-in-patient/{P1}")
+    assert r.status_code == 409 and "inget fullständigt namn" in r.get_data(as_text=True)
+
+
+# --------------------------------------------------------------------------
+# the two steps, CSRF, sso errors
+# --------------------------------------------------------------------------
+
+def test_csrf_is_required_on_both_posts(c, up):
+    _open(c)
+    for step in ("bekrafta", "skicka"):
+        r = _post(c, step, csrf=False)
+        assert r.status_code == 403, step
+        r = _post(c, step, csrf=False, csrf_token="wrong")
+        assert r.status_code == 403, step
+    assert up.sso_invites() == []
+
+
+def test_send_needs_confirmed_ja(c, up):
+    _open(c)
+    r = _post(c, "skicka", confirmed="")
+    assert r.status_code == 400 and "bekräftats" in r.get_data(as_text=True)
+    assert up.sso_invites() == []
+
+
+def test_confirm_calls_no_sso_and_carries_unit_and_mobile_forward(c, up):
+    _open(c)
+    html = _post(c, "bekrafta").get_data(as_text=True)
+    assert up.sso_invites() == []
+    assert f'action="/bjud-in-patient/{P1}/skicka"' in html
+    assert 'name="confirmed" value="ja"' in html
+    assert 'name="mobile" value="+46700000001"' in html
+
+
+def test_sso_patient_already_linked(c, up):
+    up.sso_answer = _Resp(409, {"error": "patient_already_linked"})
+    _open(c)
+    r = _post(c, "skicka")
+    assert r.status_code == 409
+    assert "Patienten har redan ett konto" in r.get_data(as_text=True)
+    assert "iv-sms" not in r.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("answer,status,text", [
-    (_Resp(422, {"error": "real_personnummer"}), 422, "Piloten tar bara emot syntetiska"),
-    (_Resp(422, {"error": "invalid_personnummer"}), 422, "inte ett giltigt personnummer"),
-    (_Resp(409, {"error": "name_mismatch"}), 409, "under ett annat namn"),
-    (_Resp(403, {"error": "not_affiliated"}), 403, "inte affilierad"),
-    (_Resp(422, {"error": "unknown_unit"}), 422, "aktiv enhet"),
+    (requests.ConnectionError("down"), 503, "Inloggningstjänsten (sso) svarade inte"),
+    (_Resp(403, {"error": "patient_not_at_unit"}), 403, "kunde inte se patienten"),
     (_Resp(500, None, "<html>boom</html>"), 503, "svarade inte"),
-    (_Resp(404, None, "<html>404</html>"), 503, "svarade inte"),
-    (requests.ConnectionError("refused"), 503, "svarade inte"),
 ])
-def test_an_eps_refusal_is_named_and_sso_is_not_asked(c, up, answer, status, text):
-    up.eps_answer = answer
-    r = _send(c)
+def test_sso_failures_are_named(c, up, answer, status, text):
+    up.sso_answer = answer
+    _open(c)
+    r = _post(c, "skicka")
     assert r.status_code == status
     assert text in r.get_data(as_text=True)
-    assert up.sso_calls == []
-    assert INVITE_URL not in r.get_data(as_text=True)
 
 
-def test_patient_already_linked_says_the_patient_has_an_account(c, up):
-    up.sso_answer = _Resp(409, {"error": "patient_already_linked"})
-    r = _send(c)
+# --------------------------------------------------------------------------
+# the done page: the sms: link, once, no-store
+# --------------------------------------------------------------------------
+
+def test_the_done_page_forms_the_message_exactly(app, c, up):
+    _open(c)
+    r = _post(c, "skicka")
     html = r.get_data(as_text=True)
-    assert r.status_code == 409
-    assert "Patienten har redan ett konto" in html and 'id="iv-retry"' not in html
+    assert r.status_code == 200
+    assert r.headers["Cache-Control"] == "no-store"
+    href = _sms_href(html)
+    text = _expected_text()
+    assert href == "sms:+46700000001&body=" + quote(text, safe="")
+    recipient, body = href[len("sms:"):].split("&body=", 1)
+    assert recipient == "+46700000001"
+    assert "&" not in body and " " not in body and "+" not in body
+    assert unquote(body) == text
+    assert unquote(body).count(INVITE_URL) == 1
+    assert "Skicka inbjudan i Meddelanden" in html
+    assert "Meddelanden öppnas med texten ifylld – tryck skicka" in html
+    assert "skickat" not in html.lower().replace("skickades", "")
+    assert 'id="iv-copy-text"' in html and 'id="iv-copy-link"' in html
+    # Nothing identifying in the audit rows.
+    rows = _audit(app)
+    dump = json.dumps(rows, ensure_ascii=False)
+    for secret in (INVITE_URL, "ONE-TIME", "Synt", "Inbjudensson", "700000001"):
+        assert secret not in dump
+    sent = [a for a in rows if a["event"] == "patient_invite_send"]
+    assert sent[-1]["payload"]["outcome"] == "invited"
+    assert sent[-1]["patient"] == P1
 
 
-def test_sso_failing_after_eps_says_registered_and_retry_works(c, up):
-    up.sso_answer = requests.ConnectionError("down")
-    r = _send(c)
-    html = r.get_data(as_text=True)
-    assert r.status_code == 502
-    assert "Patienten är registrerad, men inbjudan skapades inte" in html
-    assert 'id="iv-retry"' in html and INVITE_URL not in html
-    # the retry form carries the confirmed values and a fresh CSRF token
-    data = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)"', html))
-    assert data["personnummer"] == PNR and data["confirmed"] == "ja"
-    up.sso_answer = None
-    r = c.post("/bjud-in-patient/skicka", data=data)
-    assert r.status_code == 200 and INVITE_URL in r.get_data(as_text=True)
-    # eps found the same patient: nothing was registered twice
-    assert len(up.patients) == 1 and len(up.eps_calls) == 2
+def test_an_invite_link_with_reserved_characters_is_encoded_in_the_body(c, up):
+    odd = "https://sso.test/patient-invite/a&b=c?d#e+f"
+    up.sso_answer = _Resp(201, {"invite_guid": "g", "invite_url": odd,
+                                "expires_at": "2026-11-29T12:00:00+00:00"})
+    _open(c)
+    href = _sms_href(_post(c, "skicka").get_data(as_text=True))
+    body = href.split("&body=", 1)[1]
+    assert href.count("&") == 1 and "#" not in href and "?" not in href
+    assert unquote(body) == _expected_text(url=odd)
 
 
-def test_a_professional_without_unit_can_sign_in_only_to_reach_the_invite_page(app, up):
-    """Otherwise the clear message could never be shown: the callback refused
-    anyone without a care unit or the analysis phase."""
-    up.blob = _blob(units=())
-    for nxt, expected in (("http://localhost/bjud-in-patient", "/bjud-in-patient"),
-                          ("http://localhost/nurse", "/auth/login")):
-        client = app.test_client()
-        with client.session_transaction() as s:
-            s["sso_state"], s["sso_next"] = "st", nxt
-        r = client.get(f"/auth/callback?token={TOKEN}&state=st")
-        assert r.status_code == 302 and r.headers["Location"].endswith(expected), (nxt, r.headers)
-    # a patient is not let in that way
-    up.blob = _blob(units=(), user_type="patient")
-    client = app.test_client()
-    with client.session_transaction() as s:
-        s["sso_state"], s["sso_next"] = "st", "http://localhost/bjud-in-patient"
-    r = client.get(f"/auth/callback?token={TOKEN}&state=st")
-    assert r.headers["Location"].endswith("/auth/login")
+def test_the_sms_uses_the_confirmed_number_and_the_chosen_unit(c, up):
+    up.blob = _blob(units=(UNIT_A, UNIT_B))
+    up.listed[P1] = [UNIT_A, UNIT_B]
+    _open(c)
+    html = _post(c, "skicka", care_unit_guid=UNIT_B, mobile="073-000 00 09").get_data(as_text=True)
+    href = _sms_href(html)
+    assert href.startswith("sms:+46730000009&body=")
+    assert unquote(href.split("&body=", 1)[1]) == _expected_text(unit="Vårdcentralen Söder")
+    assert "sparas inte" in html

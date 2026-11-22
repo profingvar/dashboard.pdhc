@@ -116,10 +116,16 @@ def admin_read_attest():
 def charts_page(guid):
     # Shell only; the data endpoints below are each audited on fetch.
     g._audit_n_rows = 0
+    # #1050 v2: this patient is now open in this session, so "Bjud in till
+    # patientappen" may be made for it (routes/invite.py).
+    from app.auth import has_invite_page_access
+    from app.routes.invite import remember_opened_patient
+    remember_opened_patient(guid)
     blocks = get_active_blocks(guid)
     return render_template(
         "charts.html",
         patient_guid=guid,
+        can_invite=has_invite_page_access(getattr(g, "access_blob", None)),
         has_blocked_sources=has_any_active_block(blocks),
         # #827 — `has_blocked_sources` is False both when the patient has
         # no block AND when we could not ask ips at all, and for five

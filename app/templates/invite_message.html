@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{{ title }} · Bjud in patient{% endblock %}
-{% block h1 %}Bjud in patient{% endblock %}
+{% block title %}{{ title }} · Bjud in till patientappen{% endblock %}
+{% block h1 %}Bjud in till patientappen{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 {% endblock %}
@@ -9,7 +9,9 @@
 <div class="card rv-problem" role="alert" id="iv-message">
   <h2>{{ title }}</h2>
   <p>{{ text }}</p>
-  <p style="margin-top:0.5rem;"><a class="rv-btn" href="{{ url_for('invite.form') }}">Till Bjud in patient</a></p>
+  <p style="margin-top:0.5rem;">
+  {% if patient_guid %}<a class="rv-btn" href="{{ url_for('charts.charts_page', guid=patient_guid) }}">Tillbaka till patienten</a>
+  {% else %}<a class="rv-btn" href="{{ url_for('picker.select') }}">Till patientlistan</a>{% endif %}</p>
 </div>
 </div>
 {% endblock %}

@@ -1,46 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Inbjudan skapad · dashboard{% endblock %}
-{% block h1 %}Bjud in patient{% endblock %}
-{% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<style>
-  #iv-link { width: 100%; min-height: 44px; font-size: 1rem; font-family: monospace; }
-</style>
-{% endblock %}
+{% block h1 %}Bjud in till patientappen{% endblock %}
+{% block head %}{% include "_invite_style.html" %}{% endblock %}
 {% block content %}
 <div class="rv-wrap" lang="sv">
 <div class="card" id="iv-done">
-  <h2>Inbjudan skapad</h2>
-  <p>{{ form.given_name }} {{ form.family_name }} är
-    {% if patient.created %}registrerad{% elif patient.assignment == 'added' %}tillagd{% else %}redan registrerad{% endif %}
-    på {{ form.care_unit_name }}.</p>
-  <p><strong>Länken visas bara nu.</strong> Kopiera den och ge den till patienten.
-    Den gäller i 7 dagar och kan användas en gång.</p>
-  <label for="iv-link">Inbjudningslänk</label>
+  <h2>Inbjudan skapad för {{ ctx.given_name }} {{ ctx.family_name }}</h2>
+  <p>Vårdenhet: {{ choice.care_unit_name }}. Mobil: {{ choice.mobile }}.</p>
+  <div class="iv-actions">
+    <a class="rv-btn iv-primary" id="iv-sms" href="{{ sms }}">Skicka inbjudan i Meddelanden</a>
+  </div>
+  <p id="iv-sms-hint">Meddelanden öppnas med texten ifylld – tryck skicka. Den här
+    sidan kan inte se om meddelandet skickades.</p>
+  {% if choice.mobile_differs %}
+  <p class="iv-note">Numret används bara för det här meddelandet och sparas inte i patientregistret.</p>
+  {% endif %}
+  <p><strong>Länken visas bara nu.</strong> Den kan användas en gång{% if expires_at %} och gäller i 7 dagar{% endif %}.
+    Öppnas inte Meddelanden, kopiera texten eller länken och ge den till patienten på annat sätt.</p>
+  <label for="iv-text">Meddelandet</label>
+  <textarea id="iv-text" readonly rows="5">{{ text }}</textarea>
+  <div class="iv-actions">
+    <button type="button" class="rv-btn" id="iv-copy-text" data-copy="iv-text">Kopiera texten</button>
+  </div>
+  <label for="iv-link" style="display:block;margin-top:0.75rem;font-weight:600;">Inbjudningslänk</label>
   <input type="text" id="iv-link" readonly value="{{ invite_url }}">
-  <p style="margin-top:0.5rem;"><button type="button" class="rv-btn" id="iv-copy">Kopiera länken</button>
-    <span id="iv-copied" role="status"></span></p>
-  <h3 style="margin-top:1rem;">Text till patienten</h3>
-  <p id="iv-text">Hej {{ form.given_name }}! Du är inbjuden till patientappen av
-    {{ form.care_unit_name }}. Öppna länken, ange ditt personnummer, välj e-post och
-    lösenord och lägg till en passkey. Länken gäller i 7 dagar.</p>
-  <p class="rv-meta">Sms skickas inte ännu: ge länken till patienten på annat sätt
-    (till exempel vid besöket). Sms kommer senare.</p>
-  <p><a class="rv-btn" href="{{ url_for('invite.form') }}">Bjud in en patient till</a></p>
+  <div class="iv-actions">
+    <button type="button" class="rv-btn" id="iv-copy-link" data-copy="iv-link">Kopiera länken</button>
+    <span id="iv-copied" role="status" style="align-self:center;"></span>
+  </div>
+  <p style="margin-top:1rem;"><a class="rv-btn" href="{{ url_for('charts.charts_page', guid=ctx.patient_guid) }}">Tillbaka till patienten</a></p>
 </div>
 </div>
 <script>
-document.getElementById('iv-copy').addEventListener('click', function () {
-  var el = document.getElementById('iv-link'), out = document.getElementById('iv-copied');
-  el.select();
-  var done = function () { out.textContent = ' Kopierad.'; };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(el.value).then(done, function () {
-      try { document.execCommand('copy'); done(); } catch (e) { out.textContent = ' Markera och kopiera själv.'; }
-    });
-  } else {
-    try { document.execCommand('copy'); done(); } catch (e) { out.textContent = ' Markera och kopiera själv.'; }
-  }
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var el = document.getElementById(btn.getAttribute('data-copy'));
+    var out = document.getElementById('iv-copied');
+    var done = function () { out.textContent = 'Kopierad.'; };
+    var fallback = function () {
+      el.select();
+      try { document.execCommand('copy'); done(); } catch (e) { out.textContent = 'Markera och kopiera själv.'; }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(el.value).then(done, fallback);
+    } else { fallback(); }
+  });
 });
 </script>
 {% endblock %}
