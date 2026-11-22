@@ -186,6 +186,9 @@ def create_app(config=None):
     app.register_blueprint(picker_bp)
     app.register_blueprint(charts_bp)
     app.register_blueprint(dashboard_bp)
+    # #1044 — the queue "EPS att granska" (patient-reported EPS answers).
+    from app.routes.eps_review import bp as eps_review_bp
+    app.register_blueprint(eps_review_bp)
     register_metadata(app)
 
     # Audit view (#215). (The cache-scrub route + cache-sweep CLI were

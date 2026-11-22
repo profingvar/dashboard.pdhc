@@ -22,6 +22,11 @@
   <a href="https://www.pdhc.se/services.html" style="color:white;font-size:0.9rem;">PDHC / services</a>
   <a href="{{ url_for('picker.select') }}" style="color:white;font-weight:700;font-size:1rem;{% if request.path in ['/select', '/'] %}text-decoration:underline;{% endif %}">choose patient</a>
   <a href="/nurse" style="color:white;font-size:0.9rem;{% if request.path.startswith('/nurse') or request.path == '/workspace' or '/charts' in request.path %}text-decoration:underline;{% endif %}">Dashboard</a>
+  {# #1044: the EPS review queue. The number is what cdr1 answered; a failed
+     read shows "?" (or nothing on a refusal), never 0. #}
+  {% if g.current_user %}
+  <a href="/eps-granskning" id="eps-nav" style="color:white;font-size:0.9rem;{% if request.path.startswith('/eps-granskning') %}text-decoration:underline;{% endif %}">EPS att granska<span id="eps-nav-count"{% if eps_nav_count is defined %} data-known="{{ eps_nav_count }}"{% endif %}></span></a>
+  {% endif %}
   {% if g.current_user and (g.current_user.is_admin or g.current_user.is_su) %}
   <a href="/admin/audit" style="color:white;font-size:0.9rem;{% if request.path.startswith('/admin') %}text-decoration:underline;{% endif %}">Spärrlogg</a>
   {% endif %}
@@ -53,6 +58,45 @@
      survives an offline/locked-down deploy. chart.js@4.4.6 + adapter v3.0.0. -->
 <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/chartjs-adapter-date-fns.bundle.min.js') }}"></script>
+<script>
+/* #1044: the pending count beside "EPS att granska". Each read is a call to
+   cdr1 in the user's name (and a read-audit row there), so it is asked at
+   most once per two minutes per tab; the queue page supplies its own number. */
+(function () {
+  var el = document.getElementById('eps-nav-count');
+  if (!el) return;
+  var KEY = 'epsNavCount', TTL = 120000;
+  function show(txt, title) {
+    el.textContent = txt ? ' (' + txt + ')' : '';
+    if (title) el.parentNode.title = title;
+  }
+  function remember(txt) {
+    try { sessionStorage.setItem(KEY, JSON.stringify({ t: Date.now(), v: txt })); } catch (e) {}
+  }
+  if (el.hasAttribute('data-known')) {
+    var known = el.getAttribute('data-known');
+    show(known);
+    if (/^[0-9]+$/.test(known)) remember(known);
+    return;
+  }
+  try {
+    var c = JSON.parse(sessionStorage.getItem(KEY) || 'null');
+    if (c && Date.now() - c.t < TTL) { show(c.v); return; }
+  } catch (e) {}
+  fetch('/eps-granskning/antal', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+    .then(function (r) {
+      if (r.status === 403) { show('', 'Du har inte behörighet att granska EPS-svar'); return null; }
+      if (!r.ok) { show('?', 'Antalet kunde inte läsas'); return null; }
+      return r.json();
+    })
+    .then(function (b) {
+      if (!b) return;
+      if (typeof b.count === 'number') { show(String(b.count)); remember(String(b.count)); }
+      else show('?', 'Antalet kunde inte läsas');
+    })
+    .catch(function () { show('?', 'Antalet kunde inte läsas'); });
+})();
+</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

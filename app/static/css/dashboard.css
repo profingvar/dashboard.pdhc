@@ -253,3 +253,38 @@ button.plan-item {
 .lim-block.is-outside { border-left-color: var(--danger); }
 .lim-block.is-unjudged { border-left-color: var(--warning); }
 .lim-status { font-weight: 700; }
+
+/* EPS review queue (#1044). One column at every width: each answer is read
+ * and decided on its own, so nothing sits side by side that could be misread
+ * across. Touch targets >= 44px; inputs at 16px so iOS Safari does not zoom
+ * the page on focus. No colour carries meaning here and the three actions
+ * look the same on purpose: the page proposes no decision. */
+.rv-wrap { max-width: 900px; }
+.rv-group { margin-bottom: 1rem; }
+.rv-group h2 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+.rv-group .rv-pguid { color: var(--text-muted); font-size: 0.9em; }
+.rv-item { border-top: 1px solid var(--border); padding: 0.75rem 0; }
+.rv-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; }
+.rv-section { font-weight: 600; color: var(--text-muted); }
+.rv-answer { margin: 0.35rem 0; font-size: 1.15rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.rv-k { display: block; font-size: 0.8rem; color: var(--text-muted); }
+.rv-meta { color: var(--text-muted); font-size: 0.9em; }
+.rv-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-start; margin-top: 0.5rem; }
+.rv-actions form { margin: 0; }
+.rv-actions details { flex: 1 1 16rem; min-width: 0; }
+.rv-actions details[open] { flex-basis: 100%; }
+.rv-btn { display: inline-flex; align-items: center; min-height: 44px; padding: 0 1rem; font-size: 1rem;
+  background: #e2e8f0; color: var(--text); border: 1px solid #94a3b8; border-radius: 6px; cursor: pointer; }
+.rv-btn:hover, .rv-btn:focus-visible { background: #cbd5e1; }
+summary.rv-btn { list-style: none; }
+summary.rv-btn::-webkit-details-marker { display: none; }
+.rv-form { margin-top: 0.5rem; display: grid; gap: 0.5rem; max-width: 40rem; }
+.rv-form label { font-weight: 600; }
+.rv-form input[type="text"], .rv-form select, .rv-form textarea {
+  font-size: 16px; padding: 0.5rem 0.6rem; width: 100%; min-height: 44px;
+  border: 1px solid #94a3b8; border-radius: 6px; font-family: inherit; }
+.rv-problem { border-left: 4px solid var(--text); }
+.rv-summary { display: grid; grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr); gap: 0.4rem 1rem; margin: 0.75rem 0; }
+.rv-summary dt { color: var(--text-muted); }
+.rv-summary dd { overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 600px) { .rv-summary { grid-template-columns: minmax(0, 1fr); } }

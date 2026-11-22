@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · EPS att granska{% endblock %}
+{% block h1 %}EPS att granska{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<div class="card rv-problem" role="alert" id="rv-message">
+  <h2>{{ title }}</h2>
+  <p>{{ text }}</p>
+  <p style="margin-top:0.5rem;"><a class="rv-btn" href="{{ url_for('eps_review.queue') }}">Till kön</a></p>
+</div>
+</div>
+{% endblock %}

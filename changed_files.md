@@ -897,3 +897,15 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - app/tests/test_eps_env.py (NEW, 11); app/tests/test_base_url_config.py (RENAMED_ENV alias + 1 test)
 - app/tests/test_sparr_unconfigured.py, test_sparr_banner_distinguishes.py — autouse also clears EPS_BASE_URL
 - deploy/smoke_siblings.py, docs/dashboard.md, scripts/run_fixtures.sh — name EPS_BASE_URL
+
+## 2026-11-22 — #1044 (epic #1039) EPS review queue "EPS att granska"; docs #1046
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/eps_review.py (NEW) — queue, count, confirm, decide
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/cdr_review_client.py (NEW) — cdr1 review API, operator bearer only, named errors
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/csrf.py (NEW) — per-session CSRF token (first CSRF mechanism in this service)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/eps_review.html, eps_review_confirm.html, eps_review_message.html (NEW)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — nav link "EPS att granska" + count script
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css — `.rv-*` block
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py — `/eps-granskning*` registered as a clinical (care-delivery) path
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py — blueprint registered
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_eps_review_1044.py (NEW, 63)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, docs/user_manual.md, progress.md, changed_files.md

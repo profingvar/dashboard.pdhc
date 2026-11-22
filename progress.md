@@ -725,3 +725,66 @@ shared/.env (env_file), then docker-compose up -d.
 - Health 200 and file hashes verified in the container; sibling smoke green before (pre-rename smoke) and after.
 - No behaviour change until `EPS_*` is set in .env: operator script `/tmp/epsdep/eps_env.sh <group>` (refuses until https://eps.pdhc.se answers as eps.pdhc).
 
+
+## 2026-11-22 — #1044 (epic #1039) queue "EPS att granska" (local commit, NOT deployed)
+Built against `plans/patient_app_contract.md` s4.2/s5 and then checked against
+cdr.pdhc's `app/api/reviews.py` as it stood uncommitted in the working tree the
+same day. Detail in docs/technical.md ("EPS review queue").
+
+- Routes: `GET /eps-granskning`, `GET /eps-granskning/antal`,
+  `POST /eps-granskning/<review_guid>/bekrafta`, `POST …/beslut`. Care-delivery
+  gate (registered in `_is_clinical_path`); SU admin must attest first (428).
+- cdr1 is called with the operator's own bearer only, no service key.
+- Refusal vs empty: named exceptions in the client; the page renders
+  `#rv-problem` with 403/502/503, and `#rv-empty` only on a 200 with an empty
+  `items` list. Nav count: `count: null` + status on failure, never 0.
+- CSRF: none existed in this service. Added `app/services/csrf.py` for these
+  two POST routes only.
+- Audit: `eps_review_queue|confirm|approve|amend|reject|decision`; identifiers
+  and outcome only, no answer/value/note/reason text.
+- As-built differences from the contract text that the view handles: cdr1
+  answers a flat 403 (not 404) for an unknown or out-of-scope original; the
+  list carries `can_decide`, `limit`, `truncated` (default limit 200).
+
+### Tests
+pytest `app/tests tests`: 898 passed, 13 skipped -> **961 passed, 13 skipped**
+(+63, `app/tests/test_eps_review_1044.py`). The 13 skips are
+`tests/test_chaos_isolation.py` + `tests/test_statistical_validation.py`,
+which need `MONITOR_PDHC_SERVICE_KEY` (the retired monitor.pdhc identity);
+identical with this change stashed. e2e/ not run.
+
+All through the real routes, AUTH_MODE=sso, only `requests.get/post` patched
+(one fake = sso token validation + cdr1 review API).
+
+Controls (mutate, run, restore; every failure an assertion):
+| mutation | tests that fail |
+|---|---|
+| gate always allows | 3 `test_a_user_outside_the_gate_is_refused[*]` |
+| path not registered as clinical | 57 (a nurse without the analysis phase is 403'd) |
+| `csrf_valid` always True | 6 `test_csrf_missing_or_wrong_is_refused[*]` + audit |
+| client reads 403 as an empty list | 4, incl. `test_cdr_403_renders_a_refusal_not_an_empty_queue` |
+| client swallows every list failure | 10 |
+| a 200 without `items` read as empty | 1 |
+| route renders the problem as an empty page | 8 |
+| count answers 0 on failure | 1 |
+| reason not required | 3 `test_reject_without_a_reason_is_stopped[*]` |
+| confirmation not required | 1 |
+| service key sent with the bearer | 52 |
+| audit stores note/reason/value | 3 |
+| must_change_password not bounced | 1 |
+| admin attestation not required | 1 |
+| `can_decide` ignored | 1 |
+
+### Not verified
+- No browser pass at all: the local Playwright browsers do not match the
+  installed Playwright version and nothing was downloaded. Layout, touch
+  targets (44px in CSS), the `<details>` disclosure and the nav count script
+  are untested in a real browser; no iPad pass, no axe run.
+- Not run against a real cdr1 or sso; the fake follows the contract and the
+  cdr code read on 2026-11-22.
+
+### Deploy (operator decides when; cdr.pdhc's review API must be deployed first)
+No migration, no new dependency, no new `.env` key (`CDR1_BASE_URL` and the
+SSO pair are already set). Code only: baseline-hash, then rebuild or overlay
+as for the previous code-only deploys. Until cdr1 has the API the queue shows "CDR saknar
+granskningsfunktionen" and the nav count shows "?".

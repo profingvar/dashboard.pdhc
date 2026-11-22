@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}EPS att granska · dashboard{% endblock %}
+{% block h1 %}EPS att granska{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<p style="margin-bottom:0.75rem;">
+  Här visas uppgifter som patienter själva har lämnat i patientappen till sin
+  EPS (patientöversikt). De räknas inte som vårdens uppgifter förrän en läkare
+  eller sjuksköterska på patientens vårdenhet har godkänt dem.
+</p>
+
+{% if form_error %}
+<div class="flash flash-error" role="alert" id="rv-form-error">{{ form_error }} Inget har skickats.</div>
+{% endif %}
+
+{% if attest_required %}
+{# An SU admin sees every unit's originals: break-glass, as in the picker. #}
+<div class="card" id="rv-attest">
+  <h2>Intyg krävs</h2>
+  <p>Du är administratör. Kön visar då patientrapporterade uppgifter från alla
+     vårdenheter, vilket är en åtkomst utanför din egen vårdenhet som loggas.
+     Ange skälet för att fortsätta. Som administratör kan du se kön men inte
+     besluta, om du inte också är affilierad till patientens vårdenhet.</p>
+  <form method="post" class="rv-form" action="{{ url_for('charts.admin_read_attest') }}">
+    <input type="hidden" name="next" value="{{ url_for('eps_review.queue') }}">
+    <label for="rv-attest-reason">Skäl</label>
+    <textarea id="rv-attest-reason" name="reason" rows="3" required></textarea>
+    <button type="submit" class="rv-btn">Intyga och fortsätt</button>
+  </form>
+</div>
+{% elif problem %}
+{# A failed read. Never the empty-queue text: the queue is UNKNOWN. #}
+<div class="card rv-problem" role="alert" id="rv-problem" data-problem="{{ problem.code }}">
+  <h2>{{ problem.title }}</h2>
+  <p>{{ problem.text }}</p>
+  <p style="margin-top:0.5rem;"><a class="rv-btn" href="{{ url_for('eps_review.queue') }}">Försök igen</a></p>
+</div>
+{% elif not groups %}
+<div class="card" id="rv-empty">
+  <p>Det finns inga EPS-svar att granska för dina vårdenheter just nu.</p>
+</div>
+{% else %}
+<p class="rv-meta" id="rv-count">
+  {{ shown }} svar väntar på granskning{% if truncated or (total is not none and total != shown) %} (fler finns: CDR anger {{ total }} totalt, {{ shown }} visas här){% endif %}.
+  Svaren visas i den ordning CDR lämnar dem, grupperade per patient.
+</p>
+{% for grp in groups %}
+<section class="card rv-group" data-patient="{{ grp.patient_guid }}">
+  <h2>{{ grp.name or 'Patient' }}
+    <span class="rv-pguid monospace" title="{{ grp.patient_guid }}">{{ grp.patient_guid[:8] }}…</span>
+  </h2>
+  <p class="rv-meta"><a href="{{ url_for('charts.charts_page', guid=grp.patient_guid) }}">Öppna patientens data</a></p>
+
+  {% for it in grp['items'] %}
+  <div class="rv-item" data-review="{{ it.guid }}">
+    <div class="rv-head">
+      <span class="rv-section">{{ it.section }}</span>
+      <strong>{{ it.label }}</strong>
+      <span class="origin-badge" title="Uppgiften kommer från patienten och är inte granskad av vården">Patient</span>
+    </div>
+    <div class="rv-answer"><span class="rv-k">Patientens svar (patientrapporterat, oförändrat)</span>{{ it.value_text }}{% if it.unit %} {{ it.unit }}{% endif %}</div>
+    <div class="rv-meta">Inskickat {{ it.submitted_at }}{% if it.recorded_at != '—' %} · Avser {{ it.recorded_at }}{% endif %}</div>
+
+    {% if not it.can_decide %}
+    <p class="rv-meta rv-nodecide">Du kan se den här posten men inte besluta om den. Beslut kräver att du är läkare eller sjuksköterska med affiliering till patientens vårdenhet.</p>
+    {% else %}
+    <div class="rv-actions">
+      <form method="post" action="{{ url_for('eps_review.confirm', review_guid=it.guid) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="approve">
+        <button type="submit" class="rv-btn">{{ action_labels.approve }}</button>
+      </form>
+
+      <details>
+        <summary class="rv-btn">{{ action_labels.amend }}</summary>
+        {% if it.amendable %}
+        <form method="post" class="rv-form" action="{{ url_for('eps_review.confirm', review_guid=it.guid) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="amend">
+          <label for="v-{{ it.guid }}">Ändrat värde{% if it.unit %} ({{ it.unit }}){% endif %}</label>
+          {% if it.kind == 'bool' %}
+          <select id="v-{{ it.guid }}" name="value" required>
+            <option value="" selected>Välj …</option>
+            <option value="ja">Ja</option>
+            <option value="nej">Nej</option>
+          </select>
+          {% else %}
+          <input type="text" id="v-{{ it.guid }}" name="value" required maxlength="2000"
+                 value="{{ '' if it.value is none else it.value_text }}" autocomplete="off">
+          {% endif %}
+          <span class="rv-meta">Patientens svar ändras inte. Det ändrade värdet sparas som en ny post i ditt namn.</span>
+          <button type="submit" class="rv-btn">Fortsätt</button>
+        </form>
+        {% else %}
+        <p class="rv-meta" style="margin-top:0.5rem;">Det här svaret är sammansatt och kan inte ändras här. Godkänn det som det är eller avvisa det.</p>
+        {% endif %}
+      </details>
+
+      <details>
+        <summary class="rv-btn">{{ action_labels.reject }}</summary>
+        <form method="post" class="rv-form" action="{{ url_for('eps_review.confirm', review_guid=it.guid) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="reject">
+          <label for="r-{{ it.guid }}">Skäl (krävs, visas för patienten)</label>
+          <textarea id="r-{{ it.guid }}" name="reason" rows="3" required maxlength="2000"></textarea>
+          <button type="submit" class="rv-btn">Fortsätt</button>
+        </form>
+      </details>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endif %}
+</div>
+{% endblock %}

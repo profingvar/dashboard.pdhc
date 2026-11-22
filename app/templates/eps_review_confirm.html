@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Bekräfta beslut · EPS att granska{% endblock %}
+{% block h1 %}Bekräfta beslut{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<div class="card" id="rv-confirm" data-review="{{ item.guid }}" data-action="{{ form.action }}">
+  <h2>{{ action_label }}</h2>
+  <p>Inget har skickats ännu. Kontrollera uppgifterna och bekräfta.</p>
+  <dl class="rv-summary">
+    <dt>Patient</dt><dd class="monospace">{{ item.patient_guid }}</dd>
+    <dt>Avsnitt</dt><dd>{{ item.section }}</dd>
+    <dt>Fråga</dt><dd>{{ item.label }}</dd>
+    <dt>Patientens svar <span class="origin-badge">Patient</span></dt>
+    <dd id="rv-original">{{ item.value_text }}{% if item.unit %} {{ item.unit }}{% endif %}</dd>
+    <dt>Inskickat</dt><dd>{{ item.submitted_at }}</dd>
+    {% if form.action == 'amend' %}
+    <dt>Ändrat värde (sparas i ditt namn)</dt>
+    <dd id="rv-amended">{{ amended_text }}{% if item.unit %} {{ item.unit }}{% endif %}</dd>
+    {% endif %}
+    {% if form.action == 'reject' %}
+    <dt>Skäl (visas för patienten)</dt><dd id="rv-reason">{{ form.reason }}</dd>
+    {% endif %}
+  </dl>
+  <p class="rv-meta">
+    {% if form.action == 'reject' %}
+    Svaret avvisas och blir inte en del av patientens EPS. Patientens original sparas oförändrat, och patienten ser att svaret avvisats och varför.
+    {% else %}
+    En ny post skapas i ditt namn och pekar på patientens original, som sparas oförändrat. Den nya posten kan ingå i patientens EPS, med dig som intygande.
+    {% endif %}
+  </p>
+  <form method="post" class="rv-form" action="{{ url_for('eps_review.decide', review_guid=item.guid) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="{{ form.action }}">
+    <input type="hidden" name="confirmed" value="ja">
+    {% if form.action == 'amend' %}<input type="hidden" name="value" value="{{ form.raw_value }}">{% endif %}
+    {% if form.action == 'reject' %}<input type="hidden" name="reason" value="{{ form.reason }}">{% endif %}
+    {% if form.action != 'reject' %}
+    <label for="rv-note">Anteckning (valfri)</label>
+    <textarea id="rv-note" name="note" rows="2" maxlength="2000"></textarea>
+    {% endif %}
+    <div class="rv-actions">
+      <button type="submit" class="rv-btn">Bekräfta och skicka</button>
+      <a class="rv-btn" href="{{ url_for('eps_review.queue') }}">Avbryt</a>
+    </div>
+  </form>
+</div>
+</div>
+{% endblock %}

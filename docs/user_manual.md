@@ -75,7 +75,63 @@ user, patient, route, event type; paginated) and export the filtered set as CSV
 at `/admin/audit/export.csv`. Every patient-touching read — including denials
 and spärr-lift exposures — is recorded here.
 
-## 7. Getting help
+## 7. EPS att granska (för vårdpersonal)
+Patienter kan själva lämna uppgifter till sin EPS (patientöversikt) i
+patientappen: allergier, läkemedel, tidigare sjukdomar, vaccinationer och
+kontaktpersoner. Uppgifterna räknas inte som vårdens förrän någon i vården har
+granskat dem. Det gör du i kön **EPS att granska**, som nås från menyraden.
+Siffran efter länken är antalet svar som väntar. Ett frågetecken betyder att
+antalet inte kunde läsas, inte att kön är tom.
+
+**Vem kan granska.** Du ser svar från patienter som är listade på de
+vårdenheter du är affilierad till. För att besluta behöver du vara läkare
+eller sjuksköterska på patientens vårdenhet. En administratör kan se kön
+(efter att ha angett skäl, eftersom det är åtkomst utanför den egna enheten)
+men kan inte besluta. Poster du kan se men inte besluta om visas utan knappar.
+
+**Så ser kön ut.** Svaren är grupperade per patient och visas i den ordning
+de kommit in. Kön sorterar inte efter hur viktigt ett svar verkar och föreslår
+inget beslut. För varje svar ser du avsnitt, fråga, patientens svar precis som
+det skrevs, när det skickades in, och märket **Patient**, som betyder att
+uppgiften kommer från patienten och inte är granskad.
+
+**Tre val per svar.**
+
+- **Godkänn**: svaret stämmer som det står.
+- **Ändra och godkänn**: svaret behöver rättas, till exempel en stavning eller
+  en dos. Du skriver det rätta värdet. Patientens ursprungliga svar står kvar
+  och visas bredvid.
+- **Avvisa**: svaret ska inte in i EPS. Du måste ange ett skäl.
+
+Efter valet visas en sida där du kontrollerar uppgifterna. Först när du
+trycker **Bekräfta och skicka** registreras beslutet. Vid godkännande kan du
+lägga till en valfri anteckning. Därefter försvinner svaret ur kön.
+
+**Vad ett godkännande innebär.** Det skapas en ny post i vårdens namn, med dig
+som den som intygar, och den pekar på patientens original. Originalet ändras
+aldrig, varken vid godkännande, ändring eller avvisning, så det går alltid att
+se vad patienten skrev och vad vården intygade. Det är den nya posten, inte
+patientens, som kan ingå i patientens EPS, där du anges som intygande.
+
+**Vad patienten ser vid avvisning.** Patienten ser i appen att svaret har
+avvisats, skälet du skrev och när beslutet fattades. Patienten ser inte vem
+som beslutade. Skriv därför skälet så att patienten förstår det och vet vad
+hen ska göra, till exempel kontakta mottagningen.
+
+**Om något går fel.**
+
+- *"Någon annan har redan beslutat"*: en kollega hann före. Ditt beslut
+  registrerades inte.
+- *"Du har inte behörighet"* eller *"Du får inte besluta"*: CDR avvisade dig.
+  Inget registrerades. Det betyder inte att kön är tom.
+- *"CDR svarar inte"*: kön kunde inte läsas. Försök igen om en stund.
+- *"Beslutet kunde inte bekräftas"*: det är okänt om beslutet gick fram. Öppna
+  kön igen. Finns svaret kvar har inget registrerats.
+
+Att kön öppnas och varje beslut loggas (vem, när, vilken post), utan själva
+svarstexten.
+
+## 8. Getting help
 - Runtime logs: `results/<timestamp>_results/app.log` (local) or
   `shared/logs/gunicorn.*.log` (server).
 - Technical details: `docs/technical.md`

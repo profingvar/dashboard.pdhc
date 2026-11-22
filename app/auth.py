@@ -137,6 +137,12 @@ def _is_clinical_path(path: str) -> bool:
         # so a pure care-delivery nurse can actually open the UI.
         or path == "/workspace"
         or path.startswith("/nurse")
+        # #1044: the EPS review queue. A care action on the professional's own
+        # care units, so care-delivery like the rest of the clinical surface;
+        # left out of this list it would fall to the analysis-phase gate below
+        # and lock out a treating nurse who holds no analysis phase.
+        or path == "/eps-granskning"
+        or path.startswith("/eps-granskning/")
     )
 
 
