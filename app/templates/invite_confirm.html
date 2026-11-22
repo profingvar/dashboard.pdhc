@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Bekräfta inbjudan · dashboard{% endblock %}
+{% block h1 %}Bjud in patient{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<div class="card" id="iv-confirm">
+  <h2>Bekräfta inbjudan</h2>
+  <p>Ingenting har gjorts ännu. Kontrollera uppgifterna.</p>
+  <dl class="rv-summary">
+    <dt>Vårdenhet</dt><dd id="iv-c-unit">{{ form.care_unit_name }}</dd>
+    <dt>Namn</dt><dd id="iv-c-name">{{ form.given_name }} {{ form.family_name }}</dd>
+    <dt>Personnummer</dt><dd id="iv-c-pnr" class="monospace">{{ form.personnummer }}</dd>
+    <dt>Mobil</dt><dd>{{ form.mobile_normalised or '—' }}</dd>
+  </dl>
+  <p class="rv-meta">När du bekräftar registreras patienten på vårdenheten i
+    patientregistret (finns patienten redan, läggs vårdenheten till), och en
+    engångslänk skapas. Länken visas en gång.</p>
+  <form method="post" class="rv-form" action="{{ url_for('invite.send') }}">
+    {% include "_invite_hidden.html" %}
+    <button type="submit" class="rv-btn" id="iv-send">Bekräfta och skapa inbjudan</button>
+  </form>
+  <p style="margin-top:0.5rem;"><a href="{{ url_for('invite.form') }}">Avbryt</a></p>
+</div>
+</div>
+{% endblock %}

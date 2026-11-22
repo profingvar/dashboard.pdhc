@@ -184,6 +184,38 @@ Därefter visas en bekräftelsesida med jämförelsen och dina ändringar
 - *"CDR saknar granskning av patientkort"*: den anslutna CDR har ännu inte
   version 2. Enskilda svar kan fortfarande granskas.
 
+## 7b. Bjud in patient (för vårdpersonal, #1050)
+
+Patienter kommer in i patientappen **bara genom en inbjudan från sin
+vårdenhet**. Inbjudan görs här, under **Bjud in patient** i menyn.
+
+1. Fyll i patientens **förnamn**, **efternamn**, **personnummer** och gärna
+   **mobilnummer**. *Under piloten tas bara testpersonnummer emot.*
+2. **Vårdenhet.** Har du en vårdenhet är den redan vald. Har du flera måste du
+   välja en; ingen är förvald. Har du ingen affiliering till någon vårdenhet
+   kan du inte bjuda in, och sidan säger det.
+3. Välj **Fortsätt**. Kontrollera namn, personnummer och vårdenhet på nästa
+   sida och välj **Bekräfta och skapa inbjudan**. Inget skickas förrän du bekräftat.
+4. Patienten registreras i patientregistret (eps) vid vårdenheten, eller hittas
+   om hen redan finns där. Sedan skapas inbjudan.
+5. **Länken visas en gång.** Kopiera den med **Kopiera länken** och ge den till
+   patienten, tillsammans med texten som står under. Sms skickas inte ännu.
+   Länken fungerar en gång och gäller i sju dagar.
+
+Patienten öppnar länken, skriver sitt personnummer (det måste vara samma som du
+skrev), e-post och lösenord, och lägger till en passkey.
+
+**Om det inte går**
+
+| sidan säger | betyder | gör så här |
+|---|---|---|
+| Patienten har redan ett konto | Patienten är redan kopplad | Ingen ny inbjudan behövs; patienten loggar in |
+| Du är inte affilierad till den valda vårdenheten | Fel vårdenhet | Välj en av dina vårdenheter |
+| Det finns redan en patient med det personnumret, under ett annat namn | Numret finns under ett annat namn | Kontrollera personnumret. Inget har ändrats |
+| Patientregistret (eps) svarade inte | eps nåddes inte | Inget har gjorts. Försök igen om en stund |
+| Patienten är registrerad, men inbjudan skapades inte | eps lyckades, sso inte | Patienten finns nu vid vårdenheten. Välj **Försök skapa inbjudan igen** |
+| Piloten tar bara emot syntetiska testpersonnummer / inte ett giltigt personnummer | | Kontrollera numret |
+
 ## 8. Getting help
 - Runtime logs: `results/<timestamp>_results/app.log` (local) or
   `shared/logs/gunicorn.*.log` (server).

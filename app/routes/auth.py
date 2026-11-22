@@ -49,7 +49,14 @@ def callback():
     # relationship OR the analysis phase — so a pure care-delivery nurse can
     # log in (#546). The per-request route-aware loader (app.auth) then gates
     # each path; a user with neither is cleanly rejected here.
-    if not (has_care_delivery_access(blob) or has_analysis_access(blob)):
+    # #1050: a professional with NO care unit may still sign in to reach
+    # "Bjud in patient" when that is where they were going, so the page can
+    # tell them why they cannot invite (the loader still gates every path).
+    from urllib.parse import urlsplit
+    from app.auth import _is_invite_path, has_invite_page_access
+    going_to_invite = _is_invite_path(urlsplit(session.get("sso_next") or "").path)
+    if not (has_care_delivery_access(blob) or has_analysis_access(blob)
+            or (going_to_invite and has_invite_page_access(blob))):
         flash("Access denied — a care relationship or analysis-phase "
               "membership is required.", "danger")
         return redirect(url_for("auth.login"))

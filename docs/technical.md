@@ -274,6 +274,41 @@ browser ──SSO──▶ dashboard ─┤
 | `/admin/audit` | GET | SU-only audit browse (#215) |
 | `/admin/audit/export.csv` | GET | SU-only audit CSV export (#215) |
 
+## Bjud in patient (#1050)
+
+`app/routes/invite.py` (blueprint `invite`, `/bjud-in-patient`) with
+`app/services/invite_client.py`. Patients join the patient app only by
+invitation; this page is where it is made.
+
+| route | does |
+|---|---|
+| `GET /bjud-in-patient` | the form; 403 page when the user has no affiliation and is not SU |
+| `POST /bjud-in-patient/bekrafta` | CSRF + validation; the confirmation page. Calls nothing |
+| `POST /bjud-in-patient/skicka` | CSRF + `confirmed=ja`; then eps, then sso |
+
+- **Units** come from the blob's `affiliations[].care_unit_guid` only (never
+  `organization_ids`). One unit is the default; several require a choice with
+  no default (radios `required`, none `checked`); none and not SU is refused.
+  An SU may type any unit guid.
+- **Gate.** `app/auth.py::has_invite_page_access` admits an SU or any
+  professional (no phase gate), so a professional without a unit reaches the
+  page and is told why. `routes/auth.py::callback` lets such a professional
+  sign in only when `sso_next` is the invite page.
+- **Calls**, both with the user's own bearer (`session["sso_token"]`) and no
+  service key: eps `POST {IPS_BASE_URL}/api/v1/patients/register-at-unit`,
+  then sso `POST {SSO_BASE_URL}/api/patient-links/invites` with the name.
+  Every failure is an `InviteError(step, code, status)` rendered as a named
+  Swedish message. eps ok + sso failed is the **half-done** page
+  (`invite_half.html`): the patient IS registered; a retry form resends the
+  same data (eps answers 200 for an existing patient).
+- **The link** is shown once (`invite_done.html`, `Cache-Control: no-store`)
+  with a copy button and a text for the patient. Nothing stores it.
+- **Audit**: `DashboardAudit` rows `patient_invite_form` / `_confirm` / `_send`
+  with an `outcome` (e.g. `eps_not_affiliated`) and unit; never the personnummer, name or link.
+- **Config**: `IPS_BASE_URL` (the config key, filled from `EPS_BASE_URL` first, #1019) and `SSO_BASE_URL`; unset → named
+  "inte konfigurerad" message.
+- Tests: `app/tests/test_invite_1050.py`, auth ON, HTTP boundary patched.
+
 ## Running locally
 ```
 ./start.sh

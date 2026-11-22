@@ -863,3 +863,13 @@ nothing interactive beyond opening the amend disclosure.
 Code only, no migration, no new dependency, no `.env` key. Until cdr1 has s7.4
 the card section shows "CDR saknar granskning av patientkort", the v1 queue
 works, and the nav count shows "?".
+
+## 2026-11-22 — #1050 step 2: "Bjud in patient" (LOCAL, not deployed)
+
+- `/bjud-in-patient` (nav link "Bjud in patient", professional or SU): form → confirmation (calls nothing) → send. CSRF on both POSTs, `confirmed=ja` required.
+- Units from `affiliations[].care_unit_guid` only: one preselected; several = required radios, no default; none and not SU = 403 page "Du har ingen affiliering till någon vårdenhet". The callback now lets a professional without unit/phase sign in ONLY when going to this page, so the message can be shown.
+- Calls eps `register-at-unit` then sso `POST /api/patient-links/invites` (with the name), both with the user's own bearer, no service key. Named Swedish errors; eps ok + sso failed = half-done page with retry. The link is shown once (`no-store`) with a copy button and a patient text; sms later.
+- Audit: `patient_invite_form` / `_confirm` / `_send` with `outcome`, never the number, name or link.
+- Tests: `app/tests/test_invite_1050.py` (22), auth ON, HTTP boundary patched. Suite 1011 -> 1033 passed. 7 mutation controls (D1-D6 + bearer-only), each fails on an assertion.
+- Loopback e2e (sso + eps + dashboard + patientapp, real apps): 18/18.
+- Deploy: code only, no migration, no new dependency. Uses the config key `IPS_BASE_URL`, which create_app fills from `EPS_BASE_URL` first (#1019), and `SSO_BASE_URL`; both are already set for the dashboard's other features. No `.env` change.

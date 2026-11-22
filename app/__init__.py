@@ -189,6 +189,9 @@ def create_app(config=None):
     # #1044 — the queue "EPS att granska" (patient-reported EPS answers).
     from app.routes.eps_review import bp as eps_review_bp
     app.register_blueprint(eps_review_bp)
+    # #1050 — "Bjud in patient": patients join the patient app by invitation.
+    from app.routes.invite import bp as invite_bp
+    app.register_blueprint(invite_bp)
     register_metadata(app)
 
     # Audit view (#215). (The cache-scrub route + cache-sweep CLI were

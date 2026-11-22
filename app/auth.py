@@ -183,10 +183,28 @@ def has_care_delivery_access(blob: Optional[dict]) -> bool:
     return bool(scope_org_guids(blob))
 
 
+def _is_invite_path(path: str) -> bool:
+    """#1050 "Bjud in patient"."""
+    return path == "/bjud-in-patient" or path.startswith("/bjud-in-patient/")
+
+
+def has_invite_page_access(blob: Optional[dict]) -> bool:
+    """#1050: an SU admin or ANY professional reaches the invite page, even
+    one with no care unit, so that person is TOLD why they cannot invite
+    (routes/invite.py) instead of getting a bare 403. Who may invite for
+    which unit is decided there, and again by eps and sso with the same
+    bearer. A patient or other non-professional is refused here."""
+    if not blob:
+        return False
+    return bool(blob.get("is_su_admin")) or blob.get("user_type") == "professional"
+
+
 def _dashboard_access_allowed(path: str, blob: Optional[dict]) -> bool:
     """Route-aware gate (#463/D1): clinical routes need care-delivery
     access; the analyse engine's routes keep the analysis-phase gate until
     they relocate to analyse.pdhc."""
+    if _is_invite_path(path):
+        return has_invite_page_access(blob)
     if _is_patient_dashboard_path(path):
         # Both bases; see _is_patient_dashboard_path. access.py narrows.
         return has_care_delivery_access(blob) or has_analysis_access(blob)

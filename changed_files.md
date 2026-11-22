@@ -921,3 +921,14 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_eps_review_1044.py — fake answers the card list (empty)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, docs/user_manual.md, progress.md, changed_files.md
 - /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — `[v2 dashboard]` Deviations (workspace repo, not committed here)
+
+## 2026-11-22 — #1050 step 2
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/invite.py (NEW)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/invite_client.py (NEW)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/invite.html, invite_confirm.html, invite_done.html, invite_half.html, invite_message.html, _invite_hidden.html (NEW, all under /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py — `has_invite_page_access`
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/auth.py — callback admits a no-unit professional only for the invite page
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py — blueprint
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/base.html — nav link
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_invite_1050.py (NEW, 22)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
