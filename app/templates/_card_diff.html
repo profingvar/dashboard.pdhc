@@ -1,0 +1,29 @@
+{# #1049: one card version, proposed rows beside the endorsed ones.
+   A display diff (app/services/card_diff.py): the mark is TEXT in its own
+   column; the border style only repeats it. Rows stay in cdr1's order. #}
+{% macro card_diff_table(cd, mark_labels, amended={}) %}
+<div class="cd-table" role="table" aria-label="Föreslaget jämfört med nu godkänt">
+  <div class="cd-row cd-headrow" role="row">
+    <span role="columnheader">Fråga</span>
+    <span role="columnheader">Föreslaget av patienten <span class="origin-badge" title="Uppgiften kommer från patienten och är inte granskad av vården">Patient</span></span>
+    <span role="columnheader">Nu godkänt{% if not cd.has_endorsed %} (inget){% endif %}</span>
+    <span role="columnheader">Markering</span>
+  </div>
+  {% for b in cd.blocks %}
+  {% if b.kind == 'instance' %}<div class="cd-inst" role="rowgroup" data-mark="{{ b.mark }}"><div class="cd-insthead">Post: {{ mark_labels[b.mark] }}</div>{% endif %}
+  {% for ln in b.lines %}
+  {% set lbl = (ln.proposed or ln.endorsed).label %}
+  <div class="cd-row" role="row" data-mark="{{ ln.mark }}"{% if ln.proposed %} data-row="{{ ln.proposed.guid }}"{% endif %}>
+    <span class="cd-q" role="cell">{{ lbl }}</span>
+    <span class="cd-p" role="cell"><span class="cd-k">Föreslaget</span>{% if ln.proposed %}{{ ln.proposed.text }}{% if amended.get(ln.proposed.guid) is not none %}<span class="cd-amended" data-amended="{{ ln.proposed.guid }}"><span class="cd-k">Ändras av dig till</span>{{ amended[ln.proposed.guid] }}</span>{% endif %}{% else %}<span class="cd-none">—</span>{% endif %}</span>
+    <span class="cd-e" role="cell"><span class="cd-k">Nu godkänt</span>{% if ln.endorsed %}{{ ln.endorsed.text }}{% else %}<span class="cd-none">—</span>{% endif %}</span>
+    <span class="cd-m" role="cell"><span class="cd-k">Markering</span><span class="cd-mark">{{ mark_labels[ln.mark] }}</span></span>
+  </div>
+  {% endfor %}
+  {% if b.kind == 'instance' %}</div>{% endif %}
+  {% endfor %}
+  {% if not cd.blocks %}
+  <div class="cd-row" role="row"><span class="cd-q" role="cell">Patienten har inga uppgifter i den här versionen av avsnittet.</span></div>
+  {% endif %}
+</div>
+{% endmacro %}

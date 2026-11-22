@@ -5,6 +5,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 {% endblock %}
 {% block content %}
+{% from "_card_diff.html" import card_diff_table %}
 <div class="rv-wrap" lang="sv">
 <p style="margin-bottom:0.75rem;">
   Här visas uppgifter som patienter själva har lämnat i patientappen till sin
@@ -31,7 +32,91 @@
     <button type="submit" class="rv-btn">Intyga och fortsätt</button>
   </form>
 </div>
-{% elif problem %}
+{% else %}
+{# ---- #1049: card versions (contract s7.4/s7.5) ---------------------- #}
+<h2 class="rv-part" id="cd-part">Patientkort att granska</h2>
+<p class="rv-meta">Patienten skickar ett helt avsnitt av sitt patientkort åt gången. Det senast skickade gäller: en ny version ersätter en tidigare som ännu inte granskats. Varje version visas bredvid den version som är godkänd i dag, med ändringarna markerade. Du beslutar om hela versionen.</p>
+{% if card_problem %}
+<div class="card rv-problem" role="alert" id="cd-problem" data-problem="{{ card_problem.code }}">
+  <h2>{{ card_problem.title }}</h2>
+  <p>{{ card_problem.text }}</p>
+  <p style="margin-top:0.5rem;"><a class="rv-btn" href="{{ url_for('eps_review.queue') }}">Försök igen</a></p>
+</div>
+{% elif not card_groups %}
+<div class="card" id="cd-empty">
+  <p>Det finns inga patientkort att granska för dina vårdenheter just nu.</p>
+</div>
+{% else %}
+<p class="rv-meta" id="cd-count">{{ n_cards }} {{ 'version väntar' if n_cards == 1 else 'versioner väntar' }} på granskning{% if cards_truncated %} (fler finns än de som visas här){% endif %}. De visas i den ordning CDR lämnar dem, per patient och avsnitt.</p>
+{% for grp in card_groups %}
+<section class="card rv-cgroup" data-patient="{{ grp.patient_guid }}">
+  <h2>{{ grp.name or 'Patient' }}
+    <span class="rv-pguid monospace" title="{{ grp.patient_guid }}">{{ grp.patient_guid[:8] }}…</span>
+  </h2>
+  <p class="rv-meta"><a href="{{ url_for('charts.charts_page', guid=grp.patient_guid) }}">Öppna patientens data</a></p>
+  {% for sec in grp.sections %}
+  <div class="cd-section">
+    <h3>{{ sec.section }}</h3>
+    {% for cd in sec.cards %}
+    <div class="cd-card" data-card="{{ cd.card_version }}">
+      <p class="rv-meta">Skickad {{ cd.submitted_at }} ·
+        {% if cd.has_endorsed %}jämförs med versionen som godkändes {{ cd.endorsed_at }}{% else %}ingen tidigare godkänd version, så allt är nytt{% endif %}</p>
+      <p class="rv-meta cd-counts">{{ cd.counts.added }} ny(a), {{ cd.counts.changed }} ändrad(e), {{ cd.counts.removed }} borttagen/borttagna, {{ cd.counts.same }} oförändrad(e).</p>
+      {{ card_diff_table(cd, mark_labels) }}
+
+      {% if not cd.can_decide %}
+      <p class="rv-meta rv-nodecide">Du kan se den här versionen men inte besluta om den. Beslut kräver att du är läkare eller sjuksköterska med affiliering till patientens vårdenhet.</p>
+      {% else %}
+      <div class="rv-actions">
+        <form method="post" class="rv-form cd-approve" action="{{ url_for('eps_review.card_confirm', card_version=cd.card_version) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="action" value="approve">
+          {% if cd.amendable %}
+          <details class="cd-amend">
+            <summary class="rv-btn">Ändra enskilda värden (valfritt)</summary>
+            <p class="rv-meta">Lämna ett fält tomt för att godkänna patientens svar som det är. Patientens svar ändras aldrig; ett ändrat värde sparas som en ny post i ditt namn.</p>
+            {% for c in cd.amendable %}
+            <label for="a-{{ c.guid }}">{{ c.label }} <span class="rv-meta">(patienten: {{ c.text }})</span></label>
+            {% if c.kind == 'bool' %}
+            <select id="a-{{ c.guid }}" name="amend-{{ c.guid }}">
+              <option value="" selected>Oförändrat</option>
+              <option value="ja">Ja</option>
+              <option value="nej">Nej</option>
+            </select>
+            {% else %}
+            <input type="text" id="a-{{ c.guid }}" name="amend-{{ c.guid }}" maxlength="2000" value="" autocomplete="off">
+            {% endif %}
+            {% endfor %}
+          </details>
+          {% endif %}
+          {% if cd.amendable|length != cd.proposed|length %}
+          <span class="rv-meta">Kodade eller sammansatta svar kan inte ändras här. Avvisa versionen med ett skäl om de är fel.</span>
+          {% endif %}
+          <button type="submit" class="rv-btn">Godkänn versionen</button>
+        </form>
+        <details>
+          <summary class="rv-btn">Avvisa versionen</summary>
+          <form method="post" class="rv-form" action="{{ url_for('eps_review.card_confirm', card_version=cd.card_version) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="reject">
+            <label for="cr-{{ cd.card_version }}">Skäl (krävs, visas för patienten)</label>
+            <textarea id="cr-{{ cd.card_version }}" name="reason" rows="3" required maxlength="2000"></textarea>
+            <button type="submit" class="rv-btn">Fortsätt</button>
+          </form>
+        </details>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endif %}
+
+{# ---- v1: rows without card_version (#1044) ---------------------------- #}
+<h2 class="rv-part" id="rv-part">Enskilda svar</h2>
+{% if problem %}
 {# A failed read. Never the empty-queue text: the queue is UNKNOWN. #}
 <div class="card rv-problem" role="alert" id="rv-problem" data-problem="{{ problem.code }}">
   <h2>{{ problem.title }}</h2>
@@ -115,6 +200,7 @@
   {% endfor %}
 </section>
 {% endfor %}
+{% endif %}
 {% endif %}
 </div>
 {% endblock %}

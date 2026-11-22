@@ -288,3 +288,43 @@ summary.rv-btn::-webkit-details-marker { display: none; }
 .rv-summary dt { color: var(--text-muted); }
 .rv-summary dd { overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 600px) { .rv-summary { grid-template-columns: minmax(0, 1fr); } }
+
+/* #1049: card versions, proposed beside endorsed. Four columns from iPad
+ * portrait (768px) up; below that each line stacks and every cell carries its
+ * own small label (.cd-k), so a value can never be read against the wrong
+ * column. The mark is TEXT in its own column; the border style only repeats
+ * it (no colour carries meaning, as above). */
+.rv-part { font-size: 1.2rem; margin: 1.25rem 0 0.5rem; }
+.rv-cgroup { margin-bottom: 1rem; }
+.rv-cgroup h2 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+.rv-cgroup .rv-pguid { color: var(--text-muted); font-size: 0.9em; }
+.cd-section { border-top: 1px solid var(--border); padding-top: 0.5rem; margin-top: 0.5rem; }
+.cd-section h3 { font-size: 1.05rem; margin: 0.25rem 0; }
+.cd-card { padding: 0.5rem 0 0.75rem; }
+.cd-table { display: grid; gap: 0; margin: 0.5rem 0; border: 1px solid var(--border); border-radius: 4px; }
+.cd-row { display: grid; grid-template-columns: minmax(8rem, 1.1fr) minmax(0, 1.4fr) minmax(0, 1.4fr) 7rem;
+  gap: 0.5rem; padding: 0.6rem 0.75rem; border-top: 1px solid var(--border); border-left: 4px solid transparent;
+  overflow-wrap: anywhere; font-size: 1rem; }
+.cd-row > [role="cell"] { white-space: pre-wrap; min-width: 0; }
+.cd-headrow { border-top: 0; font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+.cd-row[data-mark="added"] { border-left: 4px solid var(--text); }
+.cd-row[data-mark="changed"] { border-left: 4px double var(--text); }
+.cd-row[data-mark="removed"] { border-left: 4px dashed var(--text); }
+.cd-row[data-mark="removed"] .cd-e { text-decoration: line-through; }
+.cd-mark { font-weight: 700; }
+.cd-row[data-mark="same"] .cd-mark { font-weight: 400; color: var(--text-muted); }
+.cd-k { display: none; font-size: 0.8rem; color: var(--text-muted); }
+.cd-none { color: var(--text-muted); }
+.cd-amended { display: block; margin-top: 0.25rem; font-weight: 700; }
+.cd-amended .cd-k { display: block; font-weight: 400; }
+.cd-inst { border-top: 2px solid var(--border); }
+.cd-insthead { padding: 0.35rem 0.75rem; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+.cd-amend { margin: 0.25rem 0; }
+.cd-amend[open] { display: grid; gap: 0.5rem; }
+.cd-approve { max-width: none; }
+@media (max-width: 767px) {
+  .cd-row { grid-template-columns: minmax(0, 1fr); gap: 0.25rem; }
+  .cd-headrow { display: none; }
+  .cd-q { font-weight: 600; }
+  .cd-k { display: block; }
+}

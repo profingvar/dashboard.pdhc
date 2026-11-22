@@ -788,3 +788,78 @@ No migration, no new dependency, no new `.env` key (`CDR1_BASE_URL` and the
 SSO pair are already set). Code only: baseline-hash, then rebuild or overlay
 as for the previous code-only deploys. Until cdr1 has the API the queue shows "CDR saknar
 granskningsfunktionen" and the nav count shows "?".
+
+## 2026-11-22 — #1049 (v2) card versions in "EPS att granska" (local commit, NOT deployed)
+Built against `plans/patient_app_contract.md` s7.4/s7.5 while cdr.pdhc's card
+API was being built in parallel: coded to the contract shapes, cdr1 faked at the
+HTTP boundary. Detail in docs/technical.md ("EPS review v2: card versions").
+Deviations recorded in the contract as `[v2 dashboard]`.
+
+- `/eps-granskning` lists card versions first, per patient then section, each
+  proposed row beside the endorsed one with Ny / Ändrad / Borttagen /
+  Oförändrad as text (`app/services/card_diff.py`, a display diff). The v1
+  per-row queue follows for rows without `card_version`.
+- `POST /eps-granskning/kort/<card_version>/bekrafta|beslut`: approve (optional
+  per-row amend, `amend-<row guid>`, empty = unchanged) or reject (reason
+  required). CSRF and the two-step confirmation as v1; operator bearer only.
+- 409 `superseded` and 409 `already_decided` each have their own Swedish
+  message (`ReviewSuperseded` subclasses `ReviewAlreadyDecided`).
+- Instances are matched whole (same group / identical content), never by
+  position, because gateway's `group` is per receipt. Coded rows not amendable.
+- Card-list failure: `#cd-problem` with the v1 list still shown; nav count is
+  null if either list fails.
+
+### Tests
+pytest `app/tests tests`: 961 passed, 13 skipped -> **1011 passed, 13 skipped**
+(+50, `app/tests/test_eps_review_cards_1049.py`; `test_eps_review_1044.py`'s fake
+also answers the card list, empty). Re-run from clean source (no __pycache__,
+PYTHONDONTWRITEBYTECODE=1) after another agent may have run a mutation script
+against `card_diff.py`; all 37 mutation sites verified restored first.
+
+Controls: 37 mutations, every one caught by at least one #1049 test, every
+failure an assertion (two tests set PROPAGATE_EXCEPTIONS=False so a crash is a
+500 to assert on, not a raise):
+| mutation | #1049 tests failing |
+|---|---|
+| instances paired by position | 1 |
+| value comparison always equal | 3 |
+| removed rows not shown | 2 |
+| same-group instances not diffed field by field | 1 |
+| superseded read as already_decided | 1 |
+| card rows / endorsed not shape-checked | 1 / 1 |
+| card list failure read as empty | 8 |
+| v1 keeps card rows / per-row decide accepts a card row | 1 / 1 |
+| count ignores a card failure | 1 |
+| coded rows amendable / coded shown by code | 2 / 1 |
+| amend kept as raw text / read from any posted field | 3 / 1 |
+| reject reason not required | 2 |
+| CSRF not checked (confirm / decide) | 3 / 3 |
+| confirmation not required | 1 |
+| can_decide ignored (post / template) | 1 / 1 |
+| card_version not checked as uuid | 1 |
+| admin attest skipped on card lookup | 1 |
+| audit stores the note | 1 |
+| gone not detected | 8 |
+| service key sent with the bearer | 47 |
+| cell labels dropped / empty text / nothing-endorsed text | 1 / 1 / 1 |
+| confirm step posts / reject sends amends | 3 / 1 |
+| already-decided message / 422 / unknown / 403 statuses | 1 / 1 / 1 / 1 |
+| card paths not clinical | 26 |
+| cards grouped per version, not patient | 1 |
+
+### Browser (static, no server)
+Rendered HTML of the queue and the confirmation page opened from file in
+Chrome (Playwright from `e2e/` driving the installed Chrome) at 820x1180,
+1180x820 and 390x844: no horizontal overflow, no `.rv-btn` under 44px, four
+columns at both iPad sizes, one stacked column on the phone. WebKit (Safari)
+NOT run: its Playwright build is not installed. No real iPad, no axe run,
+nothing interactive beyond opening the amend disclosure.
+
+### Not verified
+- Not run against a real cdr1: the card API did not exist in cdr.pdhc when
+  this was written. The fake follows s7.4 plus the `[v2 dashboard]` readings.
+
+### Deploy (operator decides; cdr.pdhc's s7.4 must be deployed first or together)
+Code only, no migration, no new dependency, no `.env` key. Until cdr1 has s7.4
+the card section shows "CDR saknar granskning av patientkort", the v1 queue
+works, and the nav count shows "?".

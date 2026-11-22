@@ -108,6 +108,66 @@ professional record one decision per original. Contract:
 - **Times** are shown in Europe/Stockholm; without tzdata in the image they
   fall back to UTC, labelled.
 
+## EPS review v2: card versions (#1049)
+In v2 the patient sends a whole SECTION of their patient card at a time
+(allergy, medication, history, vaccination, contact), as a `card_version`
+(contract `plans/patient_app_contract.md` s7.4/s7.5). `/eps-granskning` now
+shows those versions first ("Patientkort att granska") and the v1 per-row queue
+below them ("Enskilda svar") for rows without a `card_version`.
+
+- **Code**: card routes at the end of `app/routes/eps_review.py`; the display
+  diff in `app/services/card_diff.py`; client methods `list_cards`,
+  `approve_card`, `reject_card` and the exception `ReviewSuperseded` in
+  `app/services/cdr_review_client.py`; templates `_card_diff.html` (macro, the
+  four-column table) and `eps_review_card_confirm.html`; CSS `.cd-*` at the end
+  of `dashboard.css`.
+- **What it calls** (same credential as v1: the operator's own bearer, no
+  service key): `GET /api/v1/reviews/cards?status=pending`,
+  `POST /api/v1/reviews/cards/<card_version>/approve` (`{"amend": {"<row guid>":
+  value}?, "note"?}`), `POST …/reject` (`{"reason"}`).
+- **Routes**: `POST /eps-granskning/kort/<card_version>/bekrafta` and
+  `…/beslut`, two steps as in v1, both CSRF-checked, `card_version` must be a
+  UUID (else 404, nothing sent). Both re-read the card list and act only on a
+  version cdr1 lists as pending NOW; otherwise "no longer in your queue" with
+  nothing sent (decided, or superseded by a newer version from the patient).
+- **Layout**: versions grouped per patient, then per section, in cdr1's order.
+  Each line: question, proposed value (the patient's), currently endorsed
+  value, mark (Ny / Ändrad / Borttagen / Oförändrad) as TEXT; the left border
+  style repeats it. From 768px four columns; narrower, each line stacks and every
+  cell carries its own label (`.cd-k`). Touch targets 44px, inputs 16px.
+- **The diff is display only** (`card_diff.py` docstring). A row without
+  `group` is matched on `link_id`. A repeating-group instance is matched whole:
+  same `group` value -> field by field; else identical content -> unchanged;
+  else added, and an endorsed instance left over is removed. Instances are
+  never paired by position: gateway mints `group` per receipt, so position
+  pairing would call a new allergy a "changed" old one. Values are compared as
+  shown (`value` + `display`). Nothing is hidden, sorted or highlighted by
+  meaning.
+- **Approve with amend**: each amendable proposed row has an EMPTY field
+  `amend-<row guid>`; empty = not amended. A value is coerced to the original's
+  JSON type (text, number, yes/no) as in v1 and an unchanged value is refused.
+  Only the version's own rows are read from the form. A CODED row (its
+  `display` differs from its value: the value is a code from the form's answer
+  list) and a structured value are not amendable here; reject with a reason.
+- **409**: `superseded` -> "the patient has sent a newer version of <section>;
+  not recorded"; `already_decided` (or any other 409) -> "someone else already
+  decided; not recorded". Both return to the queue (303) with a flash.
+- **v1 rows and cards**: a row listed by the per-row API that has a
+  `card_version`, or whose guid is in a card's rows, is shown only in its card
+  and the per-row routes refuse to decide it ("gone", nothing sent).
+- **Failure**: the two lists fail separately. A failed card read renders
+  `#cd-problem` (`data-problem`, e.g. `card_api_missing` for a cdr1 without the
+  s7.4 routes) and the v1 list is still shown; the page answers the failure's
+  status. The nav count is `null` if EITHER list failed; otherwise v1 total +
+  number of card versions.
+- **Audit**: `eps_card_confirm`, `eps_card_approve`, `eps_card_reject`,
+  `eps_card_decision` (refused before an action); payload `card_version`,
+  `section`, `action`, `outcome`, `n_amended`, `endorsed`, `note_given`,
+  `cdr_status`. Never a value, the note or the reason. The queue row adds
+  `n_cards`.
+- **`can_decide: false`** on a version (as cdr1 does on v1 items) -> no
+  actions, and a POST is refused 403 without calling cdr1.
+
 ## Spärr (per-patient blocks)
 Both the charts series read (`app/routes/charts.py::series`) and every nurse
 read (`app/routes/nurse.py::_apply_sparr`) apply spärr identically per patient:
@@ -209,6 +269,8 @@ browser ──SSO──▶ dashboard ─┤
 | `/eps-granskning/antal` | GET | pending count for the nav link, JSON |
 | `/eps-granskning/<review_guid>/bekrafta` | POST | confirmation step (CSRF) |
 | `/eps-granskning/<review_guid>/beslut` | POST | send the decision to cdr1 (CSRF) |
+| `/eps-granskning/kort/<card_version>/bekrafta` | POST | card version: confirmation step (CSRF, #1049) |
+| `/eps-granskning/kort/<card_version>/beslut` | POST | card version: send the decision to cdr1 (CSRF, #1049) |
 | `/admin/audit` | GET | SU-only audit browse (#215) |
 | `/admin/audit/export.csv` | GET | SU-only audit CSV export (#215) |
 

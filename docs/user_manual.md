@@ -131,6 +131,59 @@ hen ska göra, till exempel kontakta mottagningen.
 Att kön öppnas och varje beslut loggas (vem, när, vilken post), utan själva
 svarstexten.
 
+### 7.1 Patientkort (version 2)
+I version 2 skickar patienten ett helt avsnitt av sitt patientkort åt gången,
+till exempel alla sina allergier. Sådana versioner visas överst i kön under
+**Patientkort att granska**. Enskilda svar från version 1 visas som förut
+längre ned, under **Enskilda svar**.
+
+**Det senast skickade gäller.** Skickar patienten en ny version av ett avsnitt
+innan den förra har granskats, ersätts den förra och försvinner ur kön. Du
+granskar alltid den senaste.
+
+**Så läser du en version.** Versionerna är grupperade per patient och avsnitt.
+Varje rad visar frågan, vad patienten nu föreslår, vad som är godkänt i dag och
+en markering:
+
+- **Ny**: finns inte i det som är godkänt i dag.
+- **Ändrad**: samma fråga, annat svar.
+- **Borttagen**: patienten har tagit bort uppgiften. Godkänner du versionen
+  försvinner den ur patientens EPS.
+- **Oförändrad**: samma som i dag.
+
+En allergi (eller annan post med flera fält) jämförs som en helhet. Har
+patienten ändrat något i en sådan post visas den ofta som en borttagen och en
+ny post, eftersom det inte går att veta säkert att det är samma post. Läs båda.
+Finns ingen godkänd version sedan tidigare är allt markerat **Ny**.
+
+Markeringen är bara en jämförelse av texten. Den säger inget om vad som är
+rätt och föreslår inget beslut.
+
+På iPad i stående läge och på mindre skärmar visas varje rad som ett block
+där varje värde har sin rubrik (Föreslaget, Nu godkänt, Markering).
+
+**Två val per version.**
+
+- **Godkänn versionen**: hela versionen godkänns. Vill du rätta enstaka värden
+  öppnar du **Ändra enskilda värden (valfritt)** och skriver det rätta värdet i
+  rätt fält. Lämna övriga fält tomma. Svar som patienten valt i en lista (till
+  exempel svårighetsgrad) kan inte ändras här; avvisa versionen med ett skäl om
+  de är fel.
+- **Avvisa versionen**: ingen rad i versionen godkänns, och det som är godkänt
+  i dag gäller som förut. Du måste ange ett skäl, som patienten ser.
+
+Därefter visas en bekräftelsesida med jämförelsen och dina ändringar
+(**Ändras av dig till**). Först **Bekräfta och skicka** registrerar beslutet.
+
+**Om något går fel med en version.**
+
+- *"Patienten har skickat en nyare version"*: versionen du granskade är
+  ersatt. Inget registrerades. Granska den nya versionen.
+- *"Någon annan har redan beslutat om den här versionen"*: en kollega hann
+  före. Inget registrerades.
+- *"CDR saknar granskning av patientkort"*: den anslutna CDR har ännu inte
+  version 2. Enskilda svar kan fortfarande granskas.
+
 ## 8. Getting help
 - Runtime logs: `results/<timestamp>_results/app.log` (local) or
   `shared/logs/gunicorn.*.log` (server).

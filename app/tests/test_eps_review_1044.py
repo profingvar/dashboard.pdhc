@@ -113,6 +113,11 @@ class FakeUpstreams:
         if url == f"{CDR}/api/v1/clinical/patients":
             return _Resp(200, {"patients": [
                 {"patient_guid": P1, "name": "Testsson, Anna"}]})
+        if url == f"{CDR}/api/v1/reviews/cards":
+            # #1049: the queue also reads s7.4's card list. These v1 tests run
+            # with none pending; the card behaviour is test_eps_review_cards_1049.
+            refusal = self._credential_refusal(headers)
+            return refusal or _Resp(200, {"items": []})
         if url == f"{CDR}/api/v1/reviews":
             self.cdr_gets.append({"headers": dict(headers), "params": list(params or [])})
             refusal = self._credential_refusal(headers)

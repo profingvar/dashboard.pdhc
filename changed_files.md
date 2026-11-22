@@ -909,3 +909,15 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py — blueprint registered
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_eps_review_1044.py (NEW, 63)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, docs/user_manual.md, progress.md, changed_files.md
+
+## 2026-11-22 — #1049 card versions in "EPS att granska"
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/card_diff.py (NEW) — display diff proposed vs endorsed
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/cdr_review_client.py — list_cards, approve_card, reject_card, ReviewSuperseded
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/eps_review.py — card list in the queue, card confirm/decide routes, v1 excludes card rows, count includes cards
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/_card_diff.html, eps_review_card_confirm.html (NEW)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/eps_review.html — "Patientkort att granska" section above "Enskilda svar"
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css — `.cd-*` block
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_eps_review_cards_1049.py (NEW, 50)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_eps_review_1044.py — fake answers the card list (empty)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, docs/user_manual.md, progress.md, changed_files.md
+- /Users/martiningvar/T7_sidewinder/plans/patient_app_contract.md — `[v2 dashboard]` Deviations (workspace repo, not committed here)

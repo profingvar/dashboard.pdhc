@@ -17,6 +17,16 @@ proposes a decision: no default action, no pre-selected button.
   GET  /eps-granskning/antal                 {"count": N} for the nav link
   POST /eps-granskning/<review_guid>/bekrafta   the confirmation step
   POST /eps-granskning/<review_guid>/beslut     send the decision to cdr1
+  POST /eps-granskning/kort/<card_version>/bekrafta   (#1049) a card version
+  POST /eps-granskning/kort/<card_version>/beslut     (#1049)
+
+v2 (#1049, contract s7.4/s7.5): the patient sends a whole SECTION of the
+patient card at a time, as a `card_version`. Those are listed first, per
+patient and section, each version's proposed rows beside the currently
+endorsed rows with added / removed / changed marked (`card_diff`, a display
+diff). One decision covers the whole version: approve (optionally amending
+single values) or reject with a reason. Rows without `card_version` are the v1
+queue below it, unchanged.
 
 The view argument is `review_guid`, NOT `guid`: `audit_read` reads a view
 argument called `guid` as the PATIENT guid.
@@ -36,11 +46,12 @@ import uuid
 from datetime import datetime, timezone
 
 from flask import (
-    Blueprint, flash, g, jsonify, redirect, render_template, request, session,
-    url_for,
+    Blueprint, abort, flash, g, jsonify, redirect, render_template, request,
+    session, url_for,
 )
 
 from app.auth import org_guids_for
+from app.services import card_diff
 from app.services import cdr1_client
 from app.services import cdr_review_client as rc
 from app.services.audit import audit_read
@@ -168,6 +179,79 @@ def _groups(items: list[dict]) -> list[dict]:
     return list(out.values())
 
 
+#: The marks of the display diff (`card_diff`), in Swedish. Text, not colour,
+#: carries the mark; the CSS border only repeats it.
+MARK_LABELS = {
+    card_diff.SAME: "Oförändrad",
+    card_diff.CHANGED: "Ändrad",
+    card_diff.ADDED: "Ny",
+    card_diff.REMOVED: "Borttagen",
+}
+
+
+def _cell(row: dict) -> dict:
+    """One card row as shown. `display` is what the patient saw when it is
+    given (a coded answer: the value is its code); else the value as entered.
+
+    A CODED row is not amendable here: its value is a code from the form's
+    answer list, which the dashboard does not hold, and a free-text
+    replacement would no longer be one of those codes."""
+    value = row.get("value")
+    display = row.get("display")
+    coded = isinstance(display, str) and display.strip() != "" and display != _display(value)
+    kind = _kind(value)
+    return {
+        "guid": str(row.get("guid") or ""),
+        "link_id": str(row.get("link_id") or ""),
+        "label": row.get("label") or row.get("link_id") or "",
+        "text": display if coded else _display(value),
+        "value": value,
+        "kind": kind,
+        "coded": coded,
+        "amendable": bool(row.get("guid")) and not coded and kind != "structured",
+    }
+
+
+def _card_view(item: dict) -> dict:
+    section = item.get("section") or ""
+    endorsed = item.get("endorsed")
+    blocks = card_diff.diff(item.get("rows") or [],
+                            (endorsed or {}).get("rows"), _cell)
+    proposed = [_cell(r) for r in item.get("rows") or []]
+    return {
+        "card_version": str(item.get("card_version") or ""),
+        "patient_guid": str(item.get("patient_guid") or ""),
+        "section_code": section,
+        "section": SECTION_LABELS.get(section, section or "Övrigt"),
+        "submitted_at": _when(item.get("submitted_at")),
+        "has_endorsed": endorsed is not None,
+        "endorsed_at": _when((endorsed or {}).get("reviewed_at")),
+        "blocks": blocks,
+        "counts": card_diff.counts(blocks),
+        "proposed": proposed,
+        "amendable": [c for c in proposed if c["amendable"]],
+        "can_decide": item.get("can_decide") is not False,
+    }
+
+
+def _card_groups(items: list[dict]) -> list[dict]:
+    """Per patient, then per section, in the order cdr1 returned the versions."""
+    names = _patient_names() if items else {}
+    out: dict[str, dict] = {}
+    for raw in items:
+        v = _card_view(raw)
+        grp = out.get(v["patient_guid"])
+        if grp is None:
+            grp = out[v["patient_guid"]] = {
+                "patient_guid": v["patient_guid"],
+                "name": names.get(v["patient_guid"]) or "",
+                "sections": {},
+            }
+        grp["sections"].setdefault(v["section_code"], {
+            "section": v["section"], "cards": []})["cards"].append(v)
+    return [dict(g_, sections=list(g_["sections"].values())) for g_ in out.values()]
+
+
 # --------------------------------------------------------------------------
 # problems, in plain Swedish
 # --------------------------------------------------------------------------
@@ -240,38 +324,100 @@ def _audit(event: str, *, n_rows: int = 0, patient_guid: str | None = None,
     g._audit_payload_snapshot = {k: v for k, v in payload.items() if v is not None}
 
 
+def _card_problem(exc: rc.ReviewError) -> tuple[int, dict]:
+    """(HTTP status, panel) for a failed read of the CARD list. A cdr1 without
+    the s7.4 routes is said by name: the per-row queue may still be there."""
+    if isinstance(exc, rc.ReviewApiMissing):
+        return 502, {"code": "card_api_missing",
+                     "title": "CDR saknar granskning av patientkort", "text": (
+                         "Den CDR som dashboard är kopplad till har ännu inte "
+                         "funktionen för patientkort (version 2). Kortversioner "
+                         "kunde därför inte läsas. Det betyder inte att det "
+                         "inte finns några.")}
+    st, problem = _list_problem(exc)
+    return st, dict(problem, text=problem["text"].replace(
+        "Kön kunde inte läsas.", "Patientkorten kunde inte läsas."))
+
+
+def _load_queue() -> dict:
+    """Both lists from cdr1, each with its own outcome. Never raises."""
+    client = rc.build_review_client()
+    out: dict = {"cards": None, "card_exc": None, "v1": None, "v1_exc": None}
+    try:
+        out["cards"] = client.list_cards()
+    except rc.ReviewError as exc:
+        out["card_exc"] = exc
+    try:
+        out["v1"] = client.list_pending()
+    except rc.ReviewError as exc:
+        out["v1_exc"] = exc
+    if out["v1"] is not None:
+        # A row that belongs to a card version is decided with its version,
+        # never alone. cdr1 may list it on the per-row route too (s7.4 does
+        # not say); it is shown once, in the card.
+        in_cards = {str(r.get("guid")) for c in (out["cards"] or {}).get("items", [])
+                    for r in c.get("rows", [])}
+        items = out["v1"]["items"]
+        kept = [i for i in items
+                if not i.get("card_version") and str(i.get("guid")) not in in_cards]
+        dropped = len(items) - len(kept)
+        out["v1"] = dict(out["v1"], items=kept,
+                         total=max(out["v1"]["total"] - dropped, len(kept)))
+    return out
+
+
 def _render_queue(*, status: int = 200, form_error: str | None = None,
                   audit_event: str = "eps_review_queue", **audit_payload):
     """The queue page. Used for the plain GET and to re-show the queue with a
-    form error. A failed read renders the problem panel INSTEAD of the list."""
+    form error. A failed read renders a problem panel INSTEAD of that list;
+    the other list is still shown, and the page answers the failure's status."""
     if _admin_attest_needed():
         _audit(audit_event, outcome="admin_attest_required", **audit_payload)
         return render_template("eps_review.html", attest_required=True,
                                problem=None, groups=[], total=None,
+                               card_problem=None, card_groups=[],
                                form_error=None, eps_nav_count=""), 428
-    try:
-        data = rc.build_review_client().list_pending()
-    except rc.ReviewError as exc:
-        st, problem = _list_problem(exc)
-        _audit(audit_event, outcome=problem["code"],
-               cdr_status=exc.status_code, **audit_payload)
-        return render_template(
-            "eps_review.html", problem=problem, groups=[], total=None,
-            form_error=form_error,
-            eps_nav_count="" if st == 403 else "?"), (status if status != 200 else st)
-    groups = _groups(data["items"])
-    _audit(audit_event, n_rows=len(data["items"]),
-           outcome=audit_payload.pop("outcome", "listed"), **audit_payload)
+    q = _load_queue()
+    problem = card_problem = None
+    statuses = []
+    if q["v1_exc"] is not None:
+        st, problem = _list_problem(q["v1_exc"])
+        statuses.append(st)
+    if q["card_exc"] is not None:
+        st, card_problem = _card_problem(q["card_exc"])
+        statuses.append(st)
+    groups = _groups(q["v1"]["items"]) if q["v1"] else []
+    cards = q["cards"]["items"] if q["cards"] else []
+    card_groups = _card_groups(cards)
+    n_v1 = len(q["v1"]["items"]) if q["v1"] else 0
+
+    if statuses:
+        nav = "" if 403 in statuses else "?"
+        outcome = ",".join(p["code"] for p in (problem, card_problem) if p)
+        _audit(audit_event, n_rows=n_v1 + len(cards), outcome=outcome,
+               cdr_status=(q["v1_exc"] or q["card_exc"]).status_code,
+               n_cards=len(cards) if q["cards"] else None,
+               **{k: v for k, v in audit_payload.items() if k != "outcome"})
+        page_status = status if status != 200 else statuses[0]
+    else:
+        nav = q["v1"]["total"] + len(cards)
+        _audit(audit_event, n_rows=n_v1 + len(cards), n_cards=len(cards),
+               outcome=audit_payload.pop("outcome", "listed"), **audit_payload)
+        page_status = status
     return render_template(
-        "eps_review.html", problem=None, groups=groups, total=data["total"],
-        shown=len(data["items"]), truncated=data["truncated"],
-        form_error=form_error,
-        eps_nav_count=data["total"],
-        csrf_token=csrf_token(), action_labels=ACTION_LABELS), status
+        "eps_review.html", problem=problem, groups=groups,
+        total=q["v1"]["total"] if q["v1"] else None,
+        shown=n_v1, truncated=bool(q["v1"] and q["v1"]["truncated"]),
+        card_problem=card_problem, card_groups=card_groups,
+        n_cards=len(cards),
+        cards_truncated=bool(q["cards"] and q["cards"]["truncated"]),
+        form_error=form_error, eps_nav_count=nav,
+        csrf_token=csrf_token(), action_labels=ACTION_LABELS,
+        mark_labels=MARK_LABELS), page_status
 
 
-def _csrf_refused(event: str, review_guid: str):
-    _audit(event, review_guid=review_guid, outcome="csrf_refused")
+def _csrf_refused(event: str, **ids):
+    _audit(event, outcome="csrf_refused", **ids)
     return render_template("eps_review_message.html", title="Begäran avvisades", text=(
         "Säkerhetskontrollen (CSRF) saknades eller stämde inte, så inget "
         "beslut har registrerats. Öppna kön igen och försök på nytt.")), 403
@@ -343,7 +489,8 @@ def _find_pending(review_guid: str) -> dict | None:
     caller's scope. Raises ReviewError."""
     for it in rc.build_review_client().list_pending()["items"]:
         if str(it.get("guid")) == review_guid:
-            return it
+            # #1049: a row of a card version is decided with its version.
+            return None if it.get("card_version") else it
     return None
 
 
@@ -367,14 +514,17 @@ def queue():
 def count():
     """The number for the navigation link. Never 0 unless cdr1 said 0: a
     failed read answers with its own status and `count: null`."""
-    try:
-        data = rc.build_review_client().list_pending()
-    except rc.ReviewError as exc:
-        st, problem = _list_problem(exc)
+    q = _load_queue()
+    exc = q["v1_exc"] or q["card_exc"]
+    if exc is not None:
+        # Either list unknown -> the number is unknown. A count that left
+        # out the card versions would be a smaller queue than the real one.
+        st, problem = (_list_problem(exc) if q["v1_exc"] is not None
+                       else _card_problem(exc))
         resp = jsonify(count=None, error=problem["code"])
         resp.headers["Cache-Control"] = "no-store"
         return resp, st
-    resp = jsonify(count=data["total"])
+    resp = jsonify(count=q["v1"]["total"] + len(q["cards"]["items"]))
     resp.headers["Cache-Control"] = "no-store"
     return resp, 200
 
@@ -384,7 +534,7 @@ def count():
 def confirm(review_guid):
     """Step 1 of 2: show exactly what will be sent. Sends nothing to cdr1."""
     if not csrf_valid():
-        return _csrf_refused("eps_review_confirm", review_guid)
+        return _csrf_refused("eps_review_confirm", review_guid=review_guid)
     if _admin_attest_needed():
         return _render_queue(audit_event="eps_review_confirm", review_guid=review_guid)
     try:
@@ -415,7 +565,7 @@ def confirm(review_guid):
 def decide(review_guid):
     """Step 2 of 2: send the confirmed decision to cdr1 in the operator's name."""
     if not csrf_valid():
-        return _csrf_refused("eps_review_decision", review_guid)
+        return _csrf_refused("eps_review_decision", review_guid=review_guid)
     if request.form.get("confirmed") != "ja":
         _audit("eps_review_decision", review_guid=review_guid, outcome="unconfirmed")
         return render_template("eps_review_message.html", title="Beslutet är inte bekräftat", text=(
@@ -499,4 +649,220 @@ def decide(review_guid):
                     "har skapats; patientens original är oförändrat.",
            "reject": "Svaret är avvisat. Patienten ser skälet i appen."}[action],
           "success")
+    return redirect(url_for("eps_review.queue"), code=303)
+
+
+# --------------------------------------------------------------------------
+# card versions (#1049, contract s7.4/s7.5)
+# --------------------------------------------------------------------------
+
+CARD_ACTIONS = ("approve", "reject")
+CARD_ACTION_LABELS = {"approve": "Godkänn versionen", "reject": "Avvisa versionen"}
+
+
+def _card_version_arg(card_version: str) -> str:
+    """The path segment as a canonical UUID (s7.3 mints a uuid), or 404.
+    Nothing that is not a uuid is put into a cdr1 URL."""
+    try:
+        return str(uuid.UUID(card_version))
+    except ValueError:
+        abort(404)
+
+
+def _find_card(card_version: str) -> dict | None:
+    """The version as cdr1 lists it NOW among the pending ones, or None.
+    Raises ReviewError."""
+    for it in rc.build_review_client().list_cards()["items"]:
+        if str(it.get("card_version")).lower() == card_version:
+            return it
+    return None
+
+
+def _card_gone():
+    flash("Den versionen av patientkortet finns inte längre i din kö. Någon "
+          "kan redan ha beslutat om den, eller så har patienten skickat en "
+          "nyare version som ersatt den. Inget beslut registrerades.", "warning")
+    return redirect(url_for("eps_review.queue"), code=303)
+
+
+def _read_card_form(view: dict) -> dict:
+    """Validate a posted card decision against the version as cdr1 lists it.
+    Amendments are read ONLY for the version's own amendable rows, from the
+    fields `amend-<row guid>`; an empty field means "not amended". Raises
+    _FormError."""
+    action = (request.form.get("action") or "").strip()
+    if action not in CARD_ACTIONS:
+        raise _FormError("Välj Godkänn versionen eller Avvisa versionen.")
+    note = (request.form.get("note") or "").strip()
+    reason = (request.form.get("reason") or "").strip()
+    if len(note) > _MAX_TEXT or len(reason) > _MAX_TEXT:
+        raise _FormError(f"Texten får vara högst {_MAX_TEXT} tecken.")
+    out = {"action": action, "note": "", "reason": "", "amend": {}, "raw": {}}
+    if action == "reject":
+        if not reason:
+            raise _FormError("Ett skäl krävs för att avvisa. Skälet visas "
+                             "för patienten.")
+        out["reason"] = reason
+        return out
+    out["note"] = note
+    for c in view["proposed"]:
+        raw = (request.form.get(f"amend-{c['guid']}") or "").strip()
+        if not raw:
+            continue
+        if not c["amendable"]:
+            raise _FormError(f"{c['label']}: svaret kan inte ändras här. "
+                             "Godkänn versionen som den är eller avvisa den.")
+        try:
+            out["amend"][c["guid"]] = _coerce_amended(raw, c["value"])
+        except _FormError as exc:
+            raise _FormError(f"{c['label']}: {exc}") from None
+        out["raw"][c["guid"]] = raw
+    return out
+
+
+def _card_audit(event: str, card_version: str, view: dict | None = None, **kw):
+    """Identifiers, counts and the outcome only: never a value, the note or
+    the reason (cdr1 is their record)."""
+    _audit(event, n_rows=len(view["proposed"]) if view else 0,
+           patient_guid=view["patient_guid"] if view else None,
+           card_version=card_version,
+           section=view["section_code"] if view else None, **kw)
+
+
+def _card_lookup(event: str, card_version: str):
+    """(view, None) for a pending, decidable version; (None, response) else."""
+    if _admin_attest_needed():
+        return None, _render_queue(audit_event=event, card_version=card_version)
+    try:
+        item = _find_card(card_version)
+    except rc.ReviewError:
+        return None, _render_queue(audit_event=event, card_version=card_version)
+    if item is None:
+        _card_audit(event, card_version, outcome="not_pending")
+        return None, _card_gone()
+    view = _card_view(item)
+    if not view["can_decide"]:
+        _card_audit(event, card_version, view, outcome="cannot_decide")
+        return None, (render_template("eps_review_message.html", title="Du får inte besluta om den här versionen", text=(
+            "CDR anger att du kan se versionen men inte besluta om den. Beslut "
+            "kräver att du är läkare eller sjuksköterska med affiliering till "
+            "patientens vårdenhet. Inget har registrerats.")), 403)
+    return view, None
+
+
+@bp.post("/kort/<card_version>/bekrafta")
+@audit_read
+def card_confirm(card_version):
+    """Step 1 of 2 for a card version. Sends nothing to cdr1."""
+    card_version = _card_version_arg(card_version)
+    if not csrf_valid():
+        return _csrf_refused("eps_card_confirm", card_version=card_version)
+    view, resp = _card_lookup("eps_card_confirm", card_version)
+    if resp is not None:
+        return resp
+    try:
+        form = _read_card_form(view)
+    except _FormError as exc:
+        return _render_queue(status=400, form_error=str(exc),
+                             audit_event="eps_card_confirm",
+                             card_version=card_version, outcome="form_invalid")
+    _card_audit("eps_card_confirm", card_version, view, action=form["action"],
+                n_amended=len(form["amend"]), outcome="shown")
+    amended = {g_: _display(v) for g_, v in form["amend"].items()}
+    return render_template(
+        "eps_review_card_confirm.html", card=view, form=form, amended=amended,
+        action_label=CARD_ACTION_LABELS[form["action"]],
+        mark_labels=MARK_LABELS, csrf_token=csrf_token())
+
+
+@bp.post("/kort/<card_version>/beslut")
+@audit_read
+def card_decide(card_version):
+    """Step 2 of 2: send the confirmed decision on a card version to cdr1."""
+    card_version = _card_version_arg(card_version)
+    if not csrf_valid():
+        return _csrf_refused("eps_card_decision", card_version=card_version)
+    if request.form.get("confirmed") != "ja":
+        _audit("eps_card_decision", card_version=card_version, outcome="unconfirmed")
+        return render_template("eps_review_message.html", title="Beslutet är inte bekräftat", text=(
+            "Ett beslut skickas först när det har bekräftats. Inget har "
+            "registrerats. Öppna kön och välj åtgärd igen.")), 400
+    view, resp = _card_lookup("eps_card_decision", card_version)
+    if resp is not None:
+        return resp
+    try:
+        form = _read_card_form(view)
+    except _FormError as exc:
+        return _render_queue(status=400, form_error=str(exc),
+                             audit_event="eps_card_decision",
+                             card_version=card_version, outcome="form_invalid")
+
+    action = form["action"]
+    event = f"eps_card_{action}"            # eps_card_approve|reject
+    client = rc.build_review_client()
+    try:
+        if action == "reject":
+            body = client.reject_card(card_version, form["reason"])
+        else:
+            body = client.approve_card(card_version, amend=form["amend"] or None,
+                                       note=form["note"] or None)
+    except rc.ReviewSuperseded as exc:      # before its base class
+        _card_audit(event, card_version, view, outcome="superseded",
+                    cdr_status=exc.status_code)
+        flash("Patienten har skickat en nyare version av avsnittet "
+              f"{view['section']}. Den version du granskade är ersatt och kan "
+              "inte längre beslutas. Ditt beslut registrerades inte. Granska "
+              "den nya versionen i kön.", "warning")
+        return redirect(url_for("eps_review.queue"), code=303)
+    except rc.ReviewAlreadyDecided as exc:
+        _card_audit(event, card_version, view, outcome="already_decided",
+                    cdr_status=exc.status_code)
+        flash("Någon annan har redan beslutat om den här versionen av "
+              "patientkortet. Ditt beslut registrerades inte, och versionen "
+              "har lämnat kön.", "warning")
+        return redirect(url_for("eps_review.queue"), code=303)
+    except rc.ReviewNotFound as exc:
+        _card_audit(event, card_version, view, outcome="not_found",
+                    cdr_status=exc.status_code)
+        flash("Versionen finns inte inom dina vårdenheter. Inget beslut "
+              "registrerades.", "warning")
+        return redirect(url_for("eps_review.queue"), code=303)
+    except rc.ReviewForbidden as exc:
+        _card_audit(event, card_version, view, outcome="forbidden",
+                    cdr_status=exc.status_code)
+        return render_template("eps_review_message.html", title="Du får inte besluta om den här versionen", text=(
+            "CDR avvisade beslutet (403), så inget har registrerats. Beslut "
+            "kräver att du är läkare eller sjuksköterska med affiliering "
+            "till den vårdenhet där patienten är listad. Att vara "
+            "administratör räcker inte.")), 403
+    except rc.ReviewInvalid as exc:
+        code = exc.cdr_code or exc.cdr_error
+        _card_audit(event, card_version, view, outcome="invalid",
+                    cdr_status=exc.status_code, cdr_error=code)
+        why = _INVALID_TEXT.get(code) or (
+            "Kontrollera värdena eller skälet" + (f" (CDR: {code})" if code else "") + ".")
+        return render_template("eps_review_message.html", title="CDR godtog inte beslutet", text=(
+            "CDR avvisade innehållet i beslutet, så inget har registrerats. "
+            + why)), 422
+    except rc.ReviewError as exc:
+        _card_audit(event, card_version, view, outcome="unknown",
+                    cdr_status=exc.status_code)
+        return render_template("eps_review_message.html", title="Beslutet kunde inte bekräftas", text=(
+            "CDR svarade inte som väntat. Det är därför OKÄNT om beslutet "
+            "registrerades. Öppna kön igen: finns versionen kvar har inget "
+            "registrerats, och du kan försöka på nytt.")), 502
+
+    _card_audit(event, card_version, view, outcome="sent",
+                n_amended=len(form["amend"]) if action == "approve" else None,
+                endorsed=body.get("endorsed") if action == "approve" else None,
+                note_given=bool(form["note"]) if action == "approve" else None)
+    if action == "approve":
+        msg = (f"Versionen av {view['section']} är godkänd. Nya poster i vårdens "
+               "namn har skapats; patientens original är oförändrade.")
+        if form["amend"]:
+            msg += f" {len(form['amend'])} värde(n) ändrades."
+    else:
+        msg = (f"Versionen av {view['section']} är avvisad. Patienten ser "
+               "skälet i appen.")
+    flash(msg, "success")
     return redirect(url_for("eps_review.queue"), code=303)

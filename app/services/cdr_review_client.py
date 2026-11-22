@@ -1,6 +1,11 @@
 """Client for cdr1's EPS review API (#1044, epic #1039).
 
-Contract: `plans/patient_app_contract.md` s4.2 (workspace repo).
+Contract: `plans/patient_app_contract.md` s4.2 (workspace repo), and s7.4
+for the card versions of v2 (#1049):
+
+    GET  /api/v1/reviews/cards?status=pending
+    POST /api/v1/reviews/cards/<card_version>/approve  {"amend": {guid: value}?, "note"?}
+    POST /api/v1/reviews/cards/<card_version>/reject   {"reason"}
 
     GET  /api/v1/reviews?status=pending[&patient_guid=]
     POST /api/v1/reviews/<guid>/approve   {"value": <optional>, "note": <optional>}
@@ -76,6 +81,14 @@ class ReviewNotFound(ReviewError):
 
 class ReviewAlreadyDecided(ReviewError):
     """cdr1 answered 409: someone has already decided this original."""
+
+
+class ReviewSuperseded(ReviewAlreadyDecided):
+    """cdr1 answered 409 `superseded` (#1049, contract s7.4): the patient
+    sent a newer version of that card section, so this version can no longer
+    be decided. A subclass of ReviewAlreadyDecided so that a caller handling
+    only "409" still treats it as "not recorded"; the card routes catch it
+    FIRST to say which of the two happened."""
 
 
 class ReviewInvalid(ReviewError):
@@ -158,6 +171,8 @@ class CdrReviewClient:
                 raise ReviewNotFound("cdr1: no such original in scope", **kw)
             raise ReviewApiMissing("cdr1 has no review API (404, not JSON)", **kw)
         if st == 409:
+            if err == "superseded":
+                raise ReviewSuperseded("cdr1: superseded by a newer version", **kw)
             raise ReviewAlreadyDecided("cdr1: already decided", **kw)
         if st in (400, 422):
             raise ReviewInvalid(f"cdr1 refused the decision ({st})", **kw)
@@ -199,6 +214,57 @@ class CdrReviewClient:
 
     def reject(self, review_guid: str, reason: str) -> dict:
         return self._call("POST", f"/api/v1/reviews/{review_guid}/reject",
+                          json_body={"reason": reason}, ok=(200,))
+
+
+    # -- card versions (#1049, contract s7.4) -------------------------------
+    def list_cards(self) -> dict:
+        """Pending card versions in the caller's scope:
+        `{"items": [{"card_version", "patient_guid", "section", "submitted_at",
+        "rows": [...], "endorsed": {...} | null}]}`.
+
+        Same rule as `list_pending`: an empty `items` is an answer, anything
+        else that is not the contract's shape raises. A card whose `rows` is
+        not a list, or whose `endorsed` is neither null nor an object with a
+        `rows` list, makes the WHOLE answer unusable rather than being dropped:
+        a dropped card is a card nobody sees.
+        """
+        body = self._call("GET", "/api/v1/reviews/cards",
+                          params=[("status", "pending")])
+        items = body.get("items")
+        if not isinstance(items, list):
+            raise ReviewUnreachable("cdr1 card list carried no items list",
+                                    status_code=200)
+        for it in items:
+            if not isinstance(it, dict) or not it.get("card_version"):
+                raise ReviewUnreachable("cdr1 card list: an item without card_version",
+                                        status_code=200)
+            rows = it.get("rows")
+            if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+                raise ReviewUnreachable("cdr1 card list: an item without a rows list",
+                                        status_code=200)
+            end = it.get("endorsed")
+            if end is not None and not (
+                    isinstance(end, dict) and isinstance(end.get("rows"), list)
+                    and all(isinstance(r, dict) for r in end["rows"])):
+                raise ReviewUnreachable("cdr1 card list: endorsed is not null or a version",
+                                        status_code=200)
+        return {"items": items, "truncated": body.get("truncated") is True}
+
+    def approve_card(self, card_version: str, *, amend: dict | None = None,
+                     note: str | None = None) -> dict:
+        """Approve a card version; `amend` maps row guid -> amended value.
+        Returns cdr1's `{"endorsed": N, "amended": M}`."""
+        body: dict = {}
+        if amend:
+            body["amend"] = amend
+        if note:
+            body["note"] = note
+        return self._call("POST", f"/api/v1/reviews/cards/{card_version}/approve",
+                          json_body=body, ok=(200, 201))
+
+    def reject_card(self, card_version: str, reason: str) -> dict:
+        return self._call("POST", f"/api/v1/reviews/cards/{card_version}/reject",
                           json_body={"reason": reason}, ok=(200,))
 
 

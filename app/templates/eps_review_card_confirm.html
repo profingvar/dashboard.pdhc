@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Bekräfta beslut · EPS att granska{% endblock %}
+{% block h1 %}Bekräfta beslut{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+{% from "_card_diff.html" import card_diff_table %}
+<div class="rv-wrap" lang="sv">
+<div class="card" id="cd-confirm" data-card="{{ card.card_version }}" data-action="{{ form.action }}">
+  <h2>{{ action_label }}</h2>
+  <p>Inget har skickats ännu. Kontrollera uppgifterna och bekräfta.</p>
+  <dl class="rv-summary">
+    <dt>Patient</dt><dd class="monospace">{{ card.patient_guid }}</dd>
+    <dt>Avsnitt</dt><dd>{{ card.section }}</dd>
+    <dt>Skickad</dt><dd>{{ card.submitted_at }}</dd>
+    <dt>Jämförs med</dt><dd>{% if card.has_endorsed %}versionen som godkändes {{ card.endorsed_at }}{% else %}ingen tidigare godkänd version{% endif %}</dd>
+    <dt>Ändringar</dt><dd>{{ card.counts.added }} ny(a), {{ card.counts.changed }} ändrad(e), {{ card.counts.removed }} borttagen/borttagna, {{ card.counts.same }} oförändrad(e)</dd>
+    {% if form.action == 'approve' %}
+    <dt>Värden du ändrar</dt><dd id="cd-n-amended">{{ amended|length }}</dd>
+    {% endif %}
+    {% if form.action == 'reject' %}
+    <dt>Skäl (visas för patienten)</dt><dd id="cd-reason">{{ form.reason }}</dd>
+    {% endif %}
+  </dl>
+
+  {{ card_diff_table(card, mark_labels, amended) }}
+
+  <p class="rv-meta" style="margin-top:0.75rem;">
+    {% if form.action == 'reject' %}
+    Alla rader i versionen avvisas och blir inte en del av patientens EPS. Den version som är godkänd i dag gäller oförändrad. Patientens original sparas oförändrade, och patienten ser att versionen avvisats och varför.
+    {% else %}
+    Varje rad i versionen blir en ny post i ditt namn som pekar på patientens original, som sparas oförändrat. Versionen ersätter sedan den som är godkänd i dag i patientens EPS: rader markerade Borttagen följer inte med.
+    {% endif %}
+  </p>
+  <form method="post" class="rv-form" action="{{ url_for('eps_review.card_decide', card_version=card.card_version) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="{{ form.action }}">
+    <input type="hidden" name="confirmed" value="ja">
+    {% for guid, raw in form.raw.items() %}<input type="hidden" name="amend-{{ guid }}" value="{{ raw }}">{% endfor %}
+    {% if form.action == 'reject' %}<input type="hidden" name="reason" value="{{ form.reason }}">{% endif %}
+    {% if form.action != 'reject' %}
+    <label for="cd-note">Anteckning (valfri)</label>
+    <textarea id="cd-note" name="note" rows="2" maxlength="2000"></textarea>
+    {% endif %}
+    <div class="rv-actions">
+      <button type="submit" class="rv-btn">Bekräfta och skicka</button>
+      <a class="rv-btn" href="{{ url_for('eps_review.queue') }}">Avbryt</a>
+    </div>
+  </form>
+</div>
+</div>
+{% endblock %}
