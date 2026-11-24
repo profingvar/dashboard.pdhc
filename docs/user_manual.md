@@ -242,6 +242,59 @@ patientregistret), väljer e-post och lösenord och lägger till en passkey.
 | Patientregistret (eps) / Inloggningstjänsten (sso) svarade inte | En tjänst nåddes inte | Ingenting har gjorts. Försök igen om en stund |
 | Ange ett svenskt mobilnummer | Numret är inte ett svenskt mobilnummer | Skriv 07… eller +467… |
 
+## 7c. Loggkontroll (#1045)
+
+Patientdatalagen (4 kap. 3 §) kräver att vårdgivaren **regelbundet och
+systematiskt kontrollerar** vem som har tagit del av patientuppgifter.
+Loggkontrollen visar, för den patient du har öppen, **vem** som läst eller
+ändrat patientens uppgifter, **när**, **i vilken tjänst** och **vad** som
+gjordes.
+
+**Vem får göra loggkontroll.** I dag systemadministratör (SU). Verksamheten
+kan bestämma att även vissa roller vid vårdenheten får granska loggar (till
+exempel en utsedd loggranskare); då får den som har en sådan roll vid en
+vårdenhet där patienten är listad göra kontrollen för den patienten. Har du
+inte rätt får du veta varför.
+
+1. Öppna patienten från patientlistan. På patientens sida finns knappen
+   **Loggkontroll**.
+2. Välj **period** (från och med, till och med; högst ett år). Förvalt är de
+   senaste 30 dagarna.
+3. Välj vad som ska visas:
+   - **Alla åtkomster** – hela listan i tidsordning.
+   - **Bara avvikande** – händelser med minst en markering (se nedan).
+   - **Slumpvis stickprov** – ett slumpmässigt urval av det antal du anger.
+     Sidan visar ett **urvalsnummer**; samma nummer ger samma urval igen, så
+     det går att visa i efterhand vilka händelser som kontrollerades.
+4. **Ladda ner som CSV** ger samma rader som visas, för arkiv eller vidare
+   granskning (öppnas i Excel; semikolonseparerad).
+
+**Tjänster som frågas.** Listan hämtas från dashboard, journaldatabasen
+(cdr1), patientregistret (eps) och beställningar (request). Överst står hur
+många händelser varje tjänst gav. **Kan en tjänst inte svara står det
+"Kunde inte hämtas från …"** – då saknas den tjänstens händelser i listan, och
+listan är alltså inte fullständig. Det gäller även CSV-filen, som har en rad
+per tjänst som inte kunde hämtas.
+
+**Markeringar (att kontrollera, inte fel i sig):**
+
+| markering | betyder |
+|---|---|
+| Nödöppning / särskild åtkomst | Åtkomst med nödöppning, eller en administratör som läste utanför sin vårdenhet med angivet skäl. Skälet visas. |
+| Användaren är inte knuten till patientens vårdenhet | Användarens vårdenheter vid tillfället omfattade inte någon av de enheter där patienten är listad. "Vårdenhet okänd" när tjänsten inte sparar användarens enheter. |
+| Åtkomsten nekades | Någon försökte men fick inte tillgång. |
+| Systemadministratör | Åtkomsten gjordes med administratörsbehörighet. |
+| Utanför arbetstid | Vardagar före 07 och efter 18 samt helger (svensk tid). |
+
+**Det här loggas också.** Varje gång du öppnar loggkontrollen eller laddar ner
+CSV loggas det, med patient, period och visning. Tjänsterna loggar dessutom
+själva att deras logg lästes.
+
+**Det som inte finns med (ännu).** Inloggningar i inloggningstjänsten (sso),
+patientens egna läsningar i patientappen och leverantörers hämtningar via
+gateway.pdhc. Namn visas när personen har loggat in i dashboard; annars visas
+användarens id.
+
 ## 8. Getting help
 - Runtime logs: `results/<timestamp>_results/app.log` (local) or
   `shared/logs/gunicorn.*.log` (server).

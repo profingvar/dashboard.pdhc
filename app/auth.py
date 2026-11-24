@@ -199,11 +199,20 @@ def has_invite_page_access(blob: Optional[dict]) -> bool:
     return bool(blob.get("is_su_admin")) or blob.get("user_type") == "professional"
 
 
+def _is_loggkontroll_path(path: str) -> bool:
+    """#1045 loggkontroll."""
+    return path == "/loggkontroll" or path.startswith("/loggkontroll/")
+
+
 def _dashboard_access_allowed(path: str, blob: Optional[dict]) -> bool:
     """Route-aware gate (#463/D1): clinical routes need care-delivery
     access; the analyse engine's routes keep the analysis-phase gate until
     they relocate to analyse.pdhc."""
     if _is_invite_path(path):
+        return has_invite_page_access(blob)
+    if _is_loggkontroll_path(path):
+        # #1045: SU or any professional knocks, so a professional is TOLD
+        # why they may not review (routes/loggkontroll.may_review decides).
         return has_invite_page_access(blob)
     if _is_patient_dashboard_path(path):
         # Both bases; see _is_patient_dashboard_path. access.py narrows.

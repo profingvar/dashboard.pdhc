@@ -145,6 +145,11 @@ def create_app(config=None):
     app.config.setdefault("NURSE_CGM_CODES", os.environ.get("NURSE_CGM_CODES", ""))
     for _key in ("PLAN_BASE_URL", "REQUEST_BASE_URL", "ICD11_BASE_URL"):
         app.config.setdefault(_key, os.environ.get(_key, ""))
+    # #1045 loggkontroll: which affiliation roles may review a patient's
+    # access log besides an SU (unset = SU only, the safe default: an
+    # operator decision), and the working day for "utanför arbetstid".
+    for _key in ("LOGGKONTROLL_ROLES", "LOGGKONTROLL_WORKDAY"):
+        app.config.setdefault(_key, os.environ.get(_key, ""))
     # #974 (Phase 6 step 22) — the SYNTHETIC fixture layer, for tests, the
     # e2e run and local development. Opt-in only, and `install` RAISES unless
     # AUTH_MODE=off, so fixture data can never be served behind a real login.
@@ -192,6 +197,9 @@ def create_app(config=None):
     # #1050 — "Bjud in patient": patients join the patient app by invitation.
     from app.routes.invite import bp as invite_bp
     app.register_blueprint(invite_bp)
+    # #1045 — loggkontroll: who read or changed the open patient's data.
+    from app.routes.loggkontroll import bp as loggkontroll_bp
+    app.register_blueprint(loggkontroll_bp)
     register_metadata(app)
 
     # Audit view (#215). (The cache-scrub route + cache-sweep CLI were

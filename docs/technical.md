@@ -247,6 +247,11 @@ browser ──SSO──▶ dashboard ─┤
 - `CDR_ENDPOINTS` — comma-separated CDR2–5 endpoints for the nurse fan-out.
 - `SPARR_LIFT_ENABLED` — enable the indispensable-care lift (#471.4/#472).
 - `SECRET_KEY` — Flask session secret.
+- `LOGGKONTROLL_ROLES` (#1045) — comma-separated affiliation roles that may
+  review a patient's access log besides an SU. **Unset = SU only** (the safe
+  default; an operator decision).
+- `LOGGKONTROLL_WORKDAY` (#1045) — working hours for "utanför arbetstid",
+  `HH-HH` local time, weekdays. Unset = `07-18`.
 
 ## Endpoints
 | Path | Method | Purpose |
@@ -271,6 +276,8 @@ browser ──SSO──▶ dashboard ─┤
 | `/eps-granskning/<review_guid>/beslut` | POST | send the decision to cdr1 (CSRF) |
 | `/eps-granskning/kort/<card_version>/bekrafta` | POST | card version: confirmation step (CSRF, #1049) |
 | `/eps-granskning/kort/<card_version>/beslut` | POST | card version: send the decision to cdr1 (CSRF, #1049) |
+| `/loggkontroll/<guid>` | GET | access log of the OPEN patient, merged (#1045) |
+| `/loggkontroll/<guid>/csv` | GET | the same rows as CSV (#1045) |
 | `/admin/audit` | GET | SU-only audit browse (#215) |
 | `/admin/audit/export.csv` | GET | SU-only audit CSV export (#215) |
 
@@ -393,6 +400,49 @@ standalone form (name, personnummer, unit) is removed, for SU too.
 - **Config**: `IPS_BASE_URL` (filled from `EPS_BASE_URL` first, #1019) and
   `SSO_BASE_URL`; unset → named "inte konfigurerad" message.
 - Tests: `app/tests/test_invite_1050.py` (35), auth ON, only HTTP patched.
+
+## Loggkontroll (#1045, 2026-11-24)
+
+`routes/loggkontroll.py` + `services/access_log.py`. Patientdatalagen 4 kap.
+3 §: who read or changed the OPEN patient's data, merged chronologically.
+
+Sources, each asked with the professional's OWN bearer (no service key):
+
+| service | call | auth |
+|---|---|---|
+| dashboard | own `dashboard_audit` where `patient_guid` | — |
+| cdr1 | `GET {CDR1_BASE_URL}/api/v1/access-log/patients/<guid>?from&to&limit` | `Authorization: Bearer` |
+| eps | `GET {IPS_BASE_URL}/api/v1/audit/patients/<guid>?from&to&limit` | `Authorization: Bearer` |
+| request | `GET {REQUEST_BASE_URL}/api/v1/patients/<guid>/access-log?from&to&limit` | `X-API-Key: <bearer>` |
+
+Every service answers `{"items": [...], "truncated"}` with the item keys in
+`access_log.ITEM_KEYS` (`at`, `user_guid`, `user_label`, `actor_type`,
+`action`, `outcome`, `route`, `resource_type`, `session_id`, `actor_units`,
+`basis`, `detail`). Each service gates the read itself (SU, or a professional
+affiliated to the patient's unit) and logs it.
+
+**Never silent:** a source that is unconfigured, unreachable, refuses, or
+answers the wrong shape is a `SourceResult(ok=False)` with a Swedish sentence
+("Kunde inte hämtas från …"), shown above the table and written as a row in
+the CSV. An empty list means the service answered with nothing.
+
+**Access to the page:** front door = SU or any professional
+(`auth._is_loggkontroll_path`, so a professional is told why); the page itself
+(`may_review`) = SU, or a professional whose affiliation at a unit where eps
+lists the patient has a role in `LOGGKONTROLL_ROLES`. Unset = SU only. The
+patient must have been opened in the session (`remember_opened_patient`).
+
+**Flags** (`access_log.flags_for`; True/False/None = cannot tell):
+`nodoppning` (basis break_glass, or a dashboard `admin_override`),
+`utanfor_enhet` (the row's `actor_units` disjoint from eps's units for the
+patient; None when the row records no units or eps could not answer),
+`nekad`, `su_admin`, `utanfor_arbetstid` (Europe/Stockholm, weekend or
+outside `LOGGKONTROLL_WORKDAY`). Random sample: `random.Random(seed)`, seed
+shown and audited, so a sample can be reproduced.
+
+**Audit:** `DashboardAudit` `event_type=loggkontroll` / `loggkontroll_export`,
+payload: period, view, seed, n_rows, basis, failed services; refusals with
+`outcome`. CSV cells starting with `= + - @` are prefixed with `'`.
 
 ## Running locally
 ```

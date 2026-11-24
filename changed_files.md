@@ -950,3 +950,13 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_picker_roster_1050.py (NEW, 22)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_patient_picker.py — cdr1 names no longer shown
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
+
+## 2026-11-24 #1045 loggkontroll
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/access_log.py (NEW) — fetch, merge, flags, sample
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/loggkontroll.py (NEW) — page, CSV, review gate, audit
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/loggkontroll.html (NEW), /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/loggkontroll_message.html (NEW)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py — blueprint; LOGGKONTROLL_ROLES / LOGGKONTROLL_WORKDAY
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py — `/loggkontroll` front door (SU or professional)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/charts.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/charts.html, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html — "Loggkontroll" button
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_loggkontroll_1045.py (NEW, 19)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md (7c), /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md

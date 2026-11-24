@@ -13,6 +13,11 @@
    style="display:inline-flex;align-items:center;min-height:44px;"
    href="{{ url_for('invite.form', guid=patient_guid) }}">Bjud in till patientappen</a></p>
 {% endif %}
+{% if can_review_log %}
+<p style="margin:0 0 0.75rem;"><a class="btn" id="loggkontroll-action" lang="sv"
+   style="display:inline-flex;align-items:center;min-height:44px;"
+   href="{{ url_for('loggkontroll.page', guid=patient_guid) }}">Loggkontroll</a></p>
+{% endif %}
 <div class="dash-grid" id="dashboard" data-patient-guid="{{ patient_guid }}">
 
   <section class="dash-panel dash-card" id="panel-card" aria-labelledby="card-heading" aria-busy="true">

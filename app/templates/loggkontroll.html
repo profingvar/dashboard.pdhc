@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Loggkontroll · dashboard{% endblock %}
+{% block h1 %}Loggkontroll{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<style>
+  .lk-form { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+  .lk-form label { display: flex; flex-direction: column; font-size: 0.9rem; gap: 0.25rem; }
+  .lk-form input, .lk-form select { font-size: 16px; min-height: 44px; padding: 0.4rem 0.5rem;
+    border: 1px solid #94a3b8; border-radius: 6px; font-family: inherit; }
+  .lk-sources { list-style: none; padding: 0; margin: 0.5rem 0; }
+  .lk-sources li { padding: 0.25rem 0; }
+  .lk-fail { border-left: 4px solid #b91c1c; background: rgba(185,28,28,0.06); padding: 0.5rem 0.75rem; margin: 0.25rem 0; }
+  .lk-table-wrap { overflow-x: auto; }
+  .lk-table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  .lk-table th, .lk-table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  .lk-table tr.lk-unusual { background: rgba(180,83,9,0.08); }
+  .lk-flag { display: inline-block; font-size: 0.8rem; border: 1px solid #b45309; color: #78350f; border-radius: 4px; padding: 0 0.3rem; margin: 0 0.2rem 0.2rem 0; }
+  .lk-muted { color: var(--text-muted, #475569); font-size: 0.85rem; }
+  .rv-wrap { overflow-wrap: anywhere; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<p>Här ser du vem som har läst eller ändrat uppgifter om den patient du har öppen,
+   när det skedde, i vilken tjänst och vad som gjordes. Använd listan för den
+   regelbundna kontrollen av åtkomst enligt patientdatalagen (4 kap. 3 §).</p>
+<p class="lk-muted" id="lk-patient">Patient: <span class="monospace">{{ ctx.patient_guid }}</span>
+  {% if ctx.units %}· Listad vid: {{ ctx.units | map(attribute='name') | join(', ') }}{% endif %}
+  {% if ctx.basis == 'su_admin' %}· Du granskar som systemadministratör.{% endif %}</p>
+
+<form method="get" class="card lk-form" id="lk-form" action="{{ url_for('loggkontroll.page', guid=ctx.patient_guid) }}">
+  <label for="lk-fran">Från och med<input type="date" id="lk-fran" name="fran" value="{{ ctx.p.fran or '' }}"></label>
+  <label for="lk-till">Till och med<input type="date" id="lk-till" name="till" value="{{ ctx.p.till or '' }}"></label>
+  <label for="lk-visa">Visa
+    <select id="lk-visa" name="visa">
+      <option value="alla" {{ 'selected' if ctx.p.visa == 'alla' }}>Alla åtkomster</option>
+      <option value="avvikande" {{ 'selected' if ctx.p.visa == 'avvikande' }}>Bara avvikande</option>
+      <option value="stickprov" {{ 'selected' if ctx.p.visa == 'stickprov' }}>Slumpvis stickprov</option>
+    </select></label>
+  <label for="lk-antal">Antal i stickprov<input type="number" id="lk-antal" name="antal" min="1" max="500" value="{{ ctx.p.antal }}"></label>
+  <button type="submit" class="rv-btn">Visa</button>
+</form>
+
+{% if ctx.errors %}
+<div class="flash flash-error" role="alert" id="lk-errors">{% for e in ctx.errors %}<p>{{ e }}</p>{% endfor %}</div>
+{% else %}
+
+<h2>Tjänster som har frågats</h2>
+<ul class="lk-sources" id="lk-sources">
+{% for r in ctx.results %}
+  {% if r.ok %}
+  <li data-service="{{ r.service }}" data-ok="1">{{ r.label }}: {{ r.items | length }} {{ 'händelse' if r.items|length == 1 else 'händelser' }}{% if r.truncated %} (fler finns än de som visas; välj en kortare period){% endif %}.</li>
+  {% else %}
+  <li data-service="{{ r.service }}" data-ok="0" class="lk-fail" role="alert">{{ r.error }} Listan nedan saknar därför händelser från den tjänsten.</li>
+  {% endif %}
+{% endfor %}
+</ul>
+{% if not ctx.units_known %}
+<p class="lk-fail" role="alert" id="lk-units-unknown">Patientregistret (eps) kunde inte ange patientens vårdenheter, så det går inte att bedöma om en användare hör till patientens vårdenhet. Den kolumnen visar "okänt".</p>
+{% endif %}
+
+<p id="lk-summary">{{ ctx.entries | length }} {{ 'händelse' if ctx.entries|length == 1 else 'händelser' }} i perioden, varav {{ ctx.n_unusual }} avvikande.
+{% if ctx.p.visa == 'avvikande' %} Visar de avvikande.{% elif ctx.p.visa == 'stickprov' %} Visar ett slumpvis stickprov på {{ ctx.shown | length }}. Urvalsnummer {{ ctx.p.urval }}: <a id="lk-same-sample" href="{{ url_for('loggkontroll.page', guid=ctx.patient_guid, fran=ctx.p.fran, till=ctx.p.till, visa='stickprov', antal=ctx.p.antal, urval=ctx.p.urval) }}">samma urval igen</a>.{% endif %}
+<a class="rv-btn" id="lk-csv" href="{{ url_for('loggkontroll.export_csv', guid=ctx.patient_guid, fran=ctx.p.fran, till=ctx.p.till, visa=ctx.p.visa, antal=ctx.p.antal, urval=ctx.p.urval) }}">Ladda ner som CSV</a></p>
+
+<details class="lk-muted"><summary>Vad betyder markeringarna?</summary>
+<ul>{% for key, text in flags %}<li><span class="lk-flag">{{ text }}</span></li>{% endfor %}</ul>
+<p>Avvikande är en händelse med minst en markering. Utanför arbetstid är vardagar före och efter arbetsdagen samt helger. En markering är inte ett fel i sig, utan något att kontrollera.</p>
+</details>
+
+{% if ctx.shown %}
+<div class="lk-table-wrap">
+<table class="lk-table" id="lk-table">
+  <thead><tr><th scope="col">Tid</th><th scope="col">Vem</th><th scope="col">Tjänst</th><th scope="col">Vad</th><th scope="col">Utfall</th><th scope="col">Att kontrollera</th></tr></thead>
+  <tbody>
+  {% for i in ctx.shown %}
+  <tr class="{{ 'lk-unusual' if i.unusual }}" data-service="{{ i.service }}" data-unusual="{{ 1 if i.unusual else 0 }}">
+    <td>{{ i.at_local }}</td>
+    <td>{{ i.user_label or (i.user_guid or 'okänd') }}{% if i.user_label and i.user_guid %}<br><span class="lk-muted monospace">{{ i.user_guid }}</span>{% endif %}{% if i.actor_type == 'service' %}<br><span class="lk-muted">(tjänst)</span>{% endif %}</td>
+    <td>{{ i.service }}{% if i.via_service %}<br><span class="lk-muted">via {{ i.via_service }}</span>{% endif %}</td>
+    <td>{{ i.action }}{% if i.route %}<br><span class="lk-muted">{{ i.route }}</span>{% endif %}{% if i.detail and i.detail.reason %}<br><span class="lk-muted">Skäl: {{ i.detail.reason }}</span>{% endif %}</td>
+    <td>{{ {'served': 'utförd', 'denied': 'nekad', 'break_glass': 'nödöppning'}.get(i.outcome, i.outcome) }}</td>
+    <td>{% for key, text in flags %}{% if i.flags[key] is sameas true %}<span class="lk-flag" data-flag="{{ key }}">{{ text }}</span>{% endif %}{% endfor %}{% if i.flags.utanfor_enhet is none and i.actor_type == 'user' %}<span class="lk-muted">vårdenhet okänd</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="card" id="lk-empty">Inga händelser att visa i perioden{% if ctx.failed %} från de tjänster som svarade{% endif %}.</p>
+{% endif %}
+{% endif %}
+<p style="margin-top:1rem;"><a class="rv-btn" href="{{ url_for('charts.charts_page', guid=ctx.patient_guid) }}">Tillbaka till patienten</a></p>
+</div>
+{% endblock %}

@@ -921,3 +921,13 @@ allow an iMessage to be formed that sends the invite".
 - Render: headless Chrome 820x1180 and 390x844, everything outside 127.0.0.1 aborted (0 attempted), 200 from our own server (nonce header + listener pid), no horizontal overflow, filter by personnummer without dash finds 1 row; eps-down variant shows the banner.
 - Not verified: production eps rosters against real professionals (needs the eps deploy); production `IPS_BASE_URL`/`EPS_BASE_URL` present in dashboard's env (invite already relies on it). The invite's own eps reads (`/state`, `/clinics`) needed an eps user row (production has 1); fixed in eps the same day (ips.pdhc bb97570: bearer admitted without a row, scoped by affiliations), so eps must be deployed before this works for real professionals.
 - Deploy: code only (dashboard), no migration, no dependency, no `.env` key.
+
+
+## 2026-11-24 — #1045 loggkontroll (LOCAL, not deployed)
+
+- Patientdatalagen 4 kap. 3 §: `/loggkontroll/<guid>` shows who read or changed the OPEN patient's data, when, in which service and what, merged from dashboard's own `dashboard_audit`, cdr1, eps and request (each asked with the professional's own bearer; each gates and logs the read itself). Views: all, only unusual (break-glass/admin override, user not affiliated to the patient's unit, denied, SU, after hours), and a reproducible random sample (seed shown + audited). CSV export (`;`, BOM, formula cells neutralised).
+- Never silent: a service that is unconfigured / unreachable / refuses / answers the wrong shape is named ("Kunde inte hämtas från …") above the table and as a CSV row.
+- ACCESS — OPERATOR DECISION PENDING: SU only by default. A professional may review only when `LOGGKONTROLL_ROLES` names their affiliation role AND that affiliation is at a unit where eps lists the patient. The services behind it admit SU or an affiliated professional, so the page is the narrower door. The "Loggkontroll" button shows for SU and for holders of a named role.
+- Needs, deployed first: cdr.pdhc (access-log endpoint), ips.pdhc (`/api/v1/audit/patients/<guid>`), request.pdhc (`/patients/<guid>/access-log`). Until then the page names each as "kunde inte hämtas".
+- Tests: `app/tests/test_loggkontroll_1045.py` (19). Suite 1068 -> 1087 passed, 13 skipped. 15 mutation controls (review gate x3, opened-patient, front door, silent failure, service key sent, flags x2, CSV x2), each fails on an assertion.
+- Deploy: code only, no migration, no dependency. New OPTIONAL env keys `LOGGKONTROLL_ROLES`, `LOGGKONTROLL_WORKDAY` (unset = SU only / 07-18).

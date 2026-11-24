@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · dashboard{% endblock %}
+{% block h1 %}Loggkontroll{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+{% block content %}
+<div class="rv-wrap" lang="sv">
+<div class="card rv-problem" role="alert" id="lk-message">
+  <h2>Loggkontrollen kan inte visas</h2>
+  <p>{{ text }}</p>
+  <p style="margin-top:0.5rem;">
+  {% if patient_guid %}<a class="rv-btn" href="{{ url_for('charts.charts_page', guid=patient_guid) }}">Tillbaka till patienten</a>
+  {% else %}<a class="rv-btn" href="{{ url_for('picker.select') }}">Till patientlistan</a>{% endif %}</p>
+</div>
+</div>
+{% endblock %}
