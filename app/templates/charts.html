@@ -18,7 +18,10 @@
   {% if record_url %}
   <p style="margin-top:0.5rem;"><a class="btn" id="record-action" lang="sv"
      style="display:inline-flex;align-items:center;min-height:44px;"
-     href="{{ record_url }}">Journal och utdrag</a></p>
+     href="{{ record_url }}">Journal och utdrag</a>
+   <a class="btn" id="record-worklist" lang="sv"
+   style="display:inline-flex;align-items:center;min-height:44px;"
+   href="{{ record_url.split('/patient/')[0] }}/vidimering">Svar att vidimera</a></p>
   {% endif %}
 </div>
 

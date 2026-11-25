@@ -1105,6 +1105,93 @@ _NOT_FOUND = {"error": "not_found",
               "message": "no such observation in your scope"}
 
 
+# ---------------------------------------------------------------------------
+# #1056: the limit verdict for ONE observation, for record.pdhc's worklist
+# ---------------------------------------------------------------------------
+
+@bp.get("/record/observations/<observation_guid>/limit")
+@audit_read
+def record_observation_limit(observation_guid: str):
+    """The dashboard's verdict on one observation, for record.pdhc's
+    vidimering worklist (plan D7: record re-uses THIS judgement and makes
+    none of its own, so the IIa assessment covers one implementation).
+
+    Reached by record.pdhc ON BEHALF OF the professional who opened the
+    worklist (app/auth.ON_BEHALF_SERVICES: record's key AND that person's
+    bearer), or by the professional's own session. The gate is event_detail's,
+    step for step: a basis, the cdr1 read scoped to the caller's
+    organisations, the patient gate on the observation's OWN patient, spärr
+    (a blocked point is the same 404 as a missing one). Only then the limit,
+    from the patient's CarePlans read with the caller's bearer.
+
+    Returns the VERSION it judged (cdr1's live row): the caller holds a task
+    for one version and must not take a verdict on another as its own.
+    """
+    from flask import g as _g
+    from app.auth import scope_org_guids
+    from app.dashboard import limits as _limits
+    from app.dashboard.access import (
+        PatientAccessRefused, assert_patient_open, record_basis, resolve_basis)
+    from app.services.cdr1_client import (
+        Cdr1NotConfigured, Cdr1ProjectionTooOld, Cdr1Unreachable)
+    from app.services.role_guards import _is_admin
+
+    blob = getattr(_g, "access_blob", None)
+    if resolve_basis(blob) is None:
+        exc = PatientAccessRefused(
+            "no_basis", "this service needs either a care relationship or "
+                        "the secondary-use phase; the account holds neither")
+        _g._audit_payload_snapshot = {"refused": exc.code}
+        return refusal_response(exc)
+    orgs = list(scope_org_guids(blob) or ()) if isinstance(blob, dict) else []
+    try:
+        d = cdr1_client.build_client().observation_detail(
+            observation_guid, orgs, is_admin=_is_admin())
+    except Cdr1ProjectionTooOld as exc:
+        return jsonify(error="upstream_projection_too_old", message=str(exc)), 503
+    except Cdr1NotConfigured as exc:
+        return jsonify(error="cdr1_not_configured", message=str(exc)), 503
+    except Cdr1Unreachable as exc:
+        return jsonify(error="cdr1_unreachable", message=str(exc)), 503
+    if d is None:
+        return jsonify(_NOT_FOUND), 404
+    patient = d.get("patient_guid")
+    _g._audit_patient_guid = patient
+    try:
+        decision = assert_patient_open(patient, _org_lookup(patient))
+    except PatientAccessRefused as exc:
+        _g._audit_payload_snapshot = {"refused": exc.code}
+        return refusal_response(exc)
+    record_basis(decision)
+    sparr = sparr_state(patient)
+    if sparr.blocks:
+        point = {"code": d.get("code"), "at": d.get("at"), "org_guid": d.get("org_guid"),
+                 "observation_guid": d.get("observation_guid")}
+        kept, _exposures = ips_client.filter_blocked_points([point], sparr.blocks)
+        if not kept:
+            return jsonify(_NOT_FOUND), 404
+    ctx = d.get("context") or {}
+    code = d.get("code") or ""
+    unavailable: list[str] = []
+    verdict = _limits.evaluate(
+        d.get("value"), d.get("unit"), ctx.get("transaction_guid"),
+        _patient_limits(patient, unavailable), code_canonical=code,
+        concept_guid=ips_client.concept_guid_from_canonical(code))
+    _g._audit_n_rows = 1
+    resp = jsonify({
+        "observation_guid": d.get("observation_guid"),
+        "patient_guid": patient,
+        "version": d.get("version"),
+        "status": d.get("status"),
+        "value": d.get("value"),
+        "unit": d.get("unit"),
+        "limit": _limits.wire(verdict),
+        "unavailable": list(dict.fromkeys(unavailable)),
+    })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 def _first(seq):
     return seq[0] if isinstance(seq, list) and seq else None
 

@@ -754,10 +754,13 @@ def build_client() -> RequestClient:
     will be refused upstream — which is the honest outcome, rather than
     inventing a key that authenticates nothing.
     """
-    from flask import session
+    from flask import g, session
     token = None
     try:
-        token = session.get("sso_token")
+        # #1056: a request record.pdhc makes ON BEHALF OF a professional
+        # carries that person's bearer (app/auth.ON_BEHALF_SERVICES); it has
+        # no session. Still the operator's own credential, never a key.
+        token = getattr(g, "forwarded_bearer", None) or session.get("sso_token")
     except RuntimeError:  # no request context
         token = None
     return RequestClient(

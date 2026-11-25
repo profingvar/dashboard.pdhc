@@ -115,3 +115,8 @@ from `gateway.pdhc`. The narrowing is tracked in
 
 ## 18. Server deploy (deferred — wait for explicit go)
 18.a Operator-only sudo (Rule 19). Bring-up plan to be drafted when greenlit.
+
+## 19. record.pdhc limit verdict (#1056)
+19.a On-behalf door (`app/auth.py`, `ON_BEHALF_SERVICES`): `X-Source-Service: record.pdhc` + `X-Service-Key` = `RECORD_DASHBOARD_KEY` + the professional's own `Authorization: Bearer`, GET only, path prefix `/dashboard/record/`. The bearer is revalidated at sso; must_change_password and the dashboard access gate apply; the request then runs as that professional (`g.forwarded_bearer` is what request_client sends to request.pdhc). Neither credential alone opens anything.
+19.b `GET /dashboard/record/observations/<guid>/limit`: cdr1 observation (scoped as usual), patient gate, spärr (404 when hidden), the patient's limits and `_limits.evaluate` — the same D7 logic as the chart; returns version, status, value, unit and the limit wire.
+19.c Link "Svar att vidimera" next to "Journal och utdrag" on the patient and chart pages.

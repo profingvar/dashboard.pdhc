@@ -18,6 +18,8 @@ Rule 24: non-admin users are org-scoped to their affiliation care-units
 """
 from __future__ import annotations
 
+import hmac
+
 import hashlib
 from functools import wraps
 from types import SimpleNamespace
@@ -315,6 +317,41 @@ def _public_path(path: str) -> bool:
 KNOWN_SERVICES: dict[str, str] = {}
 
 
+#: #1056 (record.pdhc stage 4, plan D7): a service that asks dashboard ON
+#: BEHALF OF a professional, i.e. presents BOTH its own key AND that person's
+#: SSO bearer. The person's bearer is re-validated with sso like a session's,
+#: so the route runs under the professional's own blob: the same front-door
+#: gate, the same patient gate and Rule 24 scoping as when they open the
+#: dashboard themselves, and their bearer is what reaches request.pdhc for the
+#: CarePlans (request.pdhc has no door for a service key at all, which is why
+#: a plain service-key caller could not judge a limit).
+#:
+#: Deliberately NOT KNOWN_SERVICES: that dict mints an organisation-blind
+#: service blob, and a key alone admits nobody here. Confined to GET under the
+#: listed path prefix. source -> (config var holding the key, path prefixes).
+ON_BEHALF_SERVICES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "record.pdhc": ("RECORD_DASHBOARD_KEY", ("/dashboard/record/",)),
+}
+
+
+def _on_behalf_outcome(app):
+    """None (not an on-behalf caller), False (refused) or the bearer."""
+    source = request.headers.get("X-Source-Service", "").strip()
+    if source not in ON_BEHALF_SERVICES:
+        return None
+    cfg_var, prefixes = ON_BEHALF_SERVICES[source]
+    expected = str(app.config.get(cfg_var) or "").strip()
+    key = request.headers.get("X-Service-Key", "").strip()
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+    if not expected or not hmac.compare_digest(key, expected) or not token:
+        return False
+    if request.method != "GET" or not request.path.startswith(prefixes):
+        return False
+    g.source_service = source
+    return token
+
+
 def _service_key_outcome(app):
     """None / True / False — same shape as cdr.pdhc's _service_key_outcome."""
     source = request.headers.get("X-Source-Service", "").strip()
@@ -362,6 +399,24 @@ def install_request_loader(app):
     @app.before_request
     def _loader():  # noqa: ANN202
         if _public_path(request.path):
+            return None
+        ob = _on_behalf_outcome(app)
+        if ob is not None:
+            from flask import jsonify
+            if ob is False:
+                return jsonify({"error": "Invalid service credentials"}), 403
+            blob = validate_sso_token(ob)
+            if not blob:
+                return jsonify({"error": "unauthenticated"}), 401
+            if blob.get("must_change_password"):
+                return jsonify({"error": "must_change_password"}), 403
+            if not _dashboard_access_allowed(request.path, blob):
+                return jsonify({"error": "forbidden"}), 403
+            g.access_blob = blob
+            g.current_user = _blob_to_user(blob)
+            # The professional's own bearer, for the calls this request makes
+            # on their behalf (request_client.build_client). Never the session.
+            g.forwarded_bearer = ob
             return None
         sk = _service_key_outcome(app)
         if sk is True:

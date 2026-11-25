@@ -938,3 +938,10 @@ allow an iMessage to be formed that sends the invite".
 - rc6 (operator): eps key "dashboard.pdhc sparr read", scopes [blocks:read], as EPS_BLOCKS_API_KEY in shared/.env.
 - Verified live: the client reads Tolvan's blocks with the key and no session -> eps 200; smoke 13/13.
 - Unanswered spärr question -> 503 `sparr_undetermined`, no points. Tests fail without each change.
+
+## 2026-11-25 — #1056 record.pdhc vidimering: limit verdict on behalf of a professional (LOCAL, not deployed) — readme §19
+
+- Why a new door: request.pdhc admits only a professional's bearer, so record cannot ask dashboard's limit logic with a service key alone. record sends its key AND the viewing professional's bearer; dashboard revalidates the bearer at sso and runs the request as that person.
+- `app/auth.py` `_on_behalf_outcome` + loader branch; `request_client.build_client` prefers `g.forwarded_bearer`; `app/routes/dashboard.py` `record_observation_limit`; `RECORD_DASHBOARD_KEY` in config and `.env.example`; templates link the worklist.
+- Tests: **1106 passed, 13 skipped** (1090/13 before); `app/tests/test_record_limit_1056.py` (16). Revert controls (PYTHONDONTWRITEBYTECODE=1): forwarded bearer ignored (2 fail) · prefix check off (2) · key check off (3) · must_change ignored (1) · non-GET allowed (1) · spärr not 404 (1).
+- Deploy: set `RECORD_DASHBOARD_KEY` (43+ chars, same value in record's .env) — operator. Unset = door closed; record then shows "gränskontroll ej tillgänglig".

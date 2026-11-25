@@ -170,6 +170,11 @@ def create_app(config=None):
     # record.pdhc. This is a LINK for the browser, not a call this service
     # makes, so the public name is the right default; RECORD_URL="" hides it.
     app.config.setdefault("RECORD_URL", os.environ.get("RECORD_URL", "https://record.pdhc.se"))
+    # #1056: the key record.pdhc presents when it asks for a limit verdict ON
+    # BEHALF OF a professional (app/auth.ON_BEHALF_SERVICES). Unset = that
+    # door admits nobody; record then shows "gränskontroll ej tillgänglig".
+    app.config.setdefault("RECORD_DASHBOARD_KEY",
+                          (os.environ.get("RECORD_DASHBOARD_KEY") or "").strip())
     # #974 (Phase 6 step 22) — the SYNTHETIC fixture layer, for tests, the
     # e2e run and local development. Opt-in only, and `install` RAISES unless
     # AUTH_MODE=off, so fixture data can never be served behind a real login.
