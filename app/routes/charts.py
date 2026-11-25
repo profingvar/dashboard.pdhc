@@ -120,6 +120,7 @@ def charts_page(guid):
     # patientappen" may be made for it (routes/invite.py).
     from app.auth import has_invite_page_access
     from app.routes.invite import remember_opened_patient
+    from app.routes.loggkontroll import record_link as _record_link
     from app.routes.loggkontroll import shows_link as _shows_log_link
     remember_opened_patient(guid)
     blocks = get_active_blocks(guid)
@@ -129,6 +130,8 @@ def charts_page(guid):
         can_invite=has_invite_page_access(getattr(g, "access_blob", None)),
         # #1045 loggkontroll
         can_review_log=_shows_log_link(getattr(g, "access_blob", None)),
+        # #1059 the journal and its PDF extract in record.pdhc
+        record_url=_record_link(getattr(g, "access_blob", None), guid),
         has_blocked_sources=has_any_active_block(blocks),
         # #827 — `has_blocked_sources` is False both when the patient has
         # no block AND when we could not ask ips at all, and for five

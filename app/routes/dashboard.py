@@ -201,12 +201,14 @@ def patient_view(guid: str):
     from flask import g as _g
     from app.auth import has_invite_page_access
     from app.routes.invite import remember_opened_patient
+    from app.routes.loggkontroll import record_link as _record_link
     from app.routes.loggkontroll import shows_link as _shows_log_link
     remember_opened_patient(guid)
     return render_template(
         "dashboard.html", patient_guid=guid,
         can_invite=has_invite_page_access(getattr(_g, "access_blob", None)),
-        can_review_log=_shows_log_link(getattr(_g, "access_blob", None)))
+        can_review_log=_shows_log_link(getattr(_g, "access_blob", None)),
+        record_url=_record_link(getattr(_g, "access_blob", None), guid))
 
 
 @bp.get("/patients/<guid>")

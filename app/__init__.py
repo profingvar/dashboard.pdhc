@@ -150,6 +150,10 @@ def create_app(config=None):
     # operator decision), and the working day for "utanför arbetstid".
     for _key in ("LOGGKONTROLL_ROLES", "LOGGKONTROLL_WORKDAY"):
         app.config.setdefault(_key, os.environ.get(_key, ""))
+    # #1059: the patient views link to the journal and its PDF extract in
+    # record.pdhc. This is a LINK for the browser, not a call this service
+    # makes, so the public name is the right default; RECORD_URL="" hides it.
+    app.config.setdefault("RECORD_URL", os.environ.get("RECORD_URL", "https://record.pdhc.se"))
     # #974 (Phase 6 step 22) — the SYNTHETIC fixture layer, for tests, the
     # e2e run and local development. Opt-in only, and `install` RAISES unless
     # AUTH_MODE=off, so fixture data can never be served behind a real login.

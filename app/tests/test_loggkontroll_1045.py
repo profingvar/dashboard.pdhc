@@ -313,3 +313,19 @@ def test_every_view_is_audited_with_the_patient_and_period(c, up):
     assert patient == P1 and status == 200
     assert payload["fran"] == "2026-11-02" and payload["till"] == "2026-11-08"
     assert payload["outcome"] == "shown" and payload["n_rows"] == 6
+
+
+# --------------------------------------------------------------------------
+# #1059: the link to the journal and its PDF extract in record.pdhc (D9)
+# --------------------------------------------------------------------------
+
+def test_record_link_is_offered_to_doctor_nurse_and_su_only(c, up):
+    want = f'href="https://record.pdhc.se/patient/{P1}"'
+    assert want in _open(c).get_data(as_text=True)            # nurse at the unit
+    up.blob = _blob(affiliations=[{"affiliation_guid": "x", "role": "other_care",
+                                   "care_unit_guid": UNIT_A, "care_unit_name": "A"}])
+    assert 'id="record-action"' not in _open(c).get_data(as_text=True)
+    as_su(up)
+    assert want in _open(c).get_data(as_text=True)
+    c.application.config["RECORD_URL"] = ""                    # blank hides it
+    assert 'id="record-action"' not in _open(c).get_data(as_text=True)

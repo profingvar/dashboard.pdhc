@@ -15,6 +15,11 @@
      style="display:inline-flex;align-items:center;min-height:44px;"
      href="{{ url_for('loggkontroll.page', guid=patient_guid) }}">Loggkontroll</a></p>
   {% endif %}
+  {% if record_url %}
+  <p style="margin-top:0.5rem;"><a class="btn" id="record-action" lang="sv"
+     style="display:inline-flex;align-items:center;min-height:44px;"
+     href="{{ record_url }}">Journal och utdrag</a></p>
+  {% endif %}
 </div>
 
 {% if has_blocked_sources %}

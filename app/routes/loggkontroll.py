@@ -108,6 +108,25 @@ def shows_link(blob: dict | None) -> bool:
         for a in blob.get("affiliations") or [])
 
 
+#: D9 (#1052): who may take a record extract. record.pdhc checks the
+#: patient's unit itself; this only decides whether the button is shown.
+RECORD_ROLES = frozenset({"doctor", "nurse"})
+
+
+def record_link(blob: dict | None, guid: str) -> str:
+    """The record.pdhc journal URL for this patient, or "" when the viewer
+    is neither an SU nor a doctor/nurse anywhere, or RECORD_URL is blank."""
+    base = str(current_app.config.get("RECORD_URL") or "").rstrip("/")
+    blob = blob if isinstance(blob, dict) else {}
+    if not base:
+        return ""
+    ok = bool(blob.get("is_su_admin")) or (
+        blob.get("user_type") == "professional" and any(
+            isinstance(a, dict) and str(a.get("role") or "").lower() in RECORD_ROLES
+            for a in blob.get("affiliations") or []))
+    return f"{base}/patient/{guid}" if ok else ""
+
+
 REFUSALS = {
     "not_professional": "Loggkontroll görs av vårdpersonal med uppdrag att granska loggar.",
     "su_only": ("Loggkontroll görs i dag av systemadministratör (SU). Verksamheten har "
