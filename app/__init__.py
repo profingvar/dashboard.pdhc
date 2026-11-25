@@ -129,6 +129,22 @@ def create_app(config=None):
         "IPS_BASE_URL",
         eps_env("BASE_URL", ""),
     )
+    # 2026-11-25: eps key scoped `blocks:read`, used ONLY for the spärr read
+    # (ips_client.fetch_active_blocks). Unset = the read goes out with the
+    # user's bearer as before, which eps refuses for anyone without an eps
+    # account; the data views then answer 503 rather than show everything.
+    app.config.setdefault("EPS_BLOCKS_API_KEY", os.environ.get("EPS_BLOCKS_API_KEY", ""))
+
+    from app.services.ips_client import IpsUnreachable as _IpsUnreachable
+
+    @app.errorhandler(_IpsUnreachable)
+    def _sparr_undetermined(exc):
+        # Fail closed: no spärr answer, no clinical points.
+        current_app_logger = app.logger
+        current_app_logger.warning("sparr undetermined, refusing: %s", exc)
+        from flask import jsonify as _j
+        return _j(error="sparr_undetermined",
+                  message="Spärrkontrollen kunde inte göras, så inga värden visas. Försök igen om en stund."), 503
     # #982 — the same shape as the #827 comment above, on three more
     # variables. The patient dashboard's clients for plan.pdhc,
     # request.pdhc and icd11.pdhc each resolve config-then-environment, so

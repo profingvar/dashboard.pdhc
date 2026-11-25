@@ -131,7 +131,7 @@ def _apply_sparr(guid: str, points: list[dict]) -> tuple[list[dict], bool]:
 
     Returns ``(kept_points, has_blocked_sources)`` — the boolean drives the
     PDL Ch 4 §4 ¶3 metadata-only banner."""
-    blocks = get_active_blocks(guid)
+    blocks = get_active_blocks(guid, strict=True)  # fail closed (2026-11-25)
     blocked = blocked_clinic_ids(blocks)
     if blocked:
         if current_app.config.get("SPARR_LIFT_ENABLED"):

@@ -101,7 +101,7 @@ def test_series_proxied_and_code_window_forwarded(monkeypatch):
          "value": 80.0, "unit": "kg", "org_guid": "org-a"},
     ])
     monkeypatch.setattr(charts, "build_client", lambda: fake)
-    monkeypatch.setattr(charts, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(charts, "get_active_blocks", lambda g, **kw: [])
     r = app.test_client().get(
         "/api/v1/patient/pat-1/series?code=sys|weight&from=2026-01-01T00:00:00Z",
         headers={"X-Admin-Read-Reason": "unit-test attest"})
@@ -121,7 +121,7 @@ def test_series_sparr_drops_blocked_clinic(monkeypatch):
     ])
     monkeypatch.setattr(charts, "build_client", lambda: fake)
     monkeypatch.setattr(charts, "get_active_blocks",
-                        lambda g: [_block("org-blocked")])
+                        lambda g, **kw: [_block("org-blocked")])
     r = app.test_client().get("/api/v1/patient/pat-1/series",
                               headers={"X-Admin-Read-Reason": "unit-test attest"})
     body = r.get_json()
@@ -132,7 +132,7 @@ def test_series_sparr_drops_blocked_clinic(monkeypatch):
 def test_charts_page_renders(monkeypatch):
     app = _app()
     monkeypatch.setattr(charts, "build_client", lambda: _FakeClient())
-    monkeypatch.setattr(charts, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(charts, "get_active_blocks", lambda g, **kw: [])
     r = app.test_client().get("/patient/pat-1/charts")
     assert r.status_code == 200
     html = r.get_data(as_text=True)
@@ -145,6 +145,45 @@ def test_charts_page_sparr_banner(monkeypatch):
     app = _app()
     monkeypatch.setattr(charts, "build_client", lambda: _FakeClient())
     monkeypatch.setattr(charts, "get_active_blocks",
-                        lambda g: [_block("org-x")])
+                        lambda g, **kw: [_block("org-x")])
     r = app.test_client().get("/patient/pat-1/charts")
     assert "spärr" in r.get_data(as_text=True).lower()
+
+
+def test_series_fails_closed_when_the_sparr_question_cannot_be_answered(monkeypatch):
+    """2026-11-25: eps refused the spärr read (401) for every professional
+    without an eps account, and the series then showed every point. Now an
+    unanswered spärr question is a 503 and no points leave the service."""
+    import requests
+    from app.services import ips_client as ic
+    app = _app()
+    app.config["IPS_BASE_URL"] = "http://eps.invalid"
+    fake = _FakeClient(series=[{"code": "c", "at": "2026-01-01T00:00:00Z", "value": 1,
+                                "org_guid": "org-x"}])
+    monkeypatch.setattr(charts, "build_client", lambda: fake)
+
+    class R:
+        status_code = 401
+    monkeypatch.setattr(ic.requests, "get", lambda *a, **k: R())
+    r = app.test_client().get("/api/v1/patient/pat-503/series?code=c",
+                              headers={"X-Admin-Read-Reason": "unit-test attest"})
+    assert r.status_code == 503, r.get_data(as_text=True)
+    assert r.get_json()["error"] == "sparr_undetermined"
+    assert "points" not in r.get_json()
+
+
+def test_the_sparr_read_uses_the_scoped_eps_key_not_the_bearer(monkeypatch):
+    from app.services import ips_client as ic
+    seen = {}
+
+    class R:
+        status_code = 200
+        def json(self): return {"items": [], "blocks": []}
+    def get(url, params=None, headers=None, timeout=None):
+        seen.update(headers or {}); return R()
+    monkeypatch.setattr(ic.requests, "get", get)
+    app = _app()
+    with app.test_request_context():
+        c = ic.IpsClient(token="user-bearer", base_url="http://eps.invalid", blocks_key="scoped-key")
+        assert c.fetch_active_blocks("p", strict=True) == []
+    assert seen["Authorization"] == "ApiKey scoped-key"

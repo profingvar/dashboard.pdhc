@@ -177,7 +177,9 @@ def series(guid):
     #    indispensable_care lift on its clinic covers its concept (parsed from
     #    code_canonical) AND its date; non-parseable code stays hidden. Each
     #    read that exposes lifted data is specially audited (Q4).
-    blocks = get_active_blocks(guid)
+    # FAIL CLOSED (2026-11-25): a spärr question that cannot be answered
+    # refuses the points (503) instead of showing them all.
+    blocks = get_active_blocks(guid, strict=True)
     blocked = blocked_clinic_ids(blocks)
     if blocked:
         if current_app.config.get("SPARR_LIFT_ENABLED"):

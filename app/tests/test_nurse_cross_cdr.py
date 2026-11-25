@@ -42,7 +42,7 @@ def _fake(patient_in, obs_by_cdr, calls=None):
 
 def test_summary_shows_values_held_in_a_cdr_other_than_the_owner(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     monkeypatch.setattr(nurse, "fanout", _fake({"cdr1"}, {
         "cdr2": [_obs_entry(concept=CGM_CONCEPT, value=7.1, at="2026-11-17T08:00:00Z")]}))
     body = app.test_client().get(f"/api/nurse/patient/{_PID}").get_json()
@@ -53,7 +53,7 @@ def test_summary_shows_values_held_in_a_cdr_other_than_the_owner(monkeypatch):
 
 def test_summary_without_any_patient_resource_but_with_observations(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     monkeypatch.setattr(nurse, "fanout", _fake(set(), {
         "cdr2": [_obs_entry(concept=CGM_CONCEPT, value=8.0)]}))
     r = app.test_client().get(f"/api/nurse/patient/{_PID}")
@@ -67,14 +67,14 @@ def test_summary_without_any_patient_resource_but_with_observations(monkeypatch)
 
 def test_summary_still_404_with_no_patient_and_no_visible_observation(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     monkeypatch.setattr(nurse, "fanout", _fake(set(), {}))
     assert app.test_client().get(f"/api/nurse/patient/{_PID}").status_code == 404
 
 
 def test_agp_asks_for_every_cgm_code_and_merges_per_cdr(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     calls = []
     obs = [_obs_entry(concept=CGM_CONCEPT, value=v, at=f"2026-11-1{i}T08:00:00Z")
            for i, v in enumerate([6.0, 7.0, 8.0], start=1)]
@@ -89,7 +89,7 @@ def test_agp_asks_for_every_cgm_code_and_merges_per_cdr(monkeypatch):
 
 def test_a_cdr_failing_one_code_is_reported_failed(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     n = {"i": 0}
 
     def fake(*a, **k):
@@ -111,7 +111,7 @@ def test_nurse_cgm_codes_override(monkeypatch):
 
 def test_summary_names_values_that_arrive_without_a_display(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     e = _obs_entry(concept=CGM_CONCEPT, value=7.0)
     del e["resource"]["code"]["coding"][0]["display"]
     monkeypatch.setattr(nurse, "fanout", _fake(set(), {"cdr2": [e]}))
@@ -127,7 +127,7 @@ def test_summary_names_values_that_arrive_without_a_display(monkeypatch):
 
 def test_summary_still_renders_when_plan_cannot_name(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     e = _obs_entry(concept=CGM_CONCEPT, value=7.0)
     del e["resource"]["code"]["coding"][0]["display"]
     monkeypatch.setattr(nurse, "fanout", _fake(set(), {"cdr2": [e]}))

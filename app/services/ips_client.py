@@ -115,9 +115,16 @@ class IpsClient:
         service_key: str | None = None,
         base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        blocks_key: str | None = None,
     ):
         self.token = token
         self.service_key = service_key
+        # eps key scoped `blocks:read` (eps #1047). eps answers the user's
+        # bearer only when the user also has an eps account, which almost no
+        # professional has: the read was 401 and the views showed everything
+        # (found 2026-11-25). The scoped key also gets the UNREDACTED list,
+        # which the clinic filter needs (source_scope_id).
+        self.blocks_key = blocks_key
         self.base_url = (base_url or resolve_base_url()).rstrip("/")
         self.timeout = timeout
 
@@ -128,6 +135,14 @@ class IpsClient:
             h["Authorization"] = f"Bearer {self.token}"
         if self.service_key:
             h["X-Service-Key"] = self.service_key
+        h.update(outbound_session_headers())
+        return h
+
+    def _blocks_headers(self) -> dict:
+        if not self.blocks_key:
+            return self._headers()
+        from app.services.session_headers import outbound_session_headers
+        h = {"Accept": "application/json", "Authorization": f"ApiKey {self.blocks_key}"}
         h.update(outbound_session_headers())
         return h
 
@@ -161,7 +176,7 @@ class IpsClient:
         try:
             r = requests.get(
                 url, params={"active": "true"},
-                headers=self._headers(), timeout=self.timeout,
+                headers=self._blocks_headers(), timeout=self.timeout,
             )
         except requests.RequestException as exc:
             if strict:
@@ -416,6 +431,7 @@ def _default_client() -> IpsClient:
         token=token,
         service_key=current_app.config.get("DASHBOARD_PDHC_SERVICE_KEY") or None,
         base_url=current_app.config.get("IPS_BASE_URL") or None,
+        blocks_key=current_app.config.get("EPS_BLOCKS_API_KEY") or None,
     )
 
 

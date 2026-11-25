@@ -82,7 +82,7 @@ def _block(scope=_ORG, *, lift_kind=None, lift_concepts=None,
 
 def test_variable_returns_points(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     bundle = {"entry": [_obs_entry(value=6.0, at="2026-06-01T08:00:00Z"),
                         _obs_entry(value=7.0, at="2026-06-02T08:00:00Z")]}
     monkeypatch.setattr(nurse, "fanout", lambda *a, **k: _resp([_fr(bundle)]))
@@ -97,7 +97,7 @@ def test_variable_returns_points(monkeypatch):
 
 def test_variable_coarse_sparr_hides_blocked(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [_block(_ORG)])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [_block(_ORG)])
     bundle = {"entry": [_obs_entry(org=_ORG), _obs_entry(org="other-clinic")]}
     monkeypatch.setattr(nurse, "fanout", lambda *a, **k: _resp([_fr(bundle)]))
     body = app.test_client().get(
@@ -112,7 +112,7 @@ def test_variable_lift_exposes_covered_concept(monkeypatch):
     app.config["SPARR_LIFT_ENABLED"] = True
     monkeypatch.setattr(
         nurse, "get_active_blocks",
-        lambda g: [_block(_ORG, lift_kind="indispensable_care",
+        lambda g, **kw: [_block(_ORG, lift_kind="indispensable_care",
                           lift_concepts=["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
                           lift_from="2026-01-01", lift_until="2026-12-31")],
     )
@@ -129,7 +129,7 @@ def test_variable_lift_exposes_covered_concept(monkeypatch):
 
 def test_summary_owner_and_latest_values(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     patient_body = {"resourceType": "Patient", "id": _PID}
     everything = {"entry": [
         _obs_entry(value=5.5, at="2026-06-01T08:00:00Z"),
@@ -161,7 +161,7 @@ def test_summary_owner_and_latest_values(monkeypatch):
 
 def test_summary_404_when_no_owner(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [])
     monkeypatch.setattr(nurse, "fanout",
                         lambda *a, **k: _resp([_fr(None, ok=False)]))
     r = app.test_client().get(f"/api/nurse/patient/{_PID}")
@@ -170,7 +170,7 @@ def test_summary_404_when_no_owner(monkeypatch):
 
 def test_summary_sparr_hides_blocked_obs(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [_block(_ORG)])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [_block(_ORG)])
     patient_body = {"resourceType": "Patient", "id": _PID}
     everything = {"entry": [_obs_entry(org=_ORG, value=5.5)]}
 
@@ -190,7 +190,7 @@ def test_summary_sparr_hides_blocked_obs(monkeypatch):
 
 def test_agp_sparr_drops_before_aggregation(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [_block(_ORG)])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [_block(_ORG)])
     bundle = {"resourceType": "Bundle",
               "entry": [_obs_entry(org=_ORG, value=v,
                                    at=f"2026-06-0{i}T0{i}:00:00Z")
@@ -206,7 +206,7 @@ def test_agp_sparr_drops_before_aggregation(monkeypatch):
 
 def test_events_strip_transient_key_and_hide_blocked_hypo(monkeypatch):
     app = _app()
-    monkeypatch.setattr(nurse, "get_active_blocks", lambda g: [_block(_ORG)])
+    monkeypatch.setattr(nurse, "get_active_blocks", lambda g, **kw: [_block(_ORG)])
     enc_bundle = {"entry": [{"resource": {
         "resourceType": "Encounter",
         "period": {"start": "2026-05-01T10:00:00Z", "end": "2026-05-01T11:00:00Z"},
