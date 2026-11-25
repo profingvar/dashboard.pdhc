@@ -931,3 +931,10 @@ allow an iMessage to be formed that sends the invite".
 - Needs, deployed first: cdr.pdhc (access-log endpoint), ips.pdhc (`/api/v1/audit/patients/<guid>`), request.pdhc (`/patients/<guid>/access-log`). Until then the page names each as "kunde inte hämtas".
 - Tests: `app/tests/test_loggkontroll_1045.py` (19). Suite 1068 -> 1087 passed, 13 skipped. 15 mutation controls (review gate x3, opened-patient, front door, silent failure, service key sent, flags x2, CSV x2), each fails on an assertion.
 - Deploy: code only, no migration, no dependency. New OPTIONAL env keys `LOGGKONTROLL_ROLES`, `LOGGKONTROLL_WORKDAY` (unset = SU only / 07-18).
+
+## 2026-11-25 — spärr read with a scoped eps key; data views fail closed (22ad34e)
+- eps refused the user's bearer (401) for every professional without an eps account; charts/nurse then
+  showed every point. 0 spärrar existed, so nothing was exposed.
+- rc6 (operator): eps key "dashboard.pdhc sparr read", scopes [blocks:read], as EPS_BLOCKS_API_KEY in shared/.env.
+- Verified live: the client reads Tolvan's blocks with the key and no session -> eps 200; smoke 13/13.
+- Unanswered spärr question -> 503 `sparr_undetermined`, no points. Tests fail without each change.
