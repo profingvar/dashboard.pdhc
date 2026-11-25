@@ -214,3 +214,10 @@ def test_a_blocked_point_is_the_same_404(world, monkeypatch):
     monkeypatch.setattr(dash.ips_client, "filter_blocked_points", lambda pts, blocks: ([], []))
     status, body, _ = _get(world)
     assert status == 404 and body["error"] == "not_found"
+
+
+def test_a_non_ascii_key_is_a_refusal_not_a_500(world):
+    """compare_digest raises TypeError on a non-ASCII str; bytes it is."""
+    from app.auth import _on_behalf_outcome
+    with world.app.test_request_context(PATH, headers=dict(RECORD, **{"X-Service-Key": "nyckel-åäö"})):
+        assert _on_behalf_outcome(world.app) is False

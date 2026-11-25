@@ -344,7 +344,10 @@ def _on_behalf_outcome(app):
     key = request.headers.get("X-Service-Key", "").strip()
     auth = request.headers.get("Authorization", "")
     token = auth[7:].strip() if auth.startswith("Bearer ") else ""
-    if not expected or not hmac.compare_digest(key, expected) or not token:
+    # bytes, not str: compare_digest raises TypeError on a non-ASCII str,
+    # which would turn a junk header into a 500 instead of a refusal.
+    if not expected or not token or not hmac.compare_digest(
+            key.encode("utf-8"), expected.encode("utf-8")):
         return False
     if request.method != "GET" or not request.path.startswith(prefixes):
         return False
