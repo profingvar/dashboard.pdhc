@@ -956,3 +956,29 @@ allow an iMessage to be formed that sends the invite".
 - Tests: **1126 passed** (was 1107). New `test_patientkort_fragment.py` (18). Revert control: the access decorator removed -> the gate test fails (eps was asked for a refused patient).
 - KNOWN, not fixed here: eps gates the card exactly as `euips-summary` (`require_auth`), which answers 401 for a professional without an eps users row, so most professionals would see "eps.pdhc nekade dig" -- as the EPS summary on the old card already did. Fix is in eps (both routes to `require_auth_or_care_bearer`, as #1050/#1055); operator decision.
 - Deploy order: eps first, then dashboard. Screenshots (mocked eps, synthetic) in the session scratchpad `pkdash/`.
+
+## 2026-11-26 — #1058 loggkontroll lists utlämnanden from record.pdhc (LOCAL, not deployed)
+
+**Result: 1137 passed** (was 1126; +11 in test_loggkontroll_1045.py, 4 existing
+assertions updated for the fifth source).
+
+- `services/access_log.py`: record.pdhc is a fifth log source (its read log,
+  `/api/v1/access-log/patients/<g>`), and `disclosures()` reads
+  `/api/v1/patients/<g>/disclosures?from&to` — both with the person's own
+  bearer as `Authorization: Bearer` (record accepts a bearer on JSON GETs
+  since record 47a8173). `_fetch` split into `_call` + `_failed` so both
+  share the named failure sentences; 503 now reads "kunde inte kontrollera
+  patientens vårdenhet" (record's undetermined) as 502 did.
+- Page: an "Utlämnanden" table below the log (when, who disclosed, to whom,
+  why, what, who asked), a red named line on any failure, "Inga utlämnanden
+  registrerade i perioden" only when record answered empty. CSV: one row per
+  disclosure + a failure row. Audit payload: `n_disclosures` /
+  `disclosures_failed`.
+- Mutation control: a `disclosures()` that swallows a failure into an empty
+  list makes the page lose its failure line, which the failure tests assert.
+- New config `RECORD_BASE_URL`, no default (#833): set by the operator in
+  rc11 (`plans/record_pdhc_deploy/ops/rc11_disclosure_keys.sh`).
+
+**Deploy:** after rc11 and after record (rec0005discl). Plain `--build`, no
+migration. Until record is deployed, loggkontroll names record as refusing or
+not answering; the rest of the page is unchanged.

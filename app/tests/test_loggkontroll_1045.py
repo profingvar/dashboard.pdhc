@@ -26,6 +26,7 @@ from app.tests.test_invite_1050 import (  # noqa: F401 — fixtures and fakes
 
 CDR = "https://cdr.test"
 REQ = "https://request.test"
+REC = "https://record.test"
 PERIOD = "fran=2026-11-02&till=2026-11-08"
 SU = _blob(units=(), is_su_admin=True)
 COLLEAGUE = "eeeeeeee-1045-4000-8000-00000000000e"
@@ -38,6 +39,43 @@ def _item(at, action, **kw):
             "session_id": None, "actor_units": None, "basis": None, "detail": {}}
     base.update(kw)
     return base
+
+
+def _disclosure(at, source, purpose, recipient, requester=None, refs=0, described=None):
+    """An AuditEvent `disclose` as record.pdhc serves it (#1058; written by
+    hand to record's documented shape, nothing imported from record)."""
+    svc = {"identifier": {"system": "https://pdhc.se/fhir/service", "value": source},
+           "display": source}
+    agents = [{"type": {"coding": [{"system": "http://dicom.nema.org/resources/ontology/DCM",
+                                    "code": "110153"}]}, "who": svc, "requestor": False},
+              {"type": {"coding": [{"system": "http://dicom.nema.org/resources/ontology/DCM",
+                                    "code": "110152"}]}, "who": {"display": recipient},
+               "requestor": False}]
+    if requester:
+        agents.append({"type": {"coding": [{
+            "system": "http://terminology.hl7.org/CodeSystem/extra-security-role-type",
+            "code": "humanuser"}]}, "who": {"display": requester}, "requestor": True})
+    role4 = {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/object-role",
+                         "code": "4"}]}
+    ents = [{"what": {"reference": f"Observation/o{i}/_history/1"}, "role": role4}
+            for i in range(refs)]
+    if described:
+        ents.append({"what": {"display": described[0]}, "role": role4, "detail": [
+            {"type": {"text": "description"}, "valueString": described[0]},
+            {"type": {"text": "count"}, "valueInteger": described[1]}]})
+    return {"resourceType": "AuditEvent", "id": f"d-{source}-{at}", "recorded": at,
+            "code": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/"
+                                           "iso-21089-lifecycle", "code": "disclose"}]},
+            "outcome": {"code": {"system": "http://terminology.hl7.org/CodeSystem/issue-severity",
+                                 "code": "success"}},
+            "authorization": [{"coding": [{"system": "http://terminology.hl7.org/CodeSystem/"
+                                                     "v3-ActReason", "code": purpose}]}],
+            "source": {"observer": svc}, "agent": agents,
+            "entity": [{"what": {"identifier": {"system": "https://eps.pdhc.se/fhir/Patient",
+                                                "value": P1}},
+                        "role": {"coding": [{"system": "http://terminology.hl7.org/"
+                                                       "CodeSystem/object-role", "code": "1"}]}}]
+            + ents}
 
 
 class LogFake(Fake):
@@ -55,7 +93,14 @@ class LogFake(Fake):
                     _item("2026-11-05T09:00:00+00:00", "=HYPERLINK(\"x\")",
                           basis="su_admin")],
         }
-        self.log_answer = {}        # "cdr"/"eps"/"req" -> _Resp or Exception
+        self.logs["rec"] = []
+        #: record's disclosures (#1058), the Bundle record serves
+        self.disclosures = [_disclosure("2026-11-03T10:00:00Z", "rosetta.pdhc", "TREAT",
+                                        "openEHR-systemet (syntetiskt)", refs=2),
+                            _disclosure("2026-11-06T13:00:00Z", "record.pdhc", "PATRQT",
+                                        "Patienten", requester="Doktor Test",
+                                        described=("Journalutdrag (PDF)", 17))]
+        self.log_answer = {}        # "cdr"/"eps"/"req"/"rec"/"recd" -> _Resp or Exception
         self.log_calls = []         # (which, headers, params)
 
     def get(self, url, headers=None, params=None, timeout=None, **kw):
@@ -67,6 +112,10 @@ class LogFake(Fake):
             which, ok = "eps", headers.get("Authorization") == f"Bearer {TOKEN}"
         elif re.fullmatch(rf"{REQ}/api/v1/patients/[^/]+/access-log", url):
             which, ok = "req", headers.get("X-API-Key") == TOKEN
+        elif re.fullmatch(rf"{REC}/api/v1/access-log/patients/[^/]+", url):
+            which, ok = "rec", headers.get("Authorization") == f"Bearer {TOKEN}"
+        elif re.fullmatch(rf"{REC}/api/v1/patients/[^/]+/disclosures", url):
+            which, ok = "recd", headers.get("Authorization") == f"Bearer {TOKEN}"
         if which is None:
             return super().get(url, headers=headers, params=params, timeout=timeout, **kw)
         self.log_calls.append((which, dict(headers), dict(params or {})))
@@ -79,6 +128,10 @@ class LogFake(Fake):
             raise ans
         if ans is not None:
             return ans
+        if which == "recd":
+            return _Resp(200, {"resourceType": "Bundle", "type": "searchset",
+                               "total": len(self.disclosures),
+                               "entry": [{"resource": d} for d in self.disclosures]})
         return _Resp(200, {"service": which, "items": self.logs[which], "truncated": False})
 
 
@@ -92,7 +145,8 @@ def up(monkeypatch):
 
 @pytest.fixture
 def c(app, up):
-    app.config.update(CDR1_BASE_URL=CDR, REQUEST_BASE_URL=REQ, LOGGKONTROLL_ROLES="")
+    app.config.update(CDR1_BASE_URL=CDR, REQUEST_BASE_URL=REQ, RECORD_BASE_URL=REC,
+                      LOGGKONTROLL_ROLES="")
     with app.app_context():
         db.session.add(DashboardAudit(
             user_guid=COLLEAGUE, user_org_guids=[UNIT_A], route="GET /patient/<guid>/charts",
@@ -136,7 +190,7 @@ def test_su_sees_every_service_merged_in_time_order(c, up):
     services = [s for s, _ in _rows(html)]
     assert services == ["cdr.pdhc", "eps.pdhc", "request.pdhc", "request.pdhc",
                         "dashboard.pdhc", "cdr.pdhc"]
-    assert html.count('data-ok="1"') == 4 and 'data-ok="0"' not in html
+    assert html.count('data-ok="1"') == 5 and 'data-ok="0"' not in html
     assert "kollega@example.test" in html
     assert "Skäl: akut" in html
 
@@ -145,7 +199,7 @@ def test_each_service_is_asked_with_the_persons_bearer_and_the_period(c, up):
     as_su(up)
     _open(c)
     c.get(L())
-    assert sorted(w for w, _, _ in up.log_calls) == ["cdr", "eps", "req"]
+    assert sorted(w for w, _, _ in up.log_calls) == ["cdr", "eps", "rec", "recd", "req"]
     for which, headers, params in up.log_calls:
         assert "X-Service-Key" not in headers and "X-Source-Service" not in headers
         # Stockholm days -> UTC instants, end exclusive (CET = UTC+1)
@@ -230,7 +284,7 @@ def test_a_named_role_at_the_patients_unit_may_review(c, up):
     c.application.config["LOGGKONTROLL_ROLES"] = "nurse, loggranskare"
     _open(c)
     assert c.get(L()).status_code == 200
-    assert len(up.log_calls) == 3
+    assert len(up.log_calls) == 5          # cdr, eps, request, record log + disclosures
 
 
 def test_a_named_role_at_another_unit_may_not(c, up):
@@ -300,7 +354,9 @@ def test_csv_export_carries_failures_and_neutralises_formulas(c, up):
                            delimiter=";"))
     assert rows[0][:3] == ["tid (svensk tid)", "tjänst", "användare"]
     assert rows[1][1] == "eps.pdhc" and rows[1][5] == "KUNDE INTE HÄMTAS"
-    assert len(rows) == 1 + 1 + 5
+    assert len(rows) == 1 + 1 + 2 + 5           # header, eps failure, 2 utlämnanden, 5 rows
+    assert [r[5] for r in rows if r[5].startswith("utlämnande")] == [
+        "utlämnande till Patienten (PATRQT)", "utlämnande till openEHR-systemet (syntetiskt) (TREAT)"]
     assert any(row[5] == "'=HYPERLINK(\"x\")" for row in rows)
     assert _audit(c.application, "loggkontroll_export")[-1][0] == P1
 
@@ -329,3 +385,98 @@ def test_record_link_is_offered_to_doctor_nurse_and_su_only(c, up):
     assert want in _open(c).get_data(as_text=True)
     c.application.config["RECORD_URL"] = ""                    # blank hides it
     assert 'id="record-action"' not in _open(c).get_data(as_text=True)
+
+
+# --------------------------------------------------------------------------
+# #1058: utlämnanden from record.pdhc
+# --------------------------------------------------------------------------
+
+def _disclosure_rows(html):
+    return re.findall(r'<tr data-disclosure="[^"]*" data-source="([^"]+)">(.*?)</tr>', html, re.S)
+
+
+def test_disclosures_are_listed_newest_first_with_who_what_why_to_whom(c, up):
+    as_su(up)
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    rows = _disclosure_rows(html)
+    assert [s for s, _ in rows] == ["record.pdhc", "rosetta.pdhc"]
+    first, second = rows[0][1], rows[1][1]
+    for want in ("2026-11-06 14:00:00", "Journalen (utdrag)", "Patienten",
+                 "Patientens begäran", "PATRQT", "17 poster", "Journalutdrag (PDF)", "Doktor Test"):
+        assert want in first, want
+    for want in ("rosetta (openEHR)", "openEHR-systemet (syntetiskt)", "Vård och behandling",
+                 "2 poster"):
+        assert want in second, want
+    # asked with the person's own bearer and the period, never a service key
+    (_, headers, params), = [x for x in up.log_calls if x[0] == "recd"]
+    assert headers["Authorization"] == f"Bearer {TOKEN}" and "X-Service-Key" not in headers
+    assert params["from"] == "2026-11-01T23:00:00Z" and params["to"] == "2026-11-08T23:00:00Z"
+    assert _audit(c.application, "loggkontroll")[-1][2]["n_disclosures"] == 2
+
+
+def test_record_log_rows_are_merged_like_the_others(c, up):
+    as_su(up)
+    up.logs["rec"] = [_item("2026-11-07T09:00:00+00:00", "open_patient", basis="same_unit")]
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    assert "record.pdhc" in [s for s, _ in _rows(html)]
+
+
+@pytest.mark.parametrize("answer,expect", [
+    (requests.ConnectionError("down"), "tjänsten svarade inte"),
+    (_Resp(403, {"error": "wrong_role"}), "ger dig inte tillgång"),
+    (_Resp(503, {"error": "undetermined"}), "kunde inte kontrollera patientens vårdenhet"),
+    (_Resp(401, {"error": "unauthenticated"}), "godtog inte din inloggning"),
+    (_Resp(200, {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient"}}]}),
+     "fel form"),
+    (_Resp(200, {"items": []}), "fel form"),
+])
+def test_a_disclosure_failure_is_named_never_an_empty_list(c, up, answer, expect):
+    as_su(up)
+    up.log_answer["recd"] = answer
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    assert 'id="lk-disclosures-failed"' in html and expect in html
+    assert "Kunde inte hämtas från Journalen (record)" in html
+    assert 'id="lk-disclosures-empty"' not in html and not _disclosure_rows(html)
+    assert _audit(c.application, "loggkontroll")[-1][2]["disclosures_failed"] is True
+    csv_rows = list(csv.reader(io.StringIO(
+        c.get(f"/loggkontroll/{P1}/csv?{PERIOD}").get_data(as_text=True).lstrip("\ufeff")),
+        delimiter=";"))
+    assert any(r[5] == "UTLÄMNANDEN KUNDE INTE HÄMTAS" for r in csv_rows)
+
+
+def test_record_unconfigured_is_named(c, up):
+    as_su(up)
+    c.application.config["RECORD_BASE_URL"] = ""
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    assert 'id="lk-disclosures-failed"' in html and "RECORD_BASE_URL saknas" in html
+    assert 'data-service="record.pdhc" data-ok="0"' in html
+    assert not [x for x in up.log_calls if x[0] in ("rec", "recd")]
+
+
+def test_no_disclosures_says_so(c, up):
+    as_su(up)
+    up.disclosures = []
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    assert 'id="lk-disclosures-empty"' in html and 'id="lk-disclosures-failed"' not in html
+
+
+def test_mutation_control_a_swallowed_failure_is_caught(c, up, monkeypatch):
+    """If disclosures() turned a failure into an empty answer, the failure
+    test above would fail on its assertion: prove it."""
+    from app.services import access_log as al
+    real = al.disclosures
+
+    def swallow(*a, **k):
+        res = real(*a, **k)
+        return al.DisclosureResult(True, items=[]) if not res.ok else res
+    monkeypatch.setattr(al, "disclosures", swallow)
+    as_su(up)
+    up.log_answer["recd"] = requests.ConnectionError("down")
+    _open(c)
+    html = c.get(L()).get_data(as_text=True)
+    assert 'id="lk-disclosures-failed"' not in html   # the failure test would catch this

@@ -286,6 +286,13 @@ per tjänst som inte kunde hämtas.
 | Systemadministratör | Åtkomsten gjordes med administratörsbehörighet. |
 | Utanför arbetstid | Vardagar före 07 och efter 18 samt helger (svensk tid). |
 
+**Utlämnanden.** Under loggen listas det som har lämnats ut om patienten i
+perioden: utdrag ur journalen och exporter från rosetta (openEHR), analyse och
+patientappen. Varje rad visar när, vilken tjänst som lämnade ut, till vem,
+varför, hur många poster och vem som begärde det. Listan hämtas från journalen
+(record.pdhc). Om den inte kunde hämtas står det i rött, och då är listan inte
+tom utan okänd.
+
 **Det här loggas också.** Varje gång du öppnar loggkontrollen eller laddar ner
 CSV loggas det, med patient, period och visning. Tjänsterna loggar dessutom
 själva att deras logg lästes.

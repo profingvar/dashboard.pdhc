@@ -30,6 +30,13 @@ WHO MAY REVIEW — AN OPERATOR DECISION, the safest default implemented:
   professional affiliated to the patient's unit, so this page is the
   narrower door.
 
+UTLÄMNANDEN (#1058). Below the log the page lists the patient's
+disclosures in the period, from record.pdhc (record's own extracts and the
+exports rosetta, analyse and patientapp report to it), asked with the same
+bearer and refused by record's own gate like any other read. They are
+listed apart from the log (a disclosure is not an access) and in the CSV as
+rows whose action starts "utlämnande".
+
 THE PAGE NEVER SHOWS A SILENT GAP. A service that could not be asked is
 listed by name ("Kunde inte hämtas från ...") above the table, and in the CSV
 as a row of its own.
@@ -222,6 +229,7 @@ def _prepare(guid: str, event: str):
         return ctx, None
     start, end = al.period_utc(p["fran"], p["till"])
     items, results = al.collect(canon, start, end, units)
+    ctx["disclosures"] = al.disclosures(canon, start, end)
     unusual = [i for i in items if i["unusual"]]
     if p["visa"] == "avvikande":
         shown = unusual
@@ -242,7 +250,11 @@ def _audit_ok(event: str, ctx: dict) -> None:
            visa=p["visa"], urval=p["urval"] if p["visa"] == "stickprov" else None,
            antal=p["antal"] if p["visa"] == "stickprov" else None,
            n_rows=len(ctx.get("shown") or []), basis=ctx["basis"],
-           failed=[r.service for r in ctx.get("failed") or []] or None)
+           failed=[r.service for r in ctx.get("failed") or []] or None,
+           n_disclosures=(len(ctx["disclosures"].items) if ctx.get("disclosures")
+                          and ctx["disclosures"].ok else None),
+           disclosures_failed=(True if ctx.get("disclosures") is not None
+                               and not ctx["disclosures"].ok else None))
     if ctx.get("shown") is not None:
         g._audit_n_rows = len(ctx["shown"])
 
@@ -289,6 +301,16 @@ def export_csv(guid: str):
     for r in ctx["failed"]:
         w.writerow([_cell(x) for x in ["", r.service, "", "", "", "KUNDE INTE HÄMTAS",
                                        r.error, "", "", "", ""]] + [""] * len(flag_names))
+    d = ctx["disclosures"]
+    if not d.ok:
+        w.writerow([_cell(x) for x in ["", "record.pdhc", "", "", "",
+                                       "UTLÄMNANDEN KUNDE INTE HÄMTAS", d.error, "", "", "",
+                                       ""]] + [""] * len(flag_names))
+    for u in d.items:
+        w.writerow([_cell(x) for x in [
+            u["at_local"], u["source_service"], u.get("requester"), "", "record.pdhc",
+            f"utlämnande till {u['recipient']} ({u['purpose']})", u.get("outcome"), "",
+            "", f"{u['count']} poster", ""]] + [""] * len(flag_names))
     for i in ctx["shown"]:
         f = i["flags"]
         w.writerow([_cell(x) for x in [

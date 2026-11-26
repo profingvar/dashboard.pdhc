@@ -90,6 +90,34 @@
 {% else %}
 <p class="card" id="lk-empty">Inga händelser att visa i perioden{% if ctx.failed %} från de tjänster som svarade{% endif %}.</p>
 {% endif %}
+
+<h2 id="lk-utlamnanden-rubrik">Utlämnanden</h2>
+<p class="lk-muted">Uppgifter om patienten som har lämnats ut i perioden: utdrag ur journalen och exporter
+från rosetta (openEHR), analyse och patientappen. Hämtas från journalen (record.pdhc). Nyaste först.</p>
+{% set d = ctx.disclosures %}
+{% if not d.ok %}
+<p class="lk-fail" role="alert" id="lk-disclosures-failed">{{ d.error }} Utlämnandena kan därför inte visas.</p>
+{% elif d.items %}
+<div class="lk-table-wrap">
+<table class="lk-table" id="lk-disclosures">
+  <thead><tr><th scope="col">Tid</th><th scope="col">Utlämnat av</th><th scope="col">Till vem</th><th scope="col">Varför</th><th scope="col">Vad</th><th scope="col">Begärt av</th></tr></thead>
+  <tbody>
+  {% for u in d.items %}
+  <tr data-disclosure="{{ u.id }}" data-source="{{ u.source_service }}">
+    <td>{{ u.at_local }}</td>
+    <td>{{ u.source_label }}</td>
+    <td>{{ u.recipient or 'okänd' }}</td>
+    <td>{{ u.purpose_label }}{% if u.purpose %} <span class="lk-muted">({{ u.purpose }})</span>{% endif %}</td>
+    <td>{{ u.count }} {{ 'post' if u.count == 1 else 'poster' }}{% for t in u.what %}<br><span class="lk-muted">{{ t }}</span>{% endfor %}{% if u.outcome and u.outcome != 'success' %}<br><span class="lk-flag">utfall: {{ u.outcome }}</span>{% endif %}</td>
+    <td>{{ u.requester or '–' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="card" id="lk-disclosures-empty">Inga utlämnanden registrerade i perioden.</p>
+{% endif %}
 {% endif %}
 <p style="margin-top:1rem;"><a class="rv-btn" href="{{ url_for('charts.charts_page', guid=ctx.patient_guid) }}">Tillbaka till patienten</a></p>
 </div>

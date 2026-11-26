@@ -1,3 +1,7 @@
+2026-11-26 #1058: loggkontroll lists utlämnanden (and record's read log) from
+record.pdhc — local, tested (1137 passed), NOT deployed. Deploy after rc11
+(RECORD_BASE_URL, operator) and record. progress.md "#1058".
+
 Current focus: patient dashboard, Gate 0 passed and Phase 1 foundations in.
 
 (This file was stale from 2026-07-15 and described #462 PRs as unmerged. They

@@ -9,8 +9,16 @@ ITS log of ONE patient and merges the answers into one chronological list.
     cdr.pdhc (cdr1)  GET {CDR1_BASE_URL}/api/v1/access-log/patients/<guid>
     eps.pdhc         GET {IPS_BASE_URL}/api/v1/audit/patients/<guid>
     request.pdhc     GET {REQUEST_BASE_URL}/api/v1/patients/<guid>/access-log
+    record.pdhc      GET {RECORD_BASE_URL}/api/v1/access-log/patients/<guid>   (#1058)
 
-AUTH IS THE PROFESSIONAL'S OWN SSO BEARER on all three, and nothing else
+and, as a list of its own, the patient's UTLÄMNANDEN (disclosures, #1058):
+
+    record.pdhc      GET {RECORD_BASE_URL}/api/v1/patients/<guid>/disclosures
+                     a FHIR R5 Bundle of AuditEvent `disclose` (IHE BALP
+                     shaped) — record's own extracts and every export that
+                     rosetta, analyse and patientapp reported to record
+
+AUTH IS THE PROFESSIONAL'S OWN SSO BEARER on all of them, and nothing else
 (the cdr_review_client / invite_client rule): each service decides for itself
 whether this person may read this patient's log (SU, or a professional
 affiliated to the patient's care unit) and logs that read. No service key is
@@ -67,6 +75,7 @@ SERVICE_LABELS = {
     "cdr.pdhc": "Journaldatabasen (cdr1)",
     "eps.pdhc": "Patientregistret (eps)",
     "request.pdhc": "Beställningar (request)",
+    "record.pdhc": "Journalen (record)",
 }
 
 
@@ -128,8 +137,9 @@ def _session_headers() -> dict:
         return {}
 
 
-def _fetch(service: str, base_key: str, path: str, auth_header: str,
-           start: datetime, end: datetime) -> SourceResult:
+def _call(service: str, base_key: str, path: str, auth_header: str,
+          start: datetime, end: datetime):
+    """(response, body) or a failed SourceResult naming why."""
     name = SERVICE_LABELS.get(service, service)
     base = (current_app.config.get(base_key) or "").strip().rstrip("/")
     if not base:
@@ -154,23 +164,37 @@ def _fetch(service: str, base_key: str, path: str, auth_header: str,
         body = r.json()
     except ValueError:
         body = None
+    return r, body
+
+
+def _failed(service: str, status: int) -> SourceResult:
+    name = SERVICE_LABELS.get(service, service)
+    if status in (403, 404):
+        why = ("tjänsten ger dig inte tillgång till patientens logg där "
+               "(du är inte knuten till patientens vårdenhet, eller tjänsten "
+               "känner inte patienten)")
+    elif status == 401:
+        why = "tjänsten godtog inte din inloggning"
+    elif status in (502, 503):
+        why = "tjänsten kunde inte kontrollera patientens vårdenhet"
+    elif status == 200:
+        why = "svaret hade fel form"
+    else:
+        why = f"tjänsten svarade med fel ({status})"
+    return SourceResult(service, False, error=f"Kunde inte hämtas från {name}: {why}.")
+
+
+def _fetch(service: str, base_key: str, path: str, auth_header: str,
+           start: datetime, end: datetime) -> SourceResult:
+    got = _call(service, base_key, path, auth_header, start, end)
+    if isinstance(got, SourceResult):
+        return got
+    r, body = got
     if r.status_code == 200 and isinstance(body, dict) and isinstance(body.get("items"), list):
         items = [_clean(service, i) for i in body["items"] if isinstance(i, dict)]
         return SourceResult(service, True, items=items,
                             truncated=bool(body.get("truncated")))
-    if r.status_code in (403, 404):
-        why = ("tjänsten ger dig inte tillgång till patientens logg där "
-               "(du är inte knuten till patientens vårdenhet, eller tjänsten "
-               "känner inte patienten)")
-    elif r.status_code == 401:
-        why = "tjänsten godtog inte din inloggning"
-    elif r.status_code == 502:
-        why = "tjänsten kunde inte kontrollera patientens vårdenhet"
-    elif r.status_code == 200:
-        why = "svaret hade fel form"
-    else:
-        why = f"tjänsten svarade med fel ({r.status_code})"
-    return SourceResult(service, False, error=f"Kunde inte hämtas från {name}: {why}.")
+    return _failed(service, r.status_code)
 
 
 def _clean(service: str, item: dict) -> dict:
@@ -198,6 +222,14 @@ def from_eps(patient_guid: str, start, end) -> SourceResult:
 def from_request(patient_guid: str, start, end) -> SourceResult:
     return _fetch("request.pdhc", "REQUEST_BASE_URL",
                   f"/api/v1/patients/{patient_guid}/access-log", "X-API-Key", start, end)
+
+
+def from_record(patient_guid: str, start, end) -> SourceResult:
+    """record.pdhc's own read log (#1058). record admits SU or a läkare /
+    sjuksköterska at the patient's unit (D9) — a log reviewer in another role
+    is told so by name, like any other refusing service."""
+    return _fetch("record.pdhc", "RECORD_BASE_URL",
+                  f"/api/v1/access-log/patients/{patient_guid}", "Authorization", start, end)
 
 
 def from_dashboard(patient_guid: str, start, end) -> SourceResult:
@@ -244,7 +276,8 @@ def from_dashboard(patient_guid: str, start, end) -> SourceResult:
 
 
 #: The sources, in the order their failures are listed.
-SOURCES: tuple[Callable, ...] = (from_dashboard, from_cdr1, from_eps, from_request)
+SOURCES: tuple[Callable, ...] = (from_dashboard, from_cdr1, from_eps, from_request,
+                                 from_record)
 
 
 # --------------------------------------------------------------------------
@@ -329,3 +362,109 @@ def sample(items: list[dict], n: int, seed: int) -> list[dict]:
         return list(items)
     picked = set(random.Random(seed).sample(range(len(items)), n))
     return [it for k, it in enumerate(items) if k in picked]
+
+
+# --------------------------------------------------------------------------
+# utlämnanden (#1058)
+# --------------------------------------------------------------------------
+
+#: What the page calls each disclosing service.
+DISCLOSER_SV = {"record.pdhc": "Journalen (utdrag)", "rosetta.pdhc": "rosetta (openEHR)",
+                "analyse.pdhc": "analyse (export)", "patientapp.pdhc": "Patientappen"}
+PURPOSE_SV = {"TREAT": "Vård och behandling", "COC": "Samordning av vård",
+              "PATRQT": "Patientens begäran", "HRESCH": "Forskning",
+              "HLEGAL": "Rättslig skyldighet / myndighetsbegäran"}
+_DCM = "http://dicom.nema.org/resources/ontology/DCM"
+_OBJECT_ROLE = "http://terminology.hl7.org/CodeSystem/object-role"
+_HUMANUSER = ("http://terminology.hl7.org/CodeSystem/extra-security-role-type", "humanuser")
+
+
+def _has(cc, system: str, code: str) -> bool:
+    return isinstance(cc, dict) and any(
+        isinstance(c, dict) and c.get("system") == system and c.get("code") == code
+        for c in cc.get("coding") or [])
+
+
+def disclosure_item(ae: dict) -> dict | None:
+    """One AuditEvent `disclose` from record as a row: when, who disclosed
+    (the source service), to whom, why, what, who asked, outcome. None when
+    it is not an AuditEvent (the caller counts it as a malformed answer)."""
+    if not isinstance(ae, dict) or ae.get("resourceType") != "AuditEvent":
+        return None
+    at = parse_at(ae.get("recorded"))
+    observer = ((ae.get("source") or {}).get("observer") or {})
+    source = ((observer.get("identifier") or {}).get("value")
+              or observer.get("display") or "")
+    recipient, requester = "", None
+    for a in ae.get("agent") or []:
+        if not isinstance(a, dict):
+            continue
+        who = a.get("who") if isinstance(a.get("who"), dict) else {}
+        label = who.get("display") or (who.get("identifier") or {}).get("value")
+        if _has(a.get("type"), _DCM, "110152"):
+            recipient = label or ""
+        elif _has(a.get("type"), *_HUMANUSER):
+            requester = label
+    purposes = [c.get("code") for x in ae.get("authorization") or [] if isinstance(x, dict)
+                for c in x.get("coding") or [] if isinstance(c, dict)]
+    count, what = 0, []
+    for e in ae.get("entity") or []:
+        if not isinstance(e, dict) or not _has(e.get("role"), _OBJECT_ROLE, "4"):
+            continue
+        w = e.get("what") if isinstance(e.get("what"), dict) else {}
+        det = {str(((d.get("type") or {}).get("text")) or ""): d
+               for d in e.get("detail") or [] if isinstance(d, dict)}
+        if w.get("reference"):
+            count += 1
+        elif "count" in det:
+            try:
+                count += int(det["count"].get("valueInteger") or 0)
+            except (TypeError, ValueError):
+                pass
+        if "description" in det:
+            what.append(str(det["description"].get("valueString") or ""))
+    oc = ((ae.get("outcome") or {}).get("code") or {}).get("code")
+    return {
+        "id": ae.get("id"),
+        "at": at.isoformat() if at else None,
+        "at_local": at.astimezone(STOCKHOLM).strftime("%Y-%m-%d %H:%M:%S") if at else "",
+        "source_service": source,
+        "source_label": DISCLOSER_SV.get(source, source),
+        "recipient": recipient,
+        "purpose": purposes[0] if purposes else None,
+        "purpose_label": PURPOSE_SV.get(purposes[0], purposes[0]) if purposes else "okänt",
+        "count": count,
+        "what": what,
+        "requester": requester,
+        "outcome": oc,
+    }
+
+
+@dataclass
+class DisclosureResult:
+    ok: bool
+    items: list = field(default_factory=list)
+    #: Swedish, shown to the reviewer when ok is False.
+    error: str | None = None
+
+
+def disclosures(patient_guid: str, start, end) -> DisclosureResult:
+    """The patient's disclosures in the period, newest first, from record.
+
+    NEVER SILENT, like the log: an empty list means record answered and has
+    none in the period; any failure is a named sentence."""
+    got = _call("record.pdhc", "RECORD_BASE_URL",
+                f"/api/v1/patients/{patient_guid}/disclosures", "Authorization", start, end)
+    if isinstance(got, SourceResult):
+        return DisclosureResult(False, error=got.error)
+    r, body = got
+    if r.status_code == 200 and isinstance(body, dict) and body.get("resourceType") == "Bundle" \
+            and isinstance(body.get("entry", []), list):
+        items = [disclosure_item((e or {}).get("resource")) for e in body.get("entry") or []
+                 if isinstance(e, dict)]
+        if all(i is not None for i in items):
+            items.sort(key=lambda i: i["at"] or "", reverse=True)
+            return DisclosureResult(True, items=items)
+        return DisclosureResult(False, error=(
+            "Kunde inte hämtas från Journalen (record): svaret hade fel form."))
+    return DisclosureResult(False, error=_failed("record.pdhc", r.status_code).error)

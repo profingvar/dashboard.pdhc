@@ -414,6 +414,22 @@ Sources, each asked with the professional's OWN bearer (no service key):
 | cdr1 | `GET {CDR1_BASE_URL}/api/v1/access-log/patients/<guid>?from&to&limit` | `Authorization: Bearer` |
 | eps | `GET {IPS_BASE_URL}/api/v1/audit/patients/<guid>?from&to&limit` | `Authorization: Bearer` |
 | request | `GET {REQUEST_BASE_URL}/api/v1/patients/<guid>/access-log?from&to&limit` | `X-API-Key: <bearer>` |
+| record (#1058) | `GET {RECORD_BASE_URL}/api/v1/access-log/patients/<guid>?from&to&limit` | `Authorization: Bearer` |
+
+**Utlämnanden (#1058).** Below the log, `access_log.disclosures` asks
+`GET {RECORD_BASE_URL}/api/v1/patients/<guid>/disclosures?from&to` (same
+bearer) for a FHIR Bundle of AuditEvent `disclose` (IHE BALP-shaped, record's
+own extracts plus what rosetta, analyse and patientapp reported) and lists
+them newest first: when, who disclosed (source.observer), to whom (agent DCM
+110152), why (authorization, v3-ActReason), what (object-role 4 entities:
+references count 1 each, else the `count` detail; `description` shown), who
+asked (agent `humanuser`). Never silent: unconfigured, unreachable, refused
+(401/403/404/503) or a non-AuditEvent entry is a named failure
+(`DisclosureResult(ok=False)`), on the page and as a CSV row; the CSV also
+carries one row per disclosure (action "utlämnande till …"). record gates
+the read itself (SU or läkare/sjuksköterska at the patient's unit, D9), so a
+reviewer in another `LOGGKONTROLL_ROLES` role sees record named as refusing.
+`RECORD_BASE_URL` has no default (a call, unlike the `RECORD_URL` link).
 
 Every service answers `{"items": [...], "truncated"}` with the item keys in
 `access_log.ITEM_KEYS` (`at`, `user_guid`, `user_label`, `actor_type`,

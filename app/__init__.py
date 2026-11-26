@@ -170,6 +170,12 @@ def create_app(config=None):
     # record.pdhc. This is a LINK for the browser, not a call this service
     # makes, so the public name is the right default; RECORD_URL="" hides it.
     app.config.setdefault("RECORD_URL", os.environ.get("RECORD_URL", "https://record.pdhc.se"))
+    # #1058: the base URL dashboard CALLS record.pdhc on (loggkontroll reads
+    # record's read log and the patient's disclosures with the person's own
+    # bearer). Unlike RECORD_URL this is a call, so there is NO default:
+    # unset reads as unset and loggkontroll names record as not configured
+    # (#833). The operator sets https://record.pdhc.se (rc11).
+    app.config.setdefault("RECORD_BASE_URL", (os.environ.get("RECORD_BASE_URL") or "").strip())
     # #1056: the key record.pdhc presents when it asks for a limit verdict ON
     # BEHALF OF a professional (app/auth.ON_BEHALF_SERVICES). Unset = that
     # door admits nobody; record then shows "gränskontroll ej tillgänglig".
