@@ -1,0 +1,8 @@
+{#- dashboard.pdhc's own: what stands in the patient card's place when eps
+    cannot give it. Never an empty card: `state` is named, so "could not ask"
+    never reads as "nothing to show". Not part of the shared card files. -#}
+<div class="dash-pk-unavailable" role="status" data-pk-state="{{ state }}">
+  <p class="dash-pk-unavailable-h">Patientkortet kunde inte visas</p>
+  <p>{{ message }}</p>
+  {%- if hint %}<p class="dash-note">{{ hint }}</p>{% endif %}
+</div>

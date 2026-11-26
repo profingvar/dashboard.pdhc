@@ -1,0 +1,219 @@
+{#- Patientkort — the shared patient card.
+
+    Reads ONLY `pk`, the dict built by app/services/patientkort_view.build()
+    (its shape is documented there). Styles: static/css/patientkort.css, linked
+    by the including page. No external dependencies; the small script at the
+    end adds tap, Escape and viewport-fitting to pop-outs that already open on
+    hover and keyboard focus with CSS alone.
+
+    To port (dashboard.pdhc, record.pdhc): copy this file, patientkort.css and
+    patientkort_view.py unchanged, build `pk` from your own data, then
+    {% include "_patientkort.html" %} and link the stylesheet.
+-#}
+{%- macro pop(p) -%}
+{%- if p -%}
+<span class="pk-pop" id="{{ p.id }}" role="tooltip">
+  <span class="pk-pop-title">{{ p.title }}</span>
+  <span class="pk-pop-h">Lagras i</span>
+  <span class="pk-pop-list">
+  {%- for s in p.stored %}
+    <span class="pk-pop-row">{{ s.where }}{% if s.id %} <code class="pk-id">{{ s.id }}</code>{% else %} <em>id saknas</em>{% endif %}</span>
+  {%- endfor %}
+  </span>
+  <span class="pk-pop-h">Tillkomst</span>
+  <span class="pk-pop-list">
+  {%- for o in p.origin %}
+    <span class="pk-pop-row">{{ o.text }}<span class="pk-pop-meta">{{ o.at or 'tid: uppgift saknas i eps' }} · {{ o.who or 'vem: uppgift saknas i eps' }}</span></span>
+  {%- else %}
+    <span class="pk-pop-row pk-pop-none">Uppgift saknas i eps.</span>
+  {%- endfor %}
+  </span>
+  <span class="pk-pop-h">Historik</span>
+  <span class="pk-pop-list">
+  {%- for h in p.history %}
+    <span class="pk-pop-row">{{ h.text }}<span class="pk-pop-meta">{{ h.at or 'tid: uppgift saknas i eps' }} · {{ h.who or 'vem: uppgift saknas i eps' }}</span></span>
+  {%- else %}
+    <span class="pk-pop-row pk-pop-none">Ingen historik registrerad i eps.</span>
+  {%- endfor %}
+  {%- if p.history_more %}
+    <span class="pk-pop-row pk-pop-none">+{{ p.history_more }} äldre</span>
+  {%- endif %}
+  </span>
+</span>
+{%- endif -%}
+{%- endmacro -%}
+
+<section class="pk" aria-labelledby="pk-name" data-pk>
+  {#- Two cards (operator 2026-11-25): a narrow one on the left with the
+      patient's particulars and diagnoses, a wider one on the right with the
+      EPS summary. They stack below 60rem. #}
+  <div class="pk-card pk-side">
+  <header class="pk-head">
+    <div class="pk-ident">
+      <p class="pk-kicker">Patientkort</p>
+      <h1 class="pk-name" id="pk-name"><span class="pk-p"><button type="button" class="pk-t" aria-describedby="{{ pk.name_prov.id }}">{{ pk.name }}</button>{{ pop(pk.name_prov) }}</span></h1>
+      <dl class="pk-facts">
+        {%- for f in pk.fields %}
+        <div class="pk-fact">
+          <dt>{{ f.label }}</dt>
+          <dd><span class="pk-p"><button type="button" class="pk-t{% if f.mono %} pk-mono{% endif %}" aria-describedby="{{ f.prov.id }}">{{ f.value or '—' }}</button>{{ pop(f.prov) }}</span>
+            {%- if f.sub %} <span class="pk-sub">{{ f.sub }}</span>{% endif %}
+            {%- if f.tag %} <span class="pk-tag">{{ f.tag }}</span>{% endif %}</dd>
+        </div>
+        {%- endfor %}
+        <div class="pk-fact pk-fact--wide">
+          <dt>Vårdenhet · vårdgivare</dt>
+          <dd>
+          {%- for u in pk.units %}
+            <span class="pk-p pk-unit"><button type="button" class="pk-t" aria-describedby="{{ u.prov.id }}">{{ u.name }}{% if not u.is_own_caregiver %}<span class="pk-sub"> · {{ u.caregiver_name or 'vårdgivare okänd' }}</span>{% endif %}</button>{{ pop(u.prov) }}</span>
+          {%- else %}—{% endfor %}
+          </dd>
+        </div>
+      </dl>
+    </div>
+    {%- if pk.banners %}
+    <ul class="pk-banners" aria-label="Status">
+      {%- for b in pk.banners %}
+      <li class="pk-p"><span class="pk-banner pk-banner--{{ b.level }}">
+        {%- if b.prov %}<button type="button" class="pk-t" aria-describedby="{{ b.prov.id }}">{{ b.text }}</button>{% else %}{{ b.text }}{% endif -%}
+      </span>{{ pop(b.prov) }}</li>
+      {%- endfor %}
+    </ul>
+    {%- endif %}
+  </header>
+
+  <section class="pk-block" aria-labelledby="pk-dx-h">
+    <h2 class="pk-h" id="pk-dx-h">Diagnoser
+      <span class="pk-count">{{ pk.diagnoses | length }}</span>
+      <span class="pk-source">från patientsammanfattningen (EPS)</span></h2>
+    {%- if pk.diagnoses_state == 'unavailable' %}
+    <p class="pk-empty">Diagnoserna kunde inte läsas — det betyder inte att patienten saknar diagnoser.</p>
+    {%- elif pk.diagnoses %}
+    <ul class="pk-chips">
+      {%- for d in pk.diagnoses %}
+      <li class="pk-p"><button type="button" aria-describedby="{{ d.prov.id }}"
+          class="pk-chip{% if not d.active %} is-inactive{% endif %}{% if not d.cdr_backed %} is-unbacked{% endif %}">
+        {%- if d.code %}<code>{{ d.code }}</code>{% endif %}<span>{{ d.display }}</span>
+        {%- if not d.active and d.status_text %}<span class="pk-chip-note">{{ d.status_text }}</span>{% endif %}
+        {%- if not d.cdr_backed %}<span class="pk-chip-note pk-chip-warn">ej förankrad i CDR</span>{% endif -%}
+      </button>{{ pop(d.prov) }}</li>
+      {%- endfor %}
+    </ul>
+    {%- if pk.diagnosis_note %}<p class="pk-note">{{ pk.diagnosis_note }}</p>{% endif %}
+    {%- else %}
+    <p class="pk-empty">Inga registrerade diagnoser.</p>
+    {%- endif %}
+  </section>
+
+  <footer class="pk-foot">
+    <span>GUID <code class="pk-id" title="Markera för att kopiera">{{ pk.ids.guid }}</code></span>
+    {%- if pk.ids.fhir_id %}<span>FHIR-id <code class="pk-id" title="Markera för att kopiera">{{ pk.ids.fhir_id }}</code></span>{% endif %}
+  </footer>
+  </div>
+
+  <div class="pk-card pk-main">
+  <section class="pk-block pk-block--main" aria-labelledby="pk-eps-h">
+    <h2 class="pk-h" id="pk-eps-h">Patientsammanfattning (EPS)</h2>
+    {%- if pk.sections_state == 'unavailable' %}
+    <p class="pk-empty">Patientsammanfattningen kunde inte läsas.</p>
+    {%- else %}
+    <div class="pk-grid">
+      {%- for s in pk.sections %}
+      <section class="pk-sec pk-sec--{{ s.state }}{% if s.priority %} is-priority{% endif %}" aria-label="{{ s.title }}">
+        <h3 class="pk-sec-h">{{ s.title }}<span class="pk-count">{{ s.count }}</span></h3>
+        {%- if s.state == 'present' %}
+        <ul class="pk-list">
+          {%- for e in s.entries[:pk.entries_shown] %}
+          <li class="pk-p"><button type="button" class="pk-t pk-entry" aria-describedby="{{ e.prov.id }}"><span>{{ e.display }}</span>{% if e.meta %}<span class="pk-meta">{{ e.meta }}</span>{% endif %}</button>{{ pop(e.prov) }}</li>
+          {%- endfor %}
+        </ul>
+        {%- if s.count > pk.entries_shown %}
+        <details class="pk-more"><summary>+{{ s.count - pk.entries_shown }} till</summary>
+          <ul class="pk-list">
+            {%- for e in s.entries[pk.entries_shown:] %}
+            <li class="pk-p"><button type="button" class="pk-t pk-entry" aria-describedby="{{ e.prov.id }}"><span>{{ e.display }}</span>{% if e.meta %}<span class="pk-meta">{{ e.meta }}</span>{% endif %}</button>{{ pop(e.prov) }}</li>
+            {%- endfor %}
+          </ul>
+        </details>
+        {%- endif %}
+        {%- elif s.state == 'absent' %}
+        <p class="pk-absent">{{ s.absent_text }}</p>
+        {%- else %}
+        <p class="pk-empty">Inga registrerade</p>
+        {%- endif %}
+      </section>
+      {%- endfor %}
+    </div>
+    {%- if pk.empty_sections %}
+    <p class="pk-note">Inga uppgifter heller i: {{ pk.empty_sections | join(', ') }}.</p>
+    {%- endif %}
+    {%- endif %}
+  </section>
+
+  </div>
+</section>
+<script>
+/* Patientkort pop-outs: CSS already opens them on hover and focus. This adds
+   tap (touch has no hover), Escape, and keeps each pop-out inside the
+   viewport — below its item, or above when there is no room below, so it
+   never covers the item's own text. */
+(function () {
+  if (window.__pkPop) { return; }
+  window.__pkPop = true;
+  function place(host) {
+    var pop = host.querySelector(':scope > .pk-pop');
+    if (!pop) { return; }
+    pop.style.left = '0px';
+    host.classList.remove('pk-up');
+    var r = pop.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+    var shift = 0;
+    if (r.right > vw - 8) { shift = vw - 8 - r.right; }
+    if (r.left + shift < 8) { shift = 8 - r.left; }
+    pop.style.left = shift + 'px';
+    var t = host.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 8 && t.top > r.height + 16) {
+      host.classList.add('pk-up');
+    }
+  }
+  function closeAll(except) {
+    document.querySelectorAll('.pk-p.is-open').forEach(function (h) {
+      if (h !== except) { h.classList.remove('is-open'); }
+    });
+  }
+  document.addEventListener('mouseover', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.pk-p');
+    if (h && !h.contains(ev.relatedTarget)) { h.classList.remove('is-dismissed'); place(h); }
+  });
+  document.addEventListener('focusin', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.pk-p');
+    if (h) { h.classList.remove('is-dismissed'); place(h); }
+  });
+  document.addEventListener('click', function (ev) {
+    var t = ev.target.closest && ev.target.closest('.pk-p > .pk-t, .pk-p > .pk-chip, .pk-p > .pk-banner > .pk-t, .pk-name .pk-t');
+    if (!t) { closeAll(null); return; }
+    var h = t.closest('.pk-p');
+    var open = !h.classList.contains('is-open');
+    closeAll(h);
+    h.classList.toggle('is-open', open);
+    h.classList.toggle('is-dismissed', !open);
+    if (open) { place(h); }
+  });
+  document.addEventListener('focusout', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.pk-p');
+    if (h && !h.contains(ev.relatedTarget)) { h.classList.remove('is-open'); }
+  });
+  document.addEventListener('mouseout', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.pk-p');
+    if (h && !h.contains(ev.relatedTarget)) { h.classList.remove('is-dismissed'); }
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape') { return; }
+    document.querySelectorAll('.pk-p').forEach(function (h) {
+      if (h.classList.contains('is-open') || h.matches(':hover') || h.matches(':focus-within')) {
+        h.classList.remove('is-open');
+        h.classList.add('is-dismissed');
+      }
+    });
+  });
+})();
+</script>

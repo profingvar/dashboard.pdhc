@@ -292,6 +292,57 @@ def patient_dashboard(guid: str):
     })
 
 
+#: What stands in the card's place when eps cannot give it, by named state.
+#: (status, message, hint). The status is the honest HTTP answer; the body is
+#: always an HTML fragment the page can show as it is.
+_PK_UNAVAILABLE = {
+    "not_configured": (503, "Patientsammanfattningstjänsten (eps.pdhc) är inte "
+                       "konfigurerad för dashboard.",
+                       "EPS_BASE_URL saknas i dashboards miljö. Det betyder inte att "
+                       "patienten saknar uppgifter."),
+    "unreachable": (502, "Patientsammanfattningstjänsten (eps.pdhc) svarade inte.",
+                    "Uppgifterna är okända, inte tomma. Försök igen om en stund."),
+    "refused": (403, "eps.pdhc nekade dig att läsa patientkortet.",
+                "eps kräver ett eps-konto med koppling till patientens vårdenhet."),
+    "not_found": (404, "Patienten finns inte i eps.pdhc inom din behörighet.",
+                  None),
+}
+
+
+@bp.get("/patients/<guid>/patientkort")
+@dashboard_patient_read(org_lookup=_org_lookup)
+def patient_patientkort(guid: str):
+    """The shared patient card (operator 2026-11-25), as an HTML fragment.
+
+    dashboard's OWN gate runs first (`dashboard_patient_read`: basis,
+    organisation, PDL audit), and only then is eps asked -- with the person's
+    bearer, the same headers as `/euips-summary`. eps gates the card exactly as
+    that summary. The fragment is `_patientkort.html`, a byte-identical copy of
+    eps's (a test pins its sha256), rendered from eps's `pk`.
+
+    Every failure answers a NAMED fragment in the card's place, never an empty
+    card: not configured / unreachable / refused / not in eps's scope.
+    """
+    try:
+        pk = ips_client._default_client().patientkort(guid)
+    except ips_client.IpsNotConfigured:
+        state = "not_configured"
+    except ips_client.IpsRefused:
+        state = "refused"
+    except ips_client.IpsUnreachable:
+        state = "unreachable"
+    else:
+        state = "ok" if pk is not None else "not_found"
+    if state == "ok":
+        return render_template("_patientkort.html", pk=pk)
+    status, message, hint = _PK_UNAVAILABLE[state]
+    from flask import g as _g
+    _g._audit_payload_snapshot = {
+        **(getattr(_g, "_audit_payload_snapshot", None) or {}), "eps": state}
+    return render_template("_patientkort_unavailable.html", state=state,
+                           message=message, hint=hint), status
+
+
 #: The plan panel walks the patient's event pages to count observations per
 #: transaction. Bounded: 10 pages x 500 = 5 000 observations, ~2.5x the
 #: largest patient on cdr1 (2026-11-12). Past the bound the panel is told the

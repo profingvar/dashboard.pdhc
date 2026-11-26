@@ -18,7 +18,7 @@ main { max-width: 1600px; }
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "card" "plan" "events" "series";
 }
-.dash-card   { grid-area: card; }
+.dash-pk-host { grid-area: card; }
 .dash-plan   { grid-area: plan; }
 .dash-events { grid-area: events; }
 .dash-series { grid-area: series; }
@@ -46,15 +46,6 @@ main { max-width: 1600px; }
 .dash-status { color: var(--text-muted); font-size: 0.92rem; }
 .dash-status.is-error { color: var(--danger); }
 
-.dash-demographics {
-  display: flex; flex-wrap: wrap; gap: 0.5rem 1.75rem; margin: 0;
-}
-.dash-demographics dt {
-  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-muted);
-}
-.dash-demographics dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
-
 .dash-banners { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem; }
 .dash-banner {
   padding: 0.45rem 0.7rem; border-radius: 5px; font-size: 0.9rem;
@@ -62,53 +53,34 @@ main { max-width: 1600px; }
 }
 .dash-banner.is-block { border-color: var(--danger); }
 
-.dash-source {
-  font-weight: 400; font-size: 0.78rem; color: var(--text-muted);
-  margin-left: 0.4rem;
+/* The shared patient card brings its own cards (patientkort.css), so its
+ * host is NOT a panel: no frame, and overflow visible so the provenance
+ * pop-outs are never clipped. Not `.dash-card`: pdhc.css styles that name as
+ * a framed, hover-lifting tile for the services home page. */
+.dash-pk-host { min-width: 0; overflow: visible; }
+.dash-pk-host > .dash-status { padding: 0.9rem 1rem; background: var(--card-bg);
+  border: 1px solid var(--border); border-radius: 8px; }
+.dash-pk-unavailable {
+  padding: 0.9rem 1rem; border: 1px solid var(--warning); border-radius: 8px;
+  background: var(--card-bg);
 }
-.dash-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.dash-chip, .dash-toggle, .dash-close {
+.dash-pk-unavailable p { margin: 0 0 0.3rem; }
+.dash-pk-unavailable-h { font-weight: 600; }
+
+.dash-toggle {
   min-height: 44px; min-width: 44px;
   padding: 0.35rem 0.8rem;
   border: 1px solid var(--border); border-radius: 6px;
   background: var(--card-bg); color: var(--text);
   font: inherit; cursor: pointer; text-align: left;
 }
-.dash-chip code { font-weight: 700; margin-right: 0.35rem; }
-.dash-chip.is-inactive { color: var(--text-muted); border-style: dashed; }
-/* #974 step 23 (axe color-contrast): muted text on the global `code`
- * background (--code-bg) is 4.34:1. An inactive chip's code sits on the chip. */
-.dash-chip.is-inactive code { background: transparent; }
-/* #984: held by the EPS alone, no CDR row behind it yet */
-.dash-chip.is-unbacked { border-style: dotted; }
-.dash-chip[aria-expanded="true"], .dash-toggle[aria-expanded="true"] {
+.dash-toggle[aria-expanded="true"] {
   border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary);
 }
-.dash-chip:focus-visible, .dash-toggle:focus-visible, .dash-close:focus-visible {
-  outline: 3px solid var(--primary); outline-offset: 2px;
-}
+.dash-toggle:focus-visible { outline: 3px solid var(--primary); outline-offset: 2px; }
 .dash-toggle { margin-top: 1rem; font-weight: 600; }
 
 .dash-note { color: var(--text-muted); font-size: 0.88rem; margin: 0.4rem 0 0; }
-
-.dash-disclosure {
-  margin-top: 0.6rem; padding: 0.75rem 0.9rem;
-  border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
-}
-.dash-disclosure-head {
-  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
-  font-weight: 600; margin-bottom: 0.5rem;
-}
-.dash-disclosure dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.25rem 1rem; margin: 0; }
-.dash-disclosure dt { color: var(--text-muted); }
-.dash-disclosure dd { margin: 0; overflow-wrap: anywhere; }
-
-.eps-section { padding: 0.5rem 0; border-top: 1px solid var(--border); }
-.eps-section:first-child { border-top: 0; }
-.eps-section h4 { margin: 0 0 0.3rem; font-size: 0.92rem; }
-.eps-section.is-priority { border-left: 4px solid var(--danger); padding-left: 0.6rem; }
-.eps-section ul { margin: 0; padding-left: 1.1rem; }
-.eps-meta { color: var(--text-muted); font-size: 0.82rem; margin-left: 0.4rem; }
 
 .visually-hidden {
   position: absolute; width: 1px; height: 1px; overflow: hidden;

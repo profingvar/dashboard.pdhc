@@ -66,16 +66,8 @@ field that is `null` means "not recorded", never "could not fetch".
 
 | panel | field | source service — endpoint / client method | notes |
 |---|---|---|---|
-| card | Namn | cdr1 — `GET /api/v1/clinical/patients` via `Cdr1Client.list_org_patients` | Reused from the organisation check (`g._dashboard_patient_row`), not a second call. "—" when the patient is not in the index. |
-| card | Ålder | computed in the browser from `birthDate` (same cdr1 row) | "—" when no birth date. |
-| card | Kön | **no source** | `PatientCard.sex` is never set. Always "—". |
-| card | Personnummer | **no source** | Always "—". |
-| card | Organisation | **no source** | Always "—". |
-| card | Diagnoser (chips) | ips — `GET /api/v1/patients/<guid>/euips-summary` via `IpsClient.euips_summary`, the section with `key == "problems"` | Since #984 the only source. `code`, `display`, `status`, `onset`, `abatement`, `date`, `system`, `cdr_backed`, `cdr` are read from each entry. `verificationStatus` is always `null`. A chip with `cdrBacked: false` is marked "ej förankrad i CDR". icd11.pdhc is **not** called. |
-| card | diagnosis note | derived from the problems section | Three states: `diagnosesDefinitivelyEmpty` `null` = ips failed (unknown), `true` = section is `EXPLICITLY_ABSENT`, `false` with no chips = section does not say. |
-| card | Patientsammanfattning (EPS) | ips — same `euips-summary` body, all sections | Each section → `EpsSection` (`_eps_section`, `dashboard.py:107`). An explicitly-absent section shows its absent-assertion text. |
-| card | spärr banner | ips — `GET /api/v1/patients/<guid>/blocks?active=true` via `get_active_blocks(strict=True)` (`sparr_state`, `access.py`) | `sparrChecked: false` when `EPS_BASE_URL` (and the deprecated `IPS_BASE_URL`) is unset; ips configured but unreachable → 503 `undetermined` on every patient read (#974). |
-| card | unavailable banners | `unavailable` list | `eps:unreachable:…`, `eps:patient-not-in-ips-scope` (ips 404). |
+| card | the whole card (since 2026-11-25) | eps — `GET /api/v1/patients/<guid>/patientkort` via `IpsClient.patientkort`, rendered server-side by `GET /dashboard/patients/<guid>/patientkort` into `_patientkort.html` | The shared patient card: eps's partial and `patientkort.css`, copied UNCHANGED (sha256 pinned in `test_patientkort_fragment.py`). Name, age, sex, personnummer, vårdenhet, spärr/consent banners, diagnoses and the EPS summary all come from eps's view-model; every item has a provenance pop-out. dashboard's own gate (`dashboard_patient_read`) runs first; eps is called with the person's bearer, as `euips-summary`. Failures answer a NAMED fragment (`_patientkort_unavailable.html`): not configured 503, unreachable 502, eps refused 403, not in eps's scope 404. |
+| card JSON (kept) | `GET /dashboard/patients/<guid>` | ips — `euips-summary`, cdr1 patient index | No longer drawn. Kept because the time-series markers read each diagnosis's `onset`/`abatement` (`shared.diagnoses`), which the card's view-model does not carry. Its shape is unchanged. |
 
 ### 2.2 Plan panel
 

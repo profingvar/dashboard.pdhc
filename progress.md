@@ -945,3 +945,14 @@ allow an iMessage to be formed that sends the invite".
 - `app/auth.py` `_on_behalf_outcome` + loader branch; `request_client.build_client` prefers `g.forwarded_bearer`; `app/routes/dashboard.py` `record_observation_limit`; `RECORD_DASHBOARD_KEY` in config and `.env.example`; templates link the worklist.
 - Tests: **1106 passed, 13 skipped** (1090/13 before); `app/tests/test_record_limit_1056.py` (16). Revert controls (PYTHONDONTWRITEBYTECODE=1): forwarded bearer ignored (2 fail) · prefix check off (2) · key check off (3) · must_change ignored (1) · non-GET allowed (1) · spärr not 404 (1).
 - Deploy: set `RECORD_DASHBOARD_KEY` (43+ chars, same value in record's .env) — operator. Unset = door closed; record then shows "gränskontroll ej tillgänglig".
+
+## 2026-11-25 — the shared patient card from eps (LOCAL, not deployed)
+
+- Operator 2026-11-25: "För in samma patientkort i dashboard och record". The `.dash-card` built in dashboard.js is replaced by eps's Patientkort: `_patientkort.html` and `patientkort.css` copied UNCHANGED (sha256 pinned by a test so drift is visible), rendered server-side from eps's `GET /api/v1/patients/<guid>/patientkort` (ips.pdhc a479362).
+- `GET /dashboard/patients/<guid>/patientkort`: `dashboard_patient_read` (basis, organisation, PDL audit) FIRST, then eps with the person's bearer (same `_headers()` as `euips-summary`). No new .env key or scope.
+- Failure states are named fragments, never an empty card: not configured 503, eps unreachable 502, eps refused 403, not in eps's scope 404. A dashboard refusal stays JSON and is shown by the panel's error line.
+- Page: the host is no longer a panel (`.dash-pk-host`: no frame, overflow visible so pop-outs are not clipped). NOT `.dash-card`: pdhc.css styles that name as a framed, hover-lifting tile. The card follows prefers-color-scheme; the rest of dashboard is light only.
+- `GET /dashboard/patients/<guid>` (card JSON) is kept, unchanged, for the time-series diagnosis markers (onset/abatement); it no longer draws anything. Removed: the hand-built demographics, banners, chips and EPS disclosure (JS and CSS); `.dash-toggle` kept (series buttons).
+- Tests: **1126 passed** (was 1107). New `test_patientkort_fragment.py` (18). Revert control: the access decorator removed -> the gate test fails (eps was asked for a refused patient).
+- KNOWN, not fixed here: eps gates the card exactly as `euips-summary` (`require_auth`), which answers 401 for a professional without an eps users row, so most professionals would see "eps.pdhc nekade dig" -- as the EPS summary on the old card already did. Fix is in eps (both routes to `require_auth_or_care_bearer`, as #1050/#1055); operator decision.
+- Deploy order: eps first, then dashboard. Screenshots (mocked eps, synthetic) in the session scratchpad `pkdash/`.

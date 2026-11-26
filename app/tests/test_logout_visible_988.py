@@ -24,6 +24,9 @@ def test_btn_secondary_is_dark_text_on_a_light_background():
 def test_the_diagnosis_heading_names_its_real_source_984():
     """Since #984 the chips are the EPS problems section; the heading said
     'ICD-11-register' and no script replaced it (found writing docs/dashboard.md)."""
+    # Since 2026-11-25 the heading is in the shared patient card (eps's
+    # `_patientkort.html`, copied unchanged), which the page loads.
     page = (BASE.parent / "dashboard.html").read_text()
-    assert "ICD-11-register" not in page
-    assert 'data-role="dx-source">från patientsammanfattningen (EPS)<' in page
+    card = (BASE.parent / "_patientkort.html").read_text()
+    assert "ICD-11-register" not in page and "ICD-11-register" not in card
+    assert '<span class="pk-source">från patientsammanfattningen (EPS)</span>' in card

@@ -961,3 +961,16 @@ NOT deployed (ips.pdhc's route is committed as e1d8ac5, also not deployed).
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_loggkontroll_1045.py (NEW, 19)
 - /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/user_manual.md (7c), /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/technical.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
 - 2026-11-25 #1056 record limit door: /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/auth.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/__init__.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/request_client.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/charts.html, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_record_limit_1056.py (NEW, 16), /Users/martiningvar/T7_sidewinder/dashboard.pdhc/.env.example, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/readme.md (§19), /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md
+
+## 2026-11-25 — the shared patient card (Patientkort) from eps (no ticket)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/_patientkort.html (NEW, byte-identical copy of eps.pdhc's)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/patientkort.css (NEW, byte-identical copy of eps.pdhc's)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/_patientkort_unavailable.html (NEW) — named failure fragment
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/services/ips_client.py — `IpsClient.patientkort`, `IpsNotConfigured`, `IpsRefused`, `PATIENTKORT_VERSION`
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/routes/dashboard.py — `GET /dashboard/patients/<guid>/patientkort` (HTML fragment)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/templates/dashboard.html — card host replaces the old card markup; links patientkort.css
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/js/dashboard.js — `loadCard` loads the fragment (DOMParser, re-runs its script); old card JS removed
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/static/css/dashboard.css — `.dash-pk-host`, failure box; dead card CSS removed
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_patientkort_fragment.py (NEW, 18)
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_dashboard_page.py, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/app/tests/test_logout_visible_988.py — follow the new card
+- /Users/martiningvar/T7_sidewinder/dashboard.pdhc/docs/dashboard.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/progress.md, /Users/martiningvar/T7_sidewinder/dashboard.pdhc/changed_files.md

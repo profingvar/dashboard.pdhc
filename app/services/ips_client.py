@@ -53,6 +53,23 @@ class IpsUnreachable(Exception):
     behaviour — blocks compose with org scoping, consent does not."""
 
 
+class IpsNotConfigured(IpsUnreachable):
+    """No eps base URL at all: a deployment gap, not an outage."""
+
+
+class IpsRefused(Exception):
+    """eps answered 401/403: it refused THIS reader. Not an outage, and not
+    "no such patient" either, so the card says which."""
+
+    def __init__(self, status: int):
+        super().__init__(f"eps refused the read ({status})")
+        self.status = status
+
+
+#: The patient-card contract version this client renders (eps returns it).
+PATIENTKORT_VERSION = 1
+
+
 @dataclass(frozen=True)
 class Block:
     """Subset of PatientBlock we care about for filtering + banner."""
@@ -284,6 +301,46 @@ class IpsClient:
         if not isinstance(body, dict) or not isinstance(body.get("sections"), list):
             raise IpsUnreachable("euips-summary returned no sections list")
         return body
+
+    def patientkort(self, patient_guid: str) -> dict | None:
+        """The shared patient card's view-model from eps.
+
+        `GET /api/v1/patients/<guid>/patientkort` -> `{"patientkort": pk,
+        "version": 1}`. Gated by eps exactly as `/euips-summary` and called
+        with the SAME headers (the person's bearer), so no new key or scope.
+
+        None = eps answered 404 (unknown, or outside this reader's scope —
+        eps deliberately gives both the same body). `IpsRefused` = 401/403.
+        `IpsNotConfigured` = no base URL. Every other failure, including a
+        contract version this client does not know, is `IpsUnreachable`.
+        """
+        if not self.base_url:
+            raise IpsNotConfigured(
+                "EPS_BASE_URL (or the deprecated IPS_BASE_URL) not configured")
+        try:
+            r = requests.get(
+                f"{self.base_url}/api/v1/patients/{patient_guid}/patientkort",
+                headers=self._headers(), timeout=self.timeout,
+            )
+        except requests.RequestException as e:
+            raise IpsUnreachable(f"patientkort network error: {type(e).__name__}") from e
+        if r.status_code == 404:
+            return None
+        if r.status_code in (401, 403):
+            raise IpsRefused(r.status_code)
+        if r.status_code != 200:
+            raise IpsUnreachable(f"patientkort returned {r.status_code}")
+        try:
+            body = r.json()
+        except ValueError as e:
+            raise IpsUnreachable("patientkort returned non-JSON") from e
+        if not isinstance(body, dict) or not isinstance(body.get("patientkort"), dict):
+            raise IpsUnreachable("patientkort returned no card")
+        if body.get("version") != PATIENTKORT_VERSION:
+            raise IpsUnreachable(
+                f"patientkort version {body.get('version')!r} is not "
+                f"{PATIENTKORT_VERSION}")
+        return body["patientkort"]
 
 
 class _BlockCache:

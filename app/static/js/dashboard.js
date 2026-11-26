@@ -22,9 +22,6 @@
   var guid = root.getAttribute('data-patient-guid');
   var cap = window.DashboardCapability || { hasHover: false };
 
-  // euIPS sections that come first and are highlighted: alerts, allergies.
-  var PRIORITY_SECTIONS = ['104605-1', '48765-2'];
-
   var DASH = '—';
 
   /* Limit verdicts come from the SERVER (app/dashboard/limits.py, MDR class
@@ -137,259 +134,64 @@
 
   /* ---- card -------------------------------------------------------------- */
 
-  function ageFrom(birthDate) {
-    if (!birthDate) { return null; }
-    var b = new Date(birthDate);
-    if (isNaN(b.getTime())) { return null; }
-    var now = new Date();
-    var age = now.getFullYear() - b.getFullYear();
-    var m = now.getMonth() - b.getMonth();
-    if (m < 0 || (m === 0 && now.getDate() < b.getDate())) { age -= 1; }
-    return age >= 0 ? age : null;
-  }
-
-  function setField(scope, name, value) {
-    var n = scope.querySelector('[data-field="' + name + '"]');
-    if (n) { n.textContent = (value === null || value === undefined || value === '') ? DASH : String(value); }
-  }
-
   function banner(container, text, isBlock) {
     container.appendChild(el('div', 'dash-banner' + (isBlock ? ' is-block' : ''), text));
   }
 
-  var UNAVAILABLE_TEXT = {
-    eps: 'Patientsammanfattningen (EPS) kunde inte läsas — diagnoserna nedan är okända, inte tomma.'
-  };
-
-  function renderBanners(container, data) {
-    container.textContent = '';
-    if (data.sparrChecked === false) {
-      banner(container, 'Spärr kunde inte kontrolleras. Uppgifter kan saknas eller vara spärrade.', true);
-    } else if (data.hasBlockedSources) {
-      banner(container, 'Det finns spärrade uppgifter för patienten. De visas inte här.', true);
-    }
-    (data.unavailable || []).forEach(function (u) {
-      var key = String(u).split(':')[0];
-      if (u === 'eps:patient-not-in-ips-scope') {
-        banner(container, 'Patienten finns inte i patientsammanfattningen (ips.pdhc) inom din behörighet.');
-      } else {
-        banner(container, UNAVAILABLE_TEXT[key] || ('Källa saknas: ' + u));
-      }
-    });
-  }
-
-  /* -- diagnosis chips + their disclosure -- */
-
-  var SYSTEM_TEXT = {
-    'http://snomed.info/sct': 'SNOMED CT',
-    'https://termbank.pdhc.se/CodeSystem/snomed': 'SNOMED CT',
-    'http://id.who.int/icd/release/11/mms': 'ICD-11 MMS',
-    'https://termbank.pdhc.se/CodeSystem/icd11-mms': 'ICD-11 MMS'
-  };
-
-  var dxDetail, openChip = null;
-
-  function closeDx(returnFocus) {
-    if (!openChip) { return; }
-    var chip = openChip;
-    chip.setAttribute('aria-expanded', 'false');
-    dxDetail.hidden = true;
-    dxDetail.textContent = '';
-    openChip = null;
-    if (returnFocus) { chip.focus(); }
-  }
-
-  function openDx(chip, d) {
-    if (openChip === chip) { closeDx(false); return; }
-    if (openChip) { closeDx(false); }
-    openChip = chip;
-    chip.setAttribute('aria-expanded', 'true');
-    dxDetail.textContent = '';
-    var head = el('div', 'dash-disclosure-head');
-    head.appendChild(el('span', null, d.code + ' ' + (d.display || '')));
-    var close = el('button', 'dash-close', 'Stäng');
-    close.type = 'button';
-    close.setAttribute('aria-label', 'Stäng diagnosdetaljen');
-    close.addEventListener('click', function () { closeDx(true); });
-    head.appendChild(close);
-    dxDetail.appendChild(head);
-    var dl = el('dl');
-    [
-      ['Kod', d.code],
-      ['Postkoordinering', d.postcoordination],
-      ['Klinisk status', d.clinicalStatus],
-      ['Verifiering', d.verificationStatus],
-      ['Debut', d.onset],
-      ['Avslutad', d.abatement],
-      ['Registrerad', d.recordedDate],
-      ['Kodsystem', SYSTEM_TEXT[d.system] || d.system],
-      // #984: the CDR is the record; the chip is the EPS's summary of it.
-      ['Källa', d.cdrBacked
-        ? 'Patientsammanfattningen, härledd ur ' + (d.cdr || 'CDR')
-        : 'Patientsammanfattningen — ännu inte förankrad i någon CDR']
-    ].forEach(function (pair) {
-      if (pair[1] === null || pair[1] === undefined || pair[1] === '') { return; }
-      dl.appendChild(el('dt', null, pair[0]));
-      dl.appendChild(el('dd', null, pair[1]));
-    });
-    dxDetail.appendChild(dl);
-    dxDetail.hidden = false;
-  }
-
-  function renderDiagnoses(scope, data) {
-    var chips = scope.querySelector('[data-role="chips"]');
-    var note = scope.querySelector('[data-role="dx-note"]');
-    dxDetail = scope.querySelector('[data-role="dx-detail"]');
-    chips.textContent = '';
-    var card = data.patientCard || {};
-    var list = card.diagnoses || [];
-
-    // Active first, then the rest GREYED — never hidden.
-    var sorted = list.slice().sort(function (a, b) {
-      return (a.clinicalStatus === 'active' ? 0 : 1) - (b.clinicalStatus === 'active' ? 0 : 1);
-    });
-    sorted.forEach(function (d, i) {
-      var chip = el('button', 'dash-chip' + (d.clinicalStatus === 'active' ? '' : ' is-inactive'));
-      chip.type = 'button';
-      chip.setAttribute('role', 'listitem');
-      chip.setAttribute('aria-expanded', 'false');
-      chip.setAttribute('aria-controls', 'dx-detail');
-      chip.appendChild(el('code', null, d.code));
-      chip.appendChild(el('span', null, d.display || DASH));
-      if (d.cdrBacked === false) {
-        chip.classList.add('is-unbacked');
-        chip.appendChild(el('span', 'visually-hidden', ' (ej förankrad i CDR)'));
-        chip.title = (chip.title ? chip.title + ' — ' : '') + 'Ej förankrad i CDR';
-      }
-      if (d.clinicalStatus !== 'active') {
-        chip.appendChild(el('span', 'visually-hidden', ' (' + (d.clinicalStatus || 'okänd status') + ')'));
-        chip.title = d.clinicalStatus || '';
-      }
-      chip.addEventListener('click', function () { openDx(chip, d); });
-      chips.appendChild(chip);
-    });
-
-    // THREE states, never collapsed: unknown / none / none you may see.
-    var text = null;
-    if (data.diagnosesDefinitivelyEmpty === null || data.diagnosesDefinitivelyEmpty === undefined) {
-      text = 'Diagnoserna kunde inte hämtas — det betyder inte att patienten saknar diagnoser.';
-    } else if (!list.length && data.diagnosesDefinitivelyEmpty) {
-      text = 'Inga diagnoser i patientsammanfattningen.';
-    } else if (!list.length) {
-      text = card.diagnosisScopeNote || 'Inga diagnoser som du har behörighet att se.';
-    } else if (card.diagnosisScopeNote) {
-      text = card.diagnosisScopeNote;
-    }
-    // One source since #984: the EPS, derived from the CDR. Say plainly how
-    // many chips no CDR row stands behind yet.
-    var src = data.diagnosisSource || {};
-    if (src.available && src.count && src.cdrBacked < src.count) {
-      text = (text ? text + ' ' : '') + (src.count - src.cdrBacked) + ' av ' + src.count +
-        ' diagnoser finns bara i patientsammanfattningen och är ännu inte förankrade i någon CDR.';
-    }
-    note.hidden = !text;
-    note.textContent = text || '';
-  }
-
-  /* -- EPS disclosure -- */
-
-  var epsToggle, epsDetail;
-
-  function setEps(open, returnFocus) {
-    epsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    epsDetail.hidden = !open;
-    if (!open && returnFocus) { epsToggle.focus(); }
-  }
-
-  function renderEps(scope, data) {
-    var host = scope.querySelector('[data-role="eps-sections"]');
+  /* The shared patient card (operator 2026-11-25): eps's `_patientkort.html`,
+   * rendered SERVER-SIDE by /dashboard/patients/<guid>/patientkort from eps's
+   * view-model after dashboard's own access gate. Jinja autoescapes every
+   * value, so this is the one place the page takes HTML from its server --
+   * parsed with DOMParser and adopted, never assigned to innerHTML. A refusal
+   * by dashboard's gate is JSON ({error, message}) and reads as one; every
+   * eps failure is a NAMED fragment in the card's place, never an empty card.
+   * The card's inline pop-out script is inert when parsed, so it is re-run. */
+  function insertFragment(host, html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
     host.textContent = '';
-    var sections = ((data.patientCard || {}).epsSections || []).slice();
-    if (!sections.length) {
-      host.appendChild(el('p', 'dash-status', 'Ingen patientsammanfattning tillgänglig.'));
-      return;
-    }
-    // Priority sections first, in the order above; the rest in EPS order.
-    sections.sort(function (a, b) {
-      var ia = PRIORITY_SECTIONS.indexOf(a.sectionCode), ib = PRIORITY_SECTIONS.indexOf(b.sectionCode);
-      ia = ia === -1 ? 99 : ia; ib = ib === -1 ? 99 : ib;
-      return ia - ib;
+    Array.prototype.slice.call(doc.body.childNodes).forEach(function (n) {
+      host.appendChild(document.adoptNode(n));
     });
-    sections.forEach(function (s) {
-      var isPriority = PRIORITY_SECTIONS.indexOf(s.sectionCode) !== -1;
-      var sec = el('section', 'eps-section' + (isPriority ? ' is-priority' : ''));
-      sec.appendChild(el('h4', null, s.title || s.sectionCode));
-      var entries = s.entries || [];
-      if (entries.length) {
-        var ul = el('ul');
-        entries.forEach(function (e) {
-          var li = el('li', null, e.display || DASH);
-          var meta = [e.source, e.date, e.status].filter(Boolean).join(' · ');
-          if (meta) { li.appendChild(el('span', 'eps-meta', meta)); }
-          ul.appendChild(li);
-        });
-        sec.appendChild(ul);
-      } else if (s.absentAssertion) {
-        // A clinical statement ("no known allergies"), not a gap.
-        sec.appendChild(el('p', null, s.narrative || 'Uttryckligen inga uppgifter.'));
-      } else {
-        sec.appendChild(el('p', 'dash-status', 'Ingen uppgift registrerad.'));
-      }
-      host.appendChild(sec);
+    Array.prototype.forEach.call(host.querySelectorAll('script'), function (old) {
+      var s = document.createElement('script');
+      s.textContent = old.textContent;
+      old.parentNode.replaceChild(s, old);
     });
   }
-
-  function wireEps(scope) {
-    epsToggle = document.getElementById('eps-toggle');
-    epsDetail = document.getElementById('eps-detail');
-    // #974 step 23: with real hover, the pointer ENTERS the button before it
-    // clicks it, so the hover accelerator had already opened the summary and
-    // the click then toggled it shut — a mouse user could not open it by
-    // clicking. A click within a second of a hover-open keeps it open; a
-    // later click toggles as usual. (No leave handler: hover never closes.)
-    var hoverOpenedAt = 0;
-    epsToggle.addEventListener('click', function () {
-      if (Date.now() - hoverOpenedAt < 1000) { hoverOpenedAt = 0; setEps(true, false); return; }
-      setEps(epsToggle.getAttribute('aria-expanded') !== 'true', false);
-    });
-    scope.querySelector('[data-role="eps-close"]').addEventListener('click', function () {
-      setEps(false, true);
-    });
-    // Hover accelerator: OPENS only, and only with real hover. It never
-    // closes on mouseleave — the detail stays until it is closed.
-    epsToggle.addEventListener('mouseenter', function () {
-      if (cap.hasHover && epsToggle.getAttribute('aria-expanded') !== 'true') {
-        setEps(true, false);
-        hoverOpenedAt = Date.now();
-      }
-    });
-  }
-
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key !== 'Escape') { return; }
-    if (openChip) { closeDx(true); return; }
-    if (epsToggle && epsToggle.getAttribute('aria-expanded') === 'true') { setEps(false, true); }
-  });
 
   function loadCard() {
     var p = panel('panel-card');
-    wireEps(p.body);
-    getJson('/dashboard/patients/' + encodeURIComponent(guid)).then(function (data) {
-      var card = data.patientCard || {};
-      shared.diagnoses = card.diagnoses || [];
-      setField(p.body, 'name', card.name);
-      var age = ageFrom(card.birthDate);
-      setField(p.body, 'age', age === null ? null : age + ' år');
-      setField(p.body, 'sex', card.sex);
-      setField(p.body, 'personnummer', card.personnummer);
-      setField(p.body, 'organisation', card.organisation);
-      renderBanners(p.body.querySelector('[data-role="banners"]'), data);
-      renderDiagnoses(p.body, data);
-      renderEps(p.body, data);
-      p.status.hidden = true;
-      p.body.hidden = false;
-      p.node.setAttribute('aria-busy', 'false');
+    fetch('/dashboard/patients/' + encodeURIComponent(guid) + '/patientkort', {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'text/html' }
+    }).then(function (res) {
+      var type = res.headers.get('content-type') || '';
+      if (type.indexOf('text/html') !== -1 && !res.redirected) {
+        return res.text().then(function (html) {
+          insertFragment(p.body, html);
+          p.status.hidden = true;
+          p.body.hidden = false;
+          p.node.setAttribute('aria-busy', 'false');
+        });
+      }
+      if (type.indexOf('application/json') !== -1) {
+        return res.json().then(function (body) {
+          var e = new Error((body && (body.message || body.error)) || ('fel ' + res.status));
+          e.code = body && body.error;
+          throw e;
+        });
+      }
+      throw new Error(res.redirected || res.status === 401
+        ? 'Sessionen har gått ut. Ladda om sidan för att logga in igen.'
+        : 'Oväntat svar från servern (' + res.status + ').');
     }).catch(function (err) { showError(p, err); });
+
+    // The time-series markers still need each diagnosis's onset/abatement,
+    // which the card's view-model does not carry; the card JSON keeps them.
+    // Silent on failure: the chart simply has no diagnosis markers.
+    getJson('/dashboard/patients/' + encodeURIComponent(guid)).then(function (data) {
+      shared.diagnoses = (data.patientCard || {}).diagnoses || [];
+    }).catch(function () { shared.diagnoses = []; });
   }
 
   /* ---- plan panel (#971) -------------------------------------------------

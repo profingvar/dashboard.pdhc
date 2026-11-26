@@ -58,11 +58,16 @@ def test_a_hostile_guid_is_escaped():
     assert "<script>alert(1)</script>" not in html
 
 
-def test_the_eps_detail_is_a_disclosure_not_a_popover():
+def test_the_card_region_is_a_host_for_the_shared_patient_card():
+    """Since 2026-11-25 the card is eps's shared `_patientkort.html`, loaded
+    as a fragment. The old hand-built demographics and EPS disclosure are
+    gone; the page links the card's own stylesheet."""
     html = _page().get_data(as_text=True)
-    assert re.search(r'<button[^>]*id="eps-toggle"[^>]*aria-expanded="false"', html, re.S)
-    assert 'aria-controls="eps-detail"' in html
-    assert re.search(r'id="eps-detail"[^>]*hidden', html, re.S)
+    assert "css/patientkort.css" in html
+    region = html.split('id="panel-card"', 1)[1].split("</section>", 1)[0]
+    assert 'data-role="body" hidden' in region
+    for gone in ('id="eps-toggle"', 'id="eps-detail"', 'data-field="personnummer"'):
+        assert gone not in html
 
 
 # --------------------------------------------------------------------------
@@ -93,7 +98,7 @@ def test_panels_contain_overscroll_and_targets_are_44px():
     panel = re.search(r"\.dash-panel\s*\{([^}]*)\}", css).group(1)
     assert re.search(r"overscroll-behavior:\s*contain", panel)
     assert re.search(r"overflow:\s*auto", panel)
-    target = re.search(r"\.dash-chip, \.dash-toggle, \.dash-close\s*\{([^}]*)\}", css).group(1)
+    target = re.search(r"\.dash-toggle\s*\{([^}]*min-height[^}]*)\}", css).group(1)
     assert re.search(r"min-height:\s*44px", target)
     assert re.search(r"min-width:\s*44px", target)
 
@@ -116,20 +121,31 @@ def _js() -> str:
 def test_the_script_never_writes_server_text_as_html():
     assert "innerHTML" not in _js()
     assert "insertAdjacentHTML" not in _js()
+    assert "outerHTML" not in _js() and "document.write" not in _js()
 
 
-def test_hover_only_OPENS_and_only_with_real_hover():
-    """The EPS disclosure: hover opens, never closes. (The event list and the
-    plan link use mouseleave deliberately, to end a PREVIEW; scope this to
-    the disclosure.)"""
-    eps = _fn(_js(), "wireEps")
-    assert "mouseenter" in eps
-    assert "mouseleave" not in eps and "mouseout" not in eps
-    assert re.search(r"mouseenter'[^}]*cap\.hasHover[^}]*setEps\(true", eps, re.S)
+def test_the_ONLY_html_the_page_parses_is_the_card_fragment():
+    """The one sanctioned exception: the server-rendered (autoescaped) patient
+    card, parsed with DOMParser inside `insertFragment`, called only from
+    `loadCard` with the gated fragment route."""
+    js = _js()
+    assert js.count("DOMParser") == 1
+    assert "DOMParser" in _fn(js, "insertFragment")
+    assert js.count("insertFragment(") == 2          # definition + one call
+    card = _fn(js, "loadCard")
+    assert "insertFragment(p.body, html)" in card
+    assert "'/patientkort'" in card
 
 
-def test_escape_closes():
-    assert re.search(r"ev\.key\s*!==\s*'Escape'", _js())
+def test_a_dashboard_refusal_is_shown_by_name_not_inserted():
+    card = _fn(_js(), "loadCard")
+    assert "application/json" in card and "showError(p, err)" in card
+    assert "!res.redirected" in card               # a login page is not a card
+
+
+def test_the_chart_still_gets_the_diagnoses_for_its_markers():
+    card = _fn(_js(), "loadCard")
+    assert "shared.diagnoses = (data.patientCard || {}).diagnoses || [];" in card
 
 
 # --------------------------------------------------------------------------
